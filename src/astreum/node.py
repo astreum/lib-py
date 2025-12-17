@@ -54,7 +54,9 @@ class Node:
         self.environments: Dict[uuid.UUID, Env] = {}
         self.machine_environments_lock = threading.RLock()
         self.is_connected = False
-
+        self.latest_block_hash = None
+        self.latest_block = None
+ 
     connect = connect_to_network_and_verify
     validate = process_blocks_and_transactions
 
