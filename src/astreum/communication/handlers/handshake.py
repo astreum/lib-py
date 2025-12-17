@@ -31,45 +31,11 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
         return True
     peer_address = (host, port)
 
-    old_key_bytes = node.addresses.get(peer_address)
-    node.addresses[peer_address] = sender_public_key_bytes
-
-    if old_key_bytes is None:
-        try:
-            peer = Peer(
-                node_secret_key=node.relay_secret_key,
-                peer_public_key=sender_key,
-                address=peer_address,
-            )
-        except Exception:
-            return True
-
-        node.add_peer(sender_public_key_bytes, peer)
-        node.peer_route.add_peer(sender_public_key_bytes, peer)
-
-        node.logger.info(
-            "Handshake accepted from %s:%s; peer added",
-            peer_address[0],
-            peer_address[1],
-        )
-        response = Message(
-            handshake=True,
-            sender=node.relay_public_key,
-            content=int(node.config["incoming_port"]).to_bytes(2, "big", signed=False),
-        )
-        node.outgoing_queue.put((response.to_bytes(), peer_address))
-        return True
-
-    if old_key_bytes == sender_public_key_bytes:
-        peer = node.get_peer(sender_public_key_bytes)
-        if peer is not None:
-            peer.address = peer_address
+    existing_peer = node.get_peer(sender_public_key_bytes)
+    if existing_peer is not None:
+        existing_peer.address = peer_address
         return False
 
-    try:
-        node.peer_route.remove_peer(old_key_bytes)
-    except Exception:
-        pass
     try:
         peer = Peer(
             node_secret_key=node.relay_secret_key,
@@ -79,11 +45,18 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
     except Exception:
         return True
 
-    node.replace_peer(old_key_bytes, sender_public_key_bytes, peer)
+    node.add_peer(sender_public_key_bytes, peer)
     node.peer_route.add_peer(sender_public_key_bytes, peer)
+
     node.logger.info(
-        "Peer at %s:%s replaced due to key change",
+        "Handshake accepted from %s:%s; peer added",
         peer_address[0],
         peer_address[1],
     )
-    return False
+    response = Message(
+        handshake=True,
+        sender=node.relay_public_key,
+        content=int(node.config["incoming_port"]).to_bytes(2, "big", signed=False),
+    )
+    node.outgoing_queue.put((response.to_bytes(), peer_address))
+    return True

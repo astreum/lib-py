@@ -4,6 +4,8 @@ from typing import Dict
 
 DEFAULT_HOT_STORAGE_LIMIT = 1 << 30  # 1 GiB
 DEFAULT_COLD_STORAGE_LIMIT = 10 << 30  # 10 GiB
+DEFAULT_PEER_TIMEOUT_SECONDS = 15 * 60  # 15 minutes
+DEFAULT_PEER_TIMEOUT_INTERVAL_SECONDS = 10  # 10 seconds
 
 
 def config_setup(config: Dict = {}):
@@ -44,5 +46,31 @@ def config_setup(config: Dict = {}):
             config["cold_storage_path"] = None
     else:
         config["cold_storage_path"] = None
+
+    peer_timeout_raw = config.get("peer_timeout", DEFAULT_PEER_TIMEOUT_SECONDS)
+    try:
+        peer_timeout = int(peer_timeout_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"peer_timeout must be an integer: {peer_timeout_raw!r}"
+        ) from exc
+
+    if peer_timeout <= 0:
+        raise ValueError("peer_timeout must be a positive integer")
+
+    config["peer_timeout"] = peer_timeout
+
+    interval_raw = config.get("peer_timeout_interval", DEFAULT_PEER_TIMEOUT_INTERVAL_SECONDS)
+    try:
+        interval = int(interval_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"peer_timeout_interval must be an integer: {interval_raw!r}"
+        ) from exc
+
+    if interval <= 0:
+        raise ValueError("peer_timeout_interval must be a positive integer")
+
+    config["peer_timeout_interval"] = interval
 
     return config

@@ -15,12 +15,6 @@ if str(SRC_DIR) not in sys.path:
 
 from astreum.node import Node  # noqa: E402
 
-if not hasattr(Node, "_relay_peer_manager"):
-    def _relay_peer_manager(self) -> None:  # type: ignore[no-redef]
-        return None
-
-    Node._relay_peer_manager = _relay_peer_manager  # type: ignore[attr-defined]
-
 
 class TestNodeConnection(unittest.TestCase):
     def setUp(self) -> None:

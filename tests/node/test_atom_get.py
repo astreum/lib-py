@@ -17,12 +17,6 @@ from astreum.node import Node  # noqa: E402
 from astreum.storage.models.atom import Atom, AtomKind  # noqa: E402
 from astreum.communication.util import xor_distance  # noqa: E402
 
-if not hasattr(Node, "_relay_peer_manager"):
-    def _relay_peer_manager(self) -> None:  # type: ignore[no-redef]
-        return None
-
-    Node._relay_peer_manager = _relay_peer_manager  # type: ignore[attr-defined]
-
 
 class TestAtomGet(unittest.TestCase):
     def setUp(self) -> None:

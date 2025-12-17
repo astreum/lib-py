@@ -18,6 +18,7 @@ from .processors.incoming import (
     populate_incoming_messages,
 )
 from .processors.outgoing import process_outgoing_messages
+from .processors.peer import manage_peer
 from .util import address_str_to_host_and_port
 from ..utils.bytes import hex_to_bytes
 
@@ -122,13 +123,14 @@ def communication_setup(node: "Node", config: dict):
     # other workers & maps
     # track atom requests we initiated; guarded by atom_requests_lock on the node
     node.peer_manager_thread  = threading.Thread(
-        target=node._relay_peer_manager,
+        target=manage_peer,
+        args=(node,),
         daemon=True
     )
     node.peer_manager_thread.start()
 
     with node.peers_lock:
-        node.peers, node.addresses = {}, {} # peers: Dict[bytes,Peer], addresses: Dict[(str,int),bytes]
+        node.peers = {} # Dict[bytes,Peer]
 
     latest_block_hex = config.get("latest_block_hash")
     if latest_block_hex:

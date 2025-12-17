@@ -30,9 +30,6 @@ class TestNodeInitialization(unittest.TestCase):
         for key, value in derived_settings:
             print(f"{key}: {value}")
 
-        if not hasattr(node, "_relay_peer_manager"):
-            node._relay_peer_manager = lambda: None  # type: ignore[attr-defined]
-
         node.connect()
 
         relay_public_key_bytes = (
