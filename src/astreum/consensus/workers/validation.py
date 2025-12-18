@@ -241,8 +241,16 @@ def make_validation_worker(
                 new_block_hash.hex(),
                 len(new_block_atoms),
             )
-
-            
+            # wait until the block timestamp is reached before propagating
+            now = time.time()
+            spread_delay = new_block.timestamp - now
+            if spread_delay > 0:
+                node.logger.debug(
+                    "Delaying distribution for %.3fs to reach block timestamp %s",
+                    spread_delay,
+                    new_block.timestamp,
+                )
+                time.sleep(spread_delay)
 
             # ping peers in the validation route to update their records
             if node.validation_route and node.outgoing_queue and node.peers:
