@@ -11,15 +11,19 @@ from ..storage.models.atom import ZERO32
 from ..utils.integer import bytes_to_int, int_to_bytes
 
 
+SLOT_DURATION_SECONDS = 2
+
+
 def current_validator(
     node: Any,
     block_hash: bytes,
     target_time: Optional[int] = None,
 ) -> Tuple[bytes, Accounts]:
     """
-    Determine the validator for the requested target_time, halving stakes each second
-    between the referenced block and the target time. Returns the validator key and
-    the updated accounts snapshot reflecting stake and balance adjustments.
+    Determine the validator for the requested target_time, halving stakes once per
+    slot (currently 2 seconds) between the referenced block and the target time.
+    Returns the validator key and the updated accounts snapshot reflecting stake and
+    balance adjustments.
     """
 
     block = Block.from_atom(node, block_hash)
@@ -86,10 +90,13 @@ def current_validator(
         accounts.set_account(validator_key, validator_account)
         accounts.set_account(TREASURY_ADDRESS, treasury_account)
 
-    iteration_target = block_timestamp + 1
-    while True:
+    delta = target_timestamp - block_timestamp
+    slots_to_process = max(1, (delta + SLOT_DURATION_SECONDS - 1) // SLOT_DURATION_SECONDS)
+
+    selected_validator = pick_validator()
+    halve_stake(selected_validator)
+    for _ in range(1, slots_to_process):
         selected_validator = pick_validator()
         halve_stake(selected_validator)
-        if iteration_target == target_timestamp:
-            return selected_validator, accounts
-        iteration_target += 1
+
+    return selected_validator, accounts
