@@ -78,6 +78,8 @@ def current_validator(
         if current_amount <= 0:
             raise ValueError("validator stake must be positive")
         new_amount = current_amount // 2
+        if new_amount < 1:
+            new_amount = 1
         returned_amount = current_amount - new_amount
         stakes[validator_key] = new_amount
         stake_trie.put(node, validator_key, int_to_bytes(new_amount))
