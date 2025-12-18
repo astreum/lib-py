@@ -232,7 +232,7 @@ def make_validation_worker(
             
             # wait until the block timestamp is reached before propagating
             now = time.time()
-            if now > new_block.timestamp:
+            if now > (new_block.timestamp + 2):
                 node.logger.warning(
                     "Skipping block #%s propagation; timestamp %s already elapsed (now=%s)",
                     new_block.number,
