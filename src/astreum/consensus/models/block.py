@@ -319,10 +319,11 @@ class Block:
         target_spacing: int = 2,
     ) -> int:
         """
-        Adjust the delay difficulty based on how quickly the previous block was produced.
+        Adjust the delay difficulty with linear steps relative to block spacing.
 
-        The previous block difficulty is increased if the spacing is below the target,
-        decreased if above, and returned unchanged when the target spacing is met.
+        If blocks arrive too quickly (spacing <= 1), difficulty increases by one.
+        If blocks are slower than the target spacing, difficulty decreases by one,
+        and otherwise remains unchanged.
         """
         base_difficulty = max(1, int(previous_difficulty or 1))
         if previous_timestamp is None or current_timestamp is None:
@@ -330,15 +331,10 @@ class Block:
 
         spacing = max(0, int(current_timestamp) - int(previous_timestamp))
         if spacing <= 1:
-            adjusted = base_difficulty * 1.618
-        elif spacing == target_spacing:
-            adjusted = float(base_difficulty)
-        elif spacing > target_spacing:
-            adjusted = base_difficulty * 0.618
-        else:
-            adjusted = float(base_difficulty)
-
-        return max(1, int(round(adjusted)))
+            return base_difficulty + 1
+        if spacing > target_spacing:
+            return max(1, base_difficulty - 1)
+        return base_difficulty
 
     def generate_nonce(
         self,
