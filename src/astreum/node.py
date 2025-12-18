@@ -56,6 +56,7 @@ class Node:
         self.is_connected = False
         self.latest_block_hash = None
         self.latest_block = None
+        self.nonce_time_ms = 0  # rolling measurement of last nonce search duration
         
     connect = connect_to_network_and_verify
     validate = process_blocks_and_transactions

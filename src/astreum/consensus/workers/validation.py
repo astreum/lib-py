@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 from queue import Empty
 from typing import Any, Callable
@@ -203,7 +204,9 @@ def make_validation_worker(
 
             now = time.time()
             min_allowed = new_block.previous_block.timestamp + 1
-            new_block.timestamp = max(int(now), min_allowed)
+            nonce_time_seconds = node.nonce_time_ms / 1000.0
+            expected_blocktime = now + nonce_time_seconds
+            new_block.timestamp = max(int(math.ceil(expected_blocktime)), min_allowed)
 
             new_block.delay_difficulty = Block.calculate_delay_difficulty(
                 previous_timestamp=previous_block.timestamp,
@@ -212,7 +215,10 @@ def make_validation_worker(
             )
             
             try:
+                nonce_started = time.perf_counter()
                 new_block.generate_nonce(difficulty=previous_block.delay_difficulty)
+                elapsed_ms = int((time.perf_counter() - nonce_started) * 1000)
+                setattr(node, "nonce_time_ms", elapsed_ms)
                 node.logger.debug(
                     "Found nonce %s for block #%s at difficulty %s",
                     new_block.nonce,
@@ -235,6 +241,8 @@ def make_validation_worker(
                 new_block_hash.hex(),
                 len(new_block_atoms),
             )
+
+            
 
             # ping peers in the validation route to update their records
             if node.validation_route and node.outgoing_queue and node.peers:
