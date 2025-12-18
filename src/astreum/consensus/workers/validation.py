@@ -230,7 +230,7 @@ def make_validation_worker(
             node.latest_block_hash = new_block_hash
             node.latest_block = new_block
             node.logger.info(
-                "Validated block #%s with hash %s (%d atoms)",
+                "Created block #%s with hash %s (%d atoms)",
                 new_block.number,
                 new_block_hash.hex(),
                 len(new_block_atoms),
