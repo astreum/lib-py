@@ -229,7 +229,27 @@ def make_validation_worker(
                 node.logger.exception("Failed while searching for block nonce")
                 time.sleep(0.5)
                 continue
+            
+            # wait until the block timestamp is reached before propagating
+            now = time.time()
+            if now > new_block.timestamp:
+                node.logger.warning(
+                    "Skipping block #%s propagation; timestamp %s already elapsed (now=%s)",
+                    new_block.number,
+                    new_block.timestamp,
+                    now,
+                )
+                continue
 
+            spread_delay = new_block.timestamp - now
+            if spread_delay > 0:
+                node.logger.debug(
+                    "Delaying distribution for %.3fs to reach block timestamp %s",
+                    spread_delay,
+                    new_block.timestamp,
+                )
+                time.sleep(spread_delay)
+                
             # atomize block
             new_block_hash, new_block_atoms = new_block.to_atom()
             # put as own latest block hash
@@ -241,16 +261,7 @@ def make_validation_worker(
                 new_block_hash.hex(),
                 len(new_block_atoms),
             )
-            # wait until the block timestamp is reached before propagating
-            now = time.time()
-            spread_delay = new_block.timestamp - now
-            if spread_delay > 0:
-                node.logger.debug(
-                    "Delaying distribution for %.3fs to reach block timestamp %s",
-                    spread_delay,
-                    new_block.timestamp,
-                )
-                time.sleep(spread_delay)
+            
 
             # ping peers in the validation route to update their records
             if node.validation_route and node.outgoing_queue and node.peers:
