@@ -14,7 +14,7 @@ def make_discovery_worker(node: Any):
 
     def _discovery_worker() -> None:
         node.logger.info("Discovery worker started")
-        stop = node._validation_stop_event
+        stop = node._verify_stop_event
         while not stop.is_set():
             try:
                 peers = getattr(node, "peers", None)

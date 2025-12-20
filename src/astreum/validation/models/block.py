@@ -47,7 +47,7 @@ class Block:
       6: transactions_hash                   (bytes)
       7: receipts_hash                       (bytes)
       8: delay_difficulty                    (int -> big-endian bytes)
-      9: validator_public_key               (bytes)
+      9: validator_public_key_bytes         (bytes)
       10: nonce                              (int -> big-endian bytes)
 
     Notes:
@@ -72,7 +72,7 @@ class Block:
     transactions_hash: Optional[bytes]
     receipts_hash: Optional[bytes]
     delay_difficulty: Optional[int]
-    validator_public_key: Optional[bytes]
+    validator_public_key_bytes: Optional[bytes]
     nonce: Optional[int]
 
     # additional
@@ -97,7 +97,7 @@ class Block:
         transactions_hash: Optional[bytes],
         receipts_hash: Optional[bytes],
         delay_difficulty: Optional[int],
-        validator_public_key: Optional[bytes],
+        validator_public_key_bytes: Optional[bytes],
         nonce: Optional[int] = None,
         signature: Optional[bytes] = None,
         atom_hash: Optional[bytes] = None,
@@ -117,7 +117,9 @@ class Block:
         self.transactions_hash = transactions_hash
         self.receipts_hash = receipts_hash
         self.delay_difficulty = delay_difficulty
-        self.validator_public_key = validator_public_key
+        self.validator_public_key_bytes = (
+            bytes(validator_public_key_bytes) if validator_public_key_bytes else None
+        )
         self.nonce = nonce
         self.body_hash = body_hash
         self.signature = signature
@@ -151,8 +153,8 @@ class Block:
         _emit(self.receipts_hash or b"")
         # 8: delay_difficulty
         _emit(_int_to_be_bytes(self.delay_difficulty))
-        # 9: validator_public_key
-        _emit(self.validator_public_key or b"")
+        # 9: validator_public_key_bytes
+        _emit(self.validator_public_key_bytes or b"")
         # 10: nonce
         _emit(_int_to_be_bytes(self.nonce))
 
@@ -240,7 +242,7 @@ class Block:
             transactions_hash=transactions_bytes or None,
             receipts_hash=receipts_bytes or None,
             delay_difficulty=_be_bytes_to_int(delay_diff_bytes),
-            validator_public_key=validator_bytes or None,
+            validator_public_key_bytes=validator_bytes or None,
             nonce=_be_bytes_to_int(nonce_bytes),
             signature=sig_atom.data if sig_atom is not None else None,
             atom_hash=block_id,
@@ -261,14 +263,16 @@ class Block:
             return False
         if not self.signature:
             return False
-        if not self.validator_public_key:
+        if not self.validator_public_key_bytes:
             return False
         if self.timestamp is None:
             return False
 
         # 1) Signature check over body hash
         try:
-            pub = Ed25519PublicKey.from_public_bytes(bytes(self.validator_public_key))
+            pub = Ed25519PublicKey.from_public_bytes(
+                bytes(self.validator_public_key_bytes)
+            )
             pub.verify(self.signature, self.body_hash)
         except InvalidSignature as e:
             raise ValueError("invalid signature") from e

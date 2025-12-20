@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import socket
+from queue import Empty
 from typing import TYPE_CHECKING
 
 from ..handlers.handshake import handle_handshake
@@ -18,12 +20,18 @@ if TYPE_CHECKING:
 
 def process_incoming_messages(node: "Node") -> None:
     """Process incoming messages (placeholder)."""
-    while True:
+    stop = getattr(node, "communication_stop_event", None)
+    while stop is None or not stop.is_set():
         try:
-            data, addr = node.incoming_queue.get()
-        except Exception as exc:
+            data, addr = node.incoming_queue.get(timeout=0.5)
+        except Empty:
+            continue
+        except Exception:
             node.logger.exception("Error taking from incoming queue")
             continue
+
+        if stop is not None and stop.is_set():
+            break
 
         try:
             message = Message.from_bytes(data)
@@ -61,7 +69,7 @@ def process_incoming_messages(node: "Node") -> None:
             message.decrypt(peer.shared_key_bytes)
         except Exception as exc:
             node.logger.warning("Error decrypting message from %s: %s", peer.address, exc)
-            continue
+                continue
 
         match message.topic:
             case MessageTopic.PING:
@@ -87,12 +95,25 @@ def process_incoming_messages(node: "Node") -> None:
             case _:
                 continue
 
+    node.logger.info("Incoming message processor stopped")
+
 
 def populate_incoming_messages(node: "Node") -> None:
     """Receive UDP packets and feed the incoming queue."""
-    while True:
+    stop = getattr(node, "communication_stop_event", None)
+    while stop is None or not stop.is_set():
         try:
             data, addr = node.incoming_socket.recvfrom(4096)
             node.incoming_queue.put((data, addr))
+        except socket.timeout:
+            continue
+        except OSError:
+            if stop is not None and stop.is_set():
+                break
+            node.logger.warning("Error populating incoming queue: socket closed")
+        except Exception as exc:
+            node.logger.warning("Error populating incoming queue: %s", exc)
+
+    node.logger.info("Incoming message populator stopped")
         except Exception as exc:
             node.logger.warning("Error populating incoming queue: %s", exc)

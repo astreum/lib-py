@@ -29,7 +29,7 @@ def make_validation_worker(
             if reward_amount <= 0:
                 return
             accounts = getattr(block, "accounts", None)
-            validator_key = getattr(block, "validator_public_key", None)
+            validator_key = getattr(block, "validator_public_key_bytes", None)
             if accounts is None or not validator_key:
                 node.logger.debug(
                     "Skipping validator reward; accounts snapshot or key missing"
@@ -117,7 +117,7 @@ def make_validation_worker(
                 transactions_hash=None,
                 receipts_hash=None,
                 delay_difficulty=None,
-                validator_public_key=validation_public_key,
+                validator_public_key_bytes=validation_public_key,
                 nonce=0,
                 signature=None,
                 accounts=accounts_snapshot,

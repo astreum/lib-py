@@ -6,14 +6,16 @@ import threading
 import uuid
 from typing import Dict
 
-from astreum.communication.start import connect_to_network_and_verify
+from astreum.communication.node import connect_node
+from astreum.communication.disconnect import disconnect_node
 from astreum.communication.models.peer import (
     add_peer as peers_add_peer,
     replace_peer as peers_replace_peer,
     get_peer as peers_get_peer,
     remove_peer as peers_remove_peer,
 )
-from astreum.consensus.start import process_blocks_and_transactions
+from astreum.validation.node import validate_blockchain
+from astreum.verification.node import verify_blockchain
 from astreum.machine import Expr, high_eval, low_eval, script_eval
 from astreum.machine.models.environment import Env, env_get, env_set
 from astreum.machine.models.expression import get_expr_list_from_storage
@@ -56,10 +58,13 @@ class Node:
         self.is_connected = False
         self.latest_block_hash = None
         self.latest_block = None
-        self.nonce_time_ms = 0  # rolling measurement of last nonce search duration
         
-    connect = connect_to_network_and_verify
-    validate = process_blocks_and_transactions
+    connect = connect_node
+    disconnect = disconnect_node
+
+    verify = verify_blockchain
+
+    validate = validate_blockchain
 
     low_eval = low_eval
     high_eval = high_eval

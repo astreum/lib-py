@@ -4,7 +4,7 @@ import time
 from queue import Empty
 from typing import Any, Set
 
-from ..models.fork import Fork
+from astreum.validation.models.fork import Fork
 
 
 def _process_peers_latest_block(
@@ -14,7 +14,9 @@ def _process_peers_latest_block(
     node.logger.debug(
         "Processing %d peers reporting block %s",
         len(peer_ids),
-        latest_block_hash.hex() if isinstance(latest_block_hash, (bytes, bytearray)) else latest_block_hash,
+        latest_block_hash.hex()
+        if isinstance(latest_block_hash, (bytes, bytearray))
+        else latest_block_hash,
     )
     new_fork = Fork(head=latest_block_hash)
 
@@ -29,8 +31,12 @@ def _process_peers_latest_block(
         if getattr(ref, "malicious_block_hash", None):
             node.logger.warning(
                 "Skipping fork from block %s referencing malicious fork %s",
-                latest_block_hash.hex() if isinstance(latest_block_hash, (bytes, bytearray)) else latest_block_hash,
-                new_fork.validated_upto.hex() if isinstance(new_fork.validated_upto, (bytes, bytearray)) else new_fork.validated_upto,
+                latest_block_hash.hex()
+                if isinstance(latest_block_hash, (bytes, bytearray))
+                else latest_block_hash,
+                new_fork.validated_upto.hex()
+                if isinstance(new_fork.validated_upto, (bytes, bytearray))
+                else new_fork.validated_upto,
             )
             return
         new_fork.root = ref.root
@@ -46,7 +52,9 @@ def _process_peers_latest_block(
     node.forks[latest_block_hash] = new_fork
     node.logger.debug(
         "Fork %s now has %d peers (total forks %d)",
-        latest_block_hash.hex() if isinstance(latest_block_hash, (bytes, bytearray)) else latest_block_hash,
+        latest_block_hash.hex()
+        if isinstance(latest_block_hash, (bytes, bytearray))
+        else latest_block_hash,
         len(new_fork.peers),
         len(node.forks),
     )
@@ -57,7 +65,7 @@ def make_verify_worker(node: Any):
 
     def _verify_worker() -> None:
         node.logger.info("Verify worker started")
-        stop = node._validation_stop_event
+        stop = node._verify_stop_event
         while not stop.is_set():
             batch: list[tuple[bytes, Set[Any]]] = []
             try:
@@ -77,14 +85,20 @@ def make_verify_worker(node: Any):
                     _process_peers_latest_block(node, latest_b, peers)
                     node.logger.debug(
                         "Updated forks from block %s for %d peers",
-                        latest_b.hex() if isinstance(latest_b, (bytes, bytearray)) else latest_b,
+                        latest_b.hex()
+                        if isinstance(latest_b, (bytes, bytearray))
+                        else latest_b,
                         len(peers),
                     )
                 except Exception:
                     latest_hex = (
-                        latest_b.hex() if isinstance(latest_b, (bytes, bytearray)) else latest_b
+                        latest_b.hex()
+                        if isinstance(latest_b, (bytes, bytearray))
+                        else latest_b
                     )
-                    node.logger.exception("Failed processing verification batch for %s", latest_hex)
+                    node.logger.exception(
+                        "Failed processing verification batch for %s", latest_hex
+                    )
         node.logger.info("Verify worker stopped")
 
     return _verify_worker

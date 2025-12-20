@@ -51,6 +51,7 @@ def communication_setup(node: "Node", config: dict):
     node.logger.info("Setting up node communication")
     node.use_ipv6              = config.get('use_ipv6', False)
     node.peers_lock = threading.RLock()
+    node.communication_stop_event = threading.Event()
 
     # key loading
     node.relay_secret_key      = load_x25519(config.get('relay_secret_key'))
@@ -88,6 +89,7 @@ def communication_setup(node: "Node", config: dict):
         node.incoming_socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
     node.incoming_socket.bind(("::" if node.use_ipv6 else "0.0.0.0", incoming_port or 0))
     node.incoming_port = node.incoming_socket.getsockname()[1]
+    node.incoming_socket.settimeout(0.5)
     node.logger.info(
         "Incoming UDP socket bound to %s:%s",
         "::" if node.use_ipv6 else "0.0.0.0",
@@ -111,6 +113,7 @@ def communication_setup(node: "Node", config: dict):
         socket.AF_INET6 if node.use_ipv6 else socket.AF_INET,
         socket.SOCK_DGRAM,
     )
+    node.outgoing_socket.settimeout(0.5)
     node.outgoing_queue = Queue()
 
     node.outgoing_thread = threading.Thread(

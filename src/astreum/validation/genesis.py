@@ -8,6 +8,7 @@ from .models.block import Block
 from ..storage.models.atom import ZERO32
 from ..storage.models.trie import Trie
 from ..utils.integer import int_to_bytes
+from time import time
 
 TREASURY_ADDRESS = b"\x01" * 32
 BURN_ADDRESS = b"\x00" * 32
@@ -49,13 +50,13 @@ def create_genesis_block(
         previous_block_hash=ZERO32,
         previous_block=None,
         number=0,
-        timestamp=0,
+        timestamp=int(time()),
         accounts_hash=accounts_root,
         transactions_total_fees=0,
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
         delay_difficulty=0,
-        validator_public_key=validator_pk,
+        validator_public_key_bytes=validator_pk,
         nonce=0,
         signature=b"",
         accounts=accounts,

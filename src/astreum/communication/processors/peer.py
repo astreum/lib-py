@@ -15,7 +15,8 @@ def manage_peer(node: "Node") -> None:
         node.config["peer_timeout"],
         node.config["peer_timeout_interval"],
     )
-    while True:
+    stop = getattr(node, "communication_stop_event", None)
+    while stop is None or not stop.is_set():
         timeout_seconds = node.config["peer_timeout"]
         interval_seconds = node.config["peer_timeout_interval"]
         try:
@@ -56,4 +57,7 @@ def manage_peer(node: "Node") -> None:
         except Exception:
             node.logger.exception("Peer manager iteration failed")
 
-        time.sleep(interval_seconds)
+        if stop is not None and stop.wait(interval_seconds):
+            break
+
+    node.logger.info("Peer manager stopped")

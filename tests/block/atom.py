@@ -7,7 +7,7 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from astreum.consensus.models.block import Block  # noqa: E402
+from astreum.validation.models.block import Block  # noqa: E402
 from astreum.node import Node  # noqa: E402
 from astreum.storage.models.atom import ZERO32  # noqa: E402
 

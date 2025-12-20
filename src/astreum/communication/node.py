@@ -1,19 +1,18 @@
-def connect_to_network_and_verify(self):
+
+def connect_node(self):
     """Initialize communication and consensus components, then load latest block state."""
+    if self.is_connected:
+        self.logger.debug("Node already connected; skipping communication setup")
+        return
+
     self.logger.info("Starting communication and consensus setup")
     try:
         from astreum.communication import communication_setup  # type: ignore
         communication_setup(node=self, config=self.config)
         self.logger.info("Communication setup completed")
-    except Exception:
-        self.logger.exception("Communication setup failed")
-
-    try:
-        from astreum.consensus import consensus_setup  # type: ignore
-        consensus_setup(node=self, config=self.config)
-        self.logger.info("Consensus setup completed")
-    except Exception:
-        self.logger.exception("Consensus setup failed")
+    except Exception as exc:
+        self.logger.exception("Communication setup failed: %s", exc)
+        return exc
 
     # Load latest_block_hash from config
     self.latest_block_hash = getattr(self, "latest_block_hash", None)
@@ -30,7 +29,7 @@ def connect_to_network_and_verify(self):
 
     if self.latest_block_hash and self.latest_block is None:
         try:
-            from astreum.consensus.models.block import Block
+            from astreum.validation.models.block import Block
             self.latest_block = Block.from_atom(self, self.latest_block_hash)
             self.logger.info("Loaded latest block %s from storage", self.latest_block_hash.hex())
         except Exception as exc:

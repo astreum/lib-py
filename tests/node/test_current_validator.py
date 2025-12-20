@@ -13,8 +13,8 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from astreum.consensus.genesis import create_genesis_block
-from astreum.consensus.validator import current_validator
+from astreum.validation.genesis import create_genesis_block
+from astreum.validation.validator import current_validator
 from astreum.node import Node
 
 
