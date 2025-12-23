@@ -69,7 +69,7 @@ def process_incoming_messages(node: "Node") -> None:
             message.decrypt(peer.shared_key_bytes)
         except Exception as exc:
             node.logger.warning("Error decrypting message from %s: %s", peer.address, exc)
-                continue
+            continue
 
         match message.topic:
             case MessageTopic.PING:
@@ -115,5 +115,3 @@ def populate_incoming_messages(node: "Node") -> None:
             node.logger.warning("Error populating incoming queue: %s", exc)
 
     node.logger.info("Incoming message populator stopped")
-        except Exception as exc:
-            node.logger.warning("Error populating incoming queue: %s", exc)
