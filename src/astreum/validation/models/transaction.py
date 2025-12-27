@@ -14,6 +14,7 @@ class Transaction:
     chain_id: int
     amount: int
     counter: int
+    version: int = 1
     data: bytes = b""
     recipient: bytes = b""
     sender: bytes = b""
@@ -53,13 +54,19 @@ class Transaction:
             next_id=body_list_id,
             kind=AtomKind.BYTES,
         )
+        version_atom = Atom(
+            data=int_to_bytes(self.version),
+            next_id=signature_atom.object_id(),
+            kind=AtomKind.BYTES,
+        )
         type_atom = Atom(
             data=b"transaction",
-            next_id=signature_atom.object_id(),
+            next_id=version_atom.object_id(),
             kind=AtomKind.SYMBOL,
         )
 
         acc.append(signature_atom)
+        acc.append(version_atom)
         acc.append(type_atom)
 
         self.hash = type_atom.object_id()
@@ -106,7 +113,16 @@ class Transaction:
         if type_atom.data != b"transaction":
             raise ValueError("not a transaction (type atom payload)")
 
-        signature_atom = _require_atom(type_atom.next_id, "transaction signature atom", AtomKind.BYTES)
+        version_atom = _require_atom(type_atom.next_id, "transaction version atom", AtomKind.BYTES)
+        version = bytes_to_int(version_atom.data)
+        if version != 1:
+            raise ValueError("unsupported transaction version")
+
+        signature_atom = _require_atom(
+            version_atom.next_id,
+            "transaction signature atom",
+            AtomKind.BYTES,
+        )
         body_list_atom = _require_atom(signature_atom.next_id, "transaction body list atom", AtomKind.LIST)
         if body_list_atom.next_id and body_list_atom.next_id != ZERO32:
             raise ValueError("malformed transaction (body list tail)")
@@ -141,6 +157,7 @@ class Transaction:
             sender=sender_bytes,
             signature=signature_atom.data,
             hash=bytes(transaction_id),
+            version=version,
         )
 
     @classmethod
@@ -151,7 +168,13 @@ class Transaction:
     ) -> Optional[List[Atom]]:
         """Load the transaction atom chain from storage, returning the atoms or None."""
         atoms = node.get_atom_list_from_storage(transaction_id)
-        if atoms is None or not atoms:
+        if atoms is None or len(atoms) < 4:
+            return None
+        type_atom = atoms[0]
+        if type_atom.kind is not AtomKind.SYMBOL or type_atom.data != b"transaction":
+            return None
+        version_atom = atoms[1]
+        if version_atom.kind is not AtomKind.BYTES or bytes_to_int(version_atom.data) != 1:
             return None
 
         body_list_atom = atoms[-1]

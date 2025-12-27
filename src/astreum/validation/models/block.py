@@ -32,8 +32,9 @@ class Block:
 
     Top-level encoding:
       block_id = type_atom.object_id()
-      chain: type_atom --next--> signature_atom --next--> body_list_atom --next--> ZERO32
+      chain: type_atom --next--> version_atom --next--> signature_atom --next--> body_list_atom --next--> ZERO32
       where: type_atom        = Atom(kind=AtomKind.SYMBOL, data=b"block")
+             version_atom     = Atom(kind=AtomKind.BYTES,  data=b"\x01")
              signature_atom   = Atom(kind=AtomKind.BYTES, data=<signature-bytes>)
              body_list_atom   = Atom(kind=AtomKind.LIST,  data=<body_head_id>)
 
@@ -59,6 +60,7 @@ class Block:
     """
 
     # essential identifiers
+    version: int
     atom_hash: Optional[bytes]
     chain_id: int
     previous_block_hash: bytes
@@ -98,6 +100,7 @@ class Block:
         receipts_hash: Optional[bytes],
         delay_difficulty: Optional[int],
         validator_public_key_bytes: Optional[bytes],
+        version: int = 1,
         nonce: Optional[int] = None,
         signature: Optional[bytes] = None,
         atom_hash: Optional[bytes] = None,
@@ -106,6 +109,7 @@ class Block:
         transactions: Optional[List["Transaction"]] = None,
         receipts: Optional[List["Receipt"]] = None,
     ) -> None:
+        self.version = int(version)
         self.atom_hash = atom_hash
         self.chain_id = chain_id
         self.previous_block_hash = previous_block_hash
@@ -178,10 +182,20 @@ class Block:
             next_id=self.body_hash,
             kind=AtomKind.BYTES,
         )
-        type_atom = Atom(data=b"block", next_id=sig_atom.object_id(), kind=AtomKind.SYMBOL)
+        version_atom = Atom(
+            data=_int_to_be_bytes(self.version),
+            next_id=sig_atom.object_id(),
+            kind=AtomKind.BYTES,
+        )
+        type_atom = Atom(
+            data=b"block",
+            next_id=version_atom.object_id(),
+            kind=AtomKind.SYMBOL,
+        )
 
         block_atoms.append(body_list_atom)
         block_atoms.append(sig_atom)
+        block_atoms.append(version_atom)
         block_atoms.append(type_atom)
 
         self.atom_hash = type_atom.object_id()
@@ -191,12 +205,17 @@ class Block:
     def from_atom(cls, node: Any, block_id: bytes) -> "Block":
 
         block_header = node.get_atom_list_from_storage(block_id)
-        if block_header is None or len(block_header) != 3:
+        if block_header is None or len(block_header) != 4:
             raise ValueError("malformed block atom chain")
-        type_atom, sig_atom, body_list_atom = block_header
+        type_atom, version_atom, sig_atom, body_list_atom = block_header
 
         if type_atom.kind is not AtomKind.SYMBOL or type_atom.data != b"block":
             raise ValueError("not a block (type atom payload)")
+        if version_atom.kind is not AtomKind.BYTES:
+            raise ValueError("malformed block (version atom kind)")
+        version = _be_bytes_to_int(version_atom.data)
+        if version != 1:
+            raise ValueError("unsupported block version")
         if sig_atom.kind is not AtomKind.BYTES:
             raise ValueError("malformed block (signature atom kind)")
         if body_list_atom.kind is not AtomKind.LIST:
@@ -232,6 +251,7 @@ class Block:
         ) = detail_values
 
         return cls(
+            version=version,
             chain_id=_be_bytes_to_int(chain_bytes),
             previous_block_hash=prev_bytes or ZERO32,
             previous_block=None,

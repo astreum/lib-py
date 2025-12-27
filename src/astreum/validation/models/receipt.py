@@ -31,7 +31,9 @@ class Receipt:
         cost: int,
         status: int,
         logs_hash: bytes = ZERO32,
+        version: int = 1,
     ) -> None:
+        self.version = int(version)
         self.transaction_hash = bytes(transaction_hash)
         self.cost = int(cost)
         self.logs_hash = bytes(logs_hash)
@@ -58,21 +60,31 @@ class Receipt:
             next_hash = atom.object_id()
         detail_atoms.reverse()
 
-        type_atom = Atom(data=b"receipt", next_id=next_hash, kind=AtomKind.SYMBOL)
+        version_atom = Atom(
+            data=_int_to_be_bytes(self.version),
+            next_id=next_hash,
+            kind=AtomKind.BYTES,
+        )
+        type_atom = Atom(data=b"receipt", next_id=version_atom.object_id(), kind=AtomKind.SYMBOL)
 
-        atoms = detail_atoms + [type_atom]
+        atoms = detail_atoms + [version_atom, type_atom]
         receipt_id = type_atom.object_id()
         return receipt_id, atoms
 
     @classmethod
     def from_atom(cls, node: Any, receipt_id: bytes) -> Receipt:
         atom_chain = node.get_atom_list_from_storage(receipt_id)
-        if atom_chain is None or len(atom_chain) != 5:
+        if atom_chain is None or len(atom_chain) != 6:
             raise ValueError("malformed receipt atom chain")
 
-        type_atom, tx_atom, status_atom, cost_atom, logs_atom = atom_chain
+        type_atom, version_atom, tx_atom, status_atom, cost_atom, logs_atom = atom_chain
         if type_atom.kind is not AtomKind.SYMBOL or type_atom.data != b"receipt":
             raise ValueError("not a receipt (type atom)")
+        if version_atom.kind is not AtomKind.BYTES:
+            raise ValueError("malformed receipt (version atom)")
+        version_value = _be_bytes_to_int(version_atom.data)
+        if version_value != 1:
+            raise ValueError("unsupported receipt version")
         if tx_atom.kind is not AtomKind.LIST:
             raise ValueError("receipt transaction hash must be list-kind")
         if status_atom.kind is not AtomKind.BYTES or cost_atom.kind is not AtomKind.BYTES or logs_atom.kind is not AtomKind.LIST:
@@ -92,6 +104,7 @@ class Receipt:
             cost=_be_bytes_to_int(cost_bytes),
             logs_hash=logs_bytes,
             status=status_value,
+            version=version_value,
         )
         receipt.atom_hash = bytes(receipt_id)
         receipt.atoms = atom_chain
