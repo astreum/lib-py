@@ -143,6 +143,25 @@ class Transaction:
             hash=bytes(transaction_id),
         )
 
+    @classmethod
+    def get_atoms(
+        cls,
+        node: Any,
+        transaction_id: bytes,
+    ) -> Optional[List[Atom]]:
+        """Load the transaction atom chain from storage, returning the atoms or None."""
+        atoms = node.get_atom_list_from_storage(transaction_id)
+        if atoms is None or not atoms:
+            return None
+
+        body_list_atom = atoms[-1]
+        detail_atoms = node.get_atom_list_from_storage(body_list_atom.data)
+        if detail_atoms is None:
+            return None
+        atoms.extend(detail_atoms)
+
+        return atoms
+
 
 def apply_transaction(node: Any, block: object, transaction_hash: bytes) -> int:
     """Apply transaction to the candidate block and return the collected fee."""

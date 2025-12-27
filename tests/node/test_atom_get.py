@@ -111,7 +111,7 @@ class TestAtomGet(unittest.TestCase):
         stored = node_a._hot_storage_set(key=atom_id, value=atom)
         self.assertTrue(stored, "node_a failed to store atom in hot storage")
         print(f"Stored atom on node_a id={atom_id.hex()} size={atom.size} data={atom.data!r}")
-        node_a._network_set(atom)
+        node_a._network_set(atom_id)
         time.sleep(3)
         print(f"node_a storage_index keys={[k.hex() for k in node_a.storage_index.keys()]}")
         print(f"node_b storage_index keys={[k.hex() for k in node_b.storage_index.keys()]}")

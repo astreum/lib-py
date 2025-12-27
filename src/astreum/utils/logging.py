@@ -159,7 +159,7 @@ def logging_setup(config: dict) -> logging.LoggerAdapter:
     product = _PRODUCT_NAME
     instance_id = _derive_instance_id()
 
-    retention_value = config.get("retention_days")
+    retention_value = config.get("logging_retention_days")
     retention_days = int(retention_value) if retention_value is not None else 90
 
     verbose = bool(config.get("verbose", False))

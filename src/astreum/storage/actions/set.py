@@ -12,7 +12,7 @@ def _hot_storage_set(self, key: bytes, value: Atom) -> bool:
     """Store atom in hot storage without exceeding the configured limit."""
     node_logger = self.logger
     projected = self.hot_storage_size + value.size
-    hot_limit = self.config["hot_storage_default_limit"]
+    hot_limit = self.config["hot_storage_limit"]
     if projected > hot_limit:
         node_logger.warning(
             "Hot storage limit reached (%s > %s); skipping atom %s",
@@ -33,11 +33,10 @@ def _hot_storage_set(self, key: bytes, value: Atom) -> bool:
     return True
 
 
-def _cold_storage_set(self, atom: Atom) -> None:
+def _cold_storage_set(self, key: bytes, atom: Atom) -> None:
     """Persist an atom into the cold storage directory if it already exists."""
     node_logger = self.logger
-    atom_id = atom.object_id()
-    atom_hex = atom_id.hex()
+    atom_hex = key.hex()
     if not self.config["cold_storage_path"]:
         node_logger.debug("Cold storage disabled; skipping atom %s", atom_hex)
         return
@@ -75,10 +74,9 @@ def _cold_storage_set(self, atom: Atom) -> None:
         )
 
 
-def _network_set(self, atom: Atom) -> None:
-    """Advertise an atom to the closest known peer so they can fetch it from us."""
+def _network_set(self, atom_id: bytes) -> None:
+    """Advertise an atom id to the closest known peer so they can fetch it from us."""
     node_logger = self.logger
-    atom_id = atom.object_id()
     atom_hex = atom_id.hex()
     try:
         from ...communication.handlers.object_request import (

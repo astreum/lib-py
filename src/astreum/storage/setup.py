@@ -16,7 +16,7 @@ def storage_setup(node: Any, config: dict) -> None:
 
     node.logger.info(
         "Storage ready (hot_limit=%s bytes, cold_limit=%s bytes, cold_path=%s)",
-        config["hot_storage_default_limit"],
+        config["hot_storage_limit"],
         config["cold_storage_limit"],
         config["cold_storage_path"] or "disabled",
     )

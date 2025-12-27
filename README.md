@@ -15,18 +15,21 @@ When initializing an `astreum.Node`, pass a dictionary with any of the options b
 | `hot_storage_limit`         | int        | `1073741824`   | Maximum bytes kept in the hot cache before new atoms are skipped (1 GiB).                                                                                                         |
 | `cold_storage_limit`        | int        | `10737418240`  | Cold storage write threshold (10 GiB by default); set to `0` to skip the limit.                                                                                                   |
 | `cold_storage_path`         | string     | `None`         | Directory where persisted atoms live; Astreum creates it on startup and skips cold storage when unset.                                                                            |
-| `logging_retention`         | int        | `90`           | Number of days to keep rotated log files (daily gzip).                                                                                                                           |
+| `logging_retention_days`    | int        | `90`           | Number of days to keep rotated log files (daily gzip).                                                                                                                           |
+| `chain_id`                  | int        | `0`            | Chain identifier used for validation (0 = test, 1 = main).                                                                                                                        |
 | `verbose`                   | bool       | `False`        | When **True**, also mirror JSON logs to stdout with a human-readable format.                                                                                                     |
 
-### Networking
+### Communication
 
 | Parameter                | Type        | Default               | Description                                                                                             |
 | ------------------------ | ----------- | --------------------- | ------------------------------------------------------------------------------------------------------- |
 | `relay_secret_key`       | hex string  | Auto-generated        | X25519 private key used for the relay route; a new keypair is created when this field is omitted.        |
 | `validation_secret_key`  | hex string  | `None`                | Optional Ed25519 key that lets the node join the validation route; leave blank to opt out of validation. |
 | `use_ipv6`               | bool        | `False`               | Bind the incoming/outgoing sockets on IPv6 (the OS still listens on IPv4 if a peer speaks both).         |
-| `incoming_port`          | int         | `7373`                | UDP port the relay binds to; pass `0` or omit to let the OS pick an ephemeral port.                       |
+| `incoming_port`          | int         | `52780`                | UDP port the relay binds to; pass `0` or omit to let the OS pick an ephemeral port.                       |
 | `bootstrap`              | list\[str\] | `[]`                  | Addresses to ping with a handshake before joining; each must look like `host:port` or `[ipv6]:port`.     |
+| `peer_timeout`           | int         | `900`                 | Evict peers that have not been seen within this many seconds (15 minutes).                               |
+| `peer_timeout_interval`  | int         | `10`                  | How often (seconds) the peer manager checks for stale peers.                                             |
 
 > **Note**
 > The peer‑to‑peer *route* used for object discovery is always enabled.
@@ -43,10 +46,10 @@ config = {
     "hot_storage_limit": 1073741824,         # cap hot cache at 1 GiB
     "cold_storage_limit": 10737418240,       # cap cold storage at 10 GiB
     "cold_storage_path": "./data/node1",
-    "incoming_port": 7373,
+    "incoming_port": 52780,
     "use_ipv6": False,
     "bootstrap": [
-        "bootstrap.astreum.org:7373",
+        "bootstrap.astreum.org:52780",
         "127.0.0.1:7374"
     ]
 }
@@ -127,7 +130,7 @@ except ParseError as e:
 Every `Node` instance wires up structured logging automatically:
 
 - Logs land in per-instance files named `node.log` under `%LOCALAPPDATA%\Astreum\lib-py\logs/<instance_id>` on Windows and `$XDG_STATE_HOME` (or `~/.local/state`)/`Astreum/lib-py/logs/<instance_id>` on other platforms. The `<instance_id>` is the first 16 hex characters of a BLAKE3 hash of the caller's file path, so running the node from different entry points keeps their logs isolated.
-- Files rotate at midnight UTC with gzip compression (`node-YYYY-MM-DD.log.gz`) and retain 90 days by default. Override via `config["logging_retention"]`.
+- Files rotate at midnight UTC with gzip compression (`node-YYYY-MM-DD.log.gz`) and retain 90 days by default. Override via `config["logging_retention_days"]`.
 - Each event is a single JSON line containing timestamp, level, logger, message, process/thread info, module/function, and the derived `instance_id`.
 - Set `config["verbose"] = True` to mirror logs to stdout in a human-friendly format like `[2025-04-13-42-59] [info] Starting Astreum Node`.
 - The very first entry emitted is the banner `Starting Astreum Node`, signalling that the logging pipeline is live before other subsystems spin up.

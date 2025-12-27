@@ -82,7 +82,7 @@ def communication_setup(node: "Node", config: dict):
     node.atom_requests_lock = threading.RLock()
 
     # sockets + queues + threads
-    incoming_port = config.get('incoming_port', 7373)
+    incoming_port = config.get('incoming_port')
     fam = socket.AF_INET6 if node.use_ipv6 else socket.AF_INET
     node.incoming_socket = socket.socket(fam, socket.SOCK_DGRAM)
     if node.use_ipv6:

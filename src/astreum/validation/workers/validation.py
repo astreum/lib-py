@@ -8,7 +8,7 @@ from typing import Any, Callable
 from ..models.account import Account
 from ..models.accounts import Accounts
 from ..models.block import Block
-from ..models.transaction import apply_transaction
+from ..models.transaction import Transaction, apply_transaction
 from ..validator import current_validator
 from ...storage.models.atom import bytes_list_to_atoms
 from ...communication.models.message import Message, MessageTopic
@@ -178,6 +178,18 @@ def make_validation_worker(
             head_hash, _ = bytes_list_to_atoms(tx_hashes)
             new_block.transactions_hash = head_hash
             node.logger.debug("Block includes %d transactions", len(transactions))
+            transaction_atoms = []
+            for tx in transactions:
+                if not tx.hash:
+                    continue
+                atoms = Transaction.get_atoms(node, tx.hash)
+                if atoms is None:
+                    node.logger.debug(
+                        "Unable to load transaction atoms for %s",
+                        tx.hash.hex(),
+                    )
+                    continue
+                transaction_atoms.extend(atoms)
 
             receipts = new_block.receipts or []
             receipt_atoms = []
@@ -318,16 +330,25 @@ def make_validation_worker(
             for block_atom in new_block_atoms:
                 atom_id = block_atom.object_id()
                 node._hot_storage_set(key=atom_id, value=block_atom)
+                node._cold_storage_set(atom_id, block_atom)
 
             # upload receipt atoms
             for receipt_atom in receipt_atoms:
                 atom_id = receipt_atom.object_id()
                 node._hot_storage_set(key=atom_id, value=receipt_atom)
+                node._cold_storage_set(atom_id, receipt_atom)
+
+            # upload transaction atoms
+            for transaction_atom in transaction_atoms:
+                atom_id = transaction_atom.object_id()
+                node._hot_storage_set(key=atom_id, value=transaction_atom)
+                node._cold_storage_set(atom_id, transaction_atom)
 
             # upload account atoms
             for account_atom in account_atoms:
                 atom_id = account_atom.object_id()
                 node._hot_storage_set(key=atom_id, value=account_atom)
+                node._cold_storage_set(atom_id, account_atom)
 
         node.logger.info("Validation worker stopped")
 
