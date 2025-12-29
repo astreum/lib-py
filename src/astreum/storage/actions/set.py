@@ -174,3 +174,4 @@ def _network_set(self, atom_id: bytes) -> None:
             target_addr[1],
             exc,
         )
+

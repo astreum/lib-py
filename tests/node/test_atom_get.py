@@ -46,7 +46,9 @@ class TestAtomGet(unittest.TestCase):
 
     def test_storage_get_fetches_remote_atom(self) -> None:
         node_a_port = self._get_free_port()
-        node_a = self._register_node(Node({"incoming_port": node_a_port, "verbose": True}))
+        node_a = self._register_node(
+            Node({"incoming_port": node_a_port, "default_seeds": [], "verbose": True})
+        )
 
         node_a_thread = threading.Thread(target=node_a.connect, daemon=True)
         node_a_thread.start()
@@ -62,7 +64,8 @@ class TestAtomGet(unittest.TestCase):
             Node(
                 {
                     "incoming_port": node_b_port,
-                    "bootstrap": [f"{bootstrap_host}:{bootstrap_port}"],
+                    "default_seeds": [],
+                    "additional_seeds": [f"{bootstrap_host}:{bootstrap_port}"],
                     "verbose": True,
                 }
             )
@@ -75,7 +78,7 @@ class TestAtomGet(unittest.TestCase):
         self.assertTrue(node_b.is_connected)
         print(
             f"node_b connected incoming_port={node_b.incoming_port} "
-            f"bootstrap={bootstrap_host}:{bootstrap_port}"
+            f"seed={bootstrap_host}:{bootstrap_port}"
         )
 
         node_a_peer_key = getattr(node_b, "relay_public_key_bytes", None)

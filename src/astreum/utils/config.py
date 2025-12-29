@@ -8,6 +8,7 @@ DEFAULT_INCOMING_PORT = 52780
 DEFAULT_LOGGING_RETENTION_DAYS = 90
 DEFAULT_PEER_TIMEOUT_SECONDS = 15 * 60  # 15 minutes
 DEFAULT_PEER_TIMEOUT_INTERVAL_SECONDS = 10  # 10 seconds
+DEFAULT_SEEDS = ["bootstrap.astreum.org:52780"]
 
 
 def config_setup(config: Dict = {}):
@@ -105,5 +106,21 @@ def config_setup(config: Dict = {}):
         raise ValueError("peer_timeout_interval must be a positive integer")
 
     config["peer_timeout_interval"] = interval
+
+    if "default_seeds" in config:
+        default_seeds_raw = config["default_seeds"]
+    else:
+        default_seeds_raw = DEFAULT_SEEDS
+
+    if isinstance(default_seeds_raw, (list, tuple)):
+        config["default_seeds"] = list(default_seeds_raw)
+    else:
+        raise ValueError("default_seeds must be a list of strings")
+
+    additional_seeds_raw = config.get("additional_seeds", [])
+    if isinstance(additional_seeds_raw, (list, tuple)):
+        config["additional_seeds"] = list(additional_seeds_raw)
+    else:
+        raise ValueError("additional_seeds must be a list of strings")
 
     return config

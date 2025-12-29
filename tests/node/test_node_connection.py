@@ -44,7 +44,9 @@ class TestNodeConnection(unittest.TestCase):
 
     def test_connection(self) -> None:
         node_a_port = self._get_free_port()
-        node_a = self._register_node(Node({"incoming_port": node_a_port}))
+        node_a = self._register_node(
+            Node({"incoming_port": node_a_port, "default_seeds": []})
+        )
 
         node_a_thread = threading.Thread(target=node_a.connect, daemon=True)
         node_a_thread.start()
@@ -62,7 +64,8 @@ class TestNodeConnection(unittest.TestCase):
             Node(
                 {
                     "incoming_port": node_b_port,
-                    "bootstrap": [f"{bootstrap_host}:{bootstrap_port}"],
+                    "default_seeds": [],
+                    "additional_seeds": [f"{bootstrap_host}:{bootstrap_port}"],
                 }
             )
         )
@@ -72,7 +75,7 @@ class TestNodeConnection(unittest.TestCase):
         node_b_thread.join(timeout=5)
 
         self.assertTrue(node_b.is_connected)
-        print(f"node_b incoming_port={node_b.incoming_port} bootstrap={bootstrap_host}:{bootstrap_port}")
+        print(f"node_b incoming_port={node_b.incoming_port} seed={bootstrap_host}:{bootstrap_port}")
 
         node_a_peer_key = getattr(node_b, "relay_public_key_bytes", None)
         node_b_peer_key = getattr(node_a, "relay_public_key_bytes", None)

@@ -1,4 +1,5 @@
 import socket, threading
+from pathlib import Path
 from queue import Queue
 from typing import Tuple, Optional
 from cryptography.hazmat.primitives import serialization
@@ -45,6 +46,50 @@ def make_routes(
 def make_maps():
     """Empty lookup maps: peers and addresses."""
     return
+
+
+def advertise_cold_storage(node: "Node") -> None:
+    """Advertise all cold storage atom ids to the closest known peer."""
+    node_logger = node.logger
+    cold_path = node.config.get("cold_storage_path")
+    if not cold_path:
+        node_logger.debug("Cold storage disabled; skipping cold atom advertisement")
+        return
+
+    directory = Path(cold_path)
+    if not directory.exists():
+        node_logger.warning("Cold storage path %s missing; cannot advertise atoms", directory)
+        return
+    if not directory.is_dir():
+        node_logger.warning("Cold storage path %s is not a directory; skipping", directory)
+        return
+
+    advertised = 0
+    skipped = 0
+    for file_path in directory.glob("*.bin"):
+        if not file_path.is_file():
+            skipped += 1
+            continue
+        atom_hex = file_path.stem
+        if len(atom_hex) != 64:
+            skipped += 1
+            continue
+        try:
+            atom_id = bytes.fromhex(atom_hex)
+        except ValueError:
+            skipped += 1
+            continue
+        if len(atom_id) != 32:
+            skipped += 1
+            continue
+        node._network_set(atom_id)
+        advertised += 1
+
+    node_logger.info(
+        "Cold storage advertisement complete (advertised=%s, skipped=%s)",
+        advertised,
+        skipped,
+    )
 
 
 def communication_setup(node: "Node", config: dict):
@@ -146,7 +191,9 @@ def communication_setup(node: "Node", config: dict):
         node.latest_block_hash = None
 
     # bootstrap pings
-    bootstrap_peers = config.get('bootstrap', [])
+    default_seeds = config.get("default_seeds", [])
+    additional_seeds = config.get("additional_seeds", [])
+    bootstrap_peers = list(default_seeds) + list(additional_seeds)
     for addr in bootstrap_peers:
         try:
             host, port = address_str_to_host_and_port(addr)  # type: ignore[arg-type]
@@ -169,3 +216,4 @@ def communication_setup(node: "Node", config: dict):
         len(bootstrap_peers),
     )
     node.is_connected = True
+    advertise_cold_storage(node)
