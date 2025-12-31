@@ -6,7 +6,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
 
 from ..models.peer import Peer
-from ..models.message import Message
+from ..models.message import Message, MessageTopic
+from ..models.ping import Ping
 
 if TYPE_CHECKING:
     from .... import Node
@@ -17,6 +18,29 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
 
     Returns True if the outer loop should `continue`, False otherwise.
     """
+    def _queue_handshake_ping(peer: Peer, peer_address: tuple[str, int]) -> None:
+        latest_block = getattr(node, "latest_block_hash", None)
+        if not isinstance(latest_block, (bytes, bytearray)) or len(latest_block) != 32:
+            latest_block = None
+        try:
+            ping_payload = Ping(
+                is_validator=bool(getattr(node, "validation_public_key", None)),
+                latest_block=latest_block,
+            ).to_bytes()
+            ping_msg = Message(
+                topic=MessageTopic.PING,
+                content=ping_payload,
+                sender=node.relay_public_key,
+            )
+            ping_msg.encrypt(peer.shared_key_bytes)
+            node.outgoing_queue.put((ping_msg.to_bytes(), peer_address))
+        except Exception as exc:
+            node.logger.debug(
+                "Failed sending handshake ping to %s:%s: %s",
+                peer_address[0],
+                peer_address[1],
+                exc,
+            )
     sender_public_key_bytes = message.sender_bytes
     try:
         sender_key = X25519PublicKey.from_public_bytes(sender_public_key_bytes)
@@ -34,6 +58,7 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
     existing_peer = node.get_peer(sender_public_key_bytes)
     if existing_peer is not None:
         existing_peer.address = peer_address
+        _queue_handshake_ping(existing_peer, peer_address)
         return False
 
     try:
@@ -59,4 +84,5 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
         content=int(node.config["incoming_port"]).to_bytes(2, "big", signed=False),
     )
     node.outgoing_queue.put((response.to_bytes(), peer_address))
+    _queue_handshake_ping(peer, peer_address)
     return True

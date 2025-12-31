@@ -275,32 +275,26 @@ def make_validation_worker(
             )
             
 
-            # ping peers in the validation route to update their records
-            if node.validation_route and node.outgoing_queue and node.peers:
-                route_peers = {
-                    peer_key
-                    for bucket in getattr(node.validation_route, "buckets", {}).values()
-                    for peer_key in bucket
-                }
-                if route_peers:
+            # ping all peers to update their records
+            if node.outgoing_queue and node.peers:
+                try:
+                    with node.peers_lock:
+                        peers = list(node.peers.items())
+                except Exception:
+                    peers = list(getattr(node, "peers", {}).items())
+
+                if peers:
                     ping_payload = Ping(
                         is_validator=True,
                         latest_block=new_block_hash,
                     ).to_bytes()
 
-                    for peer_key in route_peers:
+                    for peer_key, peer in peers:
                         peer_hex = (
                             peer_key.hex()
                             if isinstance(peer_key, (bytes, bytearray))
                             else peer_key
                         )
-                        peer = node.get_peer(peer_key)
-                        if peer is None:
-                            node.logger.debug(
-                                "Skipping validator ping to peer %s; peer not found",
-                                peer_hex,
-                            )
-                            continue
                         address = getattr(peer, "address", None)
                         if not address:
                             node.logger.debug(
