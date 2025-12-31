@@ -31,6 +31,7 @@ When initializing an `astreum.Node`, pass a dictionary with any of the options b
 | `additional_seeds`       | list\[str\] | `[]`                  | Extra addresses appended to `default_seeds`; each must look like `host:port` or `[ipv6]:port`.           |
 | `peer_timeout`           | int         | `900`                 | Evict peers that have not been seen within this many seconds (15 minutes).                               |
 | `peer_timeout_interval`  | int         | `10`                  | How often (seconds) the peer manager checks for stale peers.                                             |
+| `bootstrap_retry_interval` | int       | `30`                  | How often (seconds) to retry bootstrapping when the peer list is empty.                                  |
 
 > **Note**
 > The peer‑to‑peer *route* used for object discovery is always enabled.

@@ -8,6 +8,7 @@ DEFAULT_INCOMING_PORT = 52780
 DEFAULT_LOGGING_RETENTION_DAYS = 90
 DEFAULT_PEER_TIMEOUT_SECONDS = 15 * 60  # 15 minutes
 DEFAULT_PEER_TIMEOUT_INTERVAL_SECONDS = 10  # 10 seconds
+DEFAULT_BOOTSTRAP_RETRY_INTERVAL_SECONDS = 30  # 30 seconds
 DEFAULT_SEEDS = ["bootstrap.astreum.org:52780"]
 
 
@@ -106,6 +107,19 @@ def config_setup(config: Dict = {}):
         raise ValueError("peer_timeout_interval must be a positive integer")
 
     config["peer_timeout_interval"] = interval
+
+    bootstrap_retry_raw = config.get(
+        "bootstrap_retry_interval", DEFAULT_BOOTSTRAP_RETRY_INTERVAL_SECONDS
+    )
+    try:
+        bootstrap_retry_interval = int(bootstrap_retry_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"bootstrap_retry_interval must be an integer: {bootstrap_retry_raw!r}"
+        ) from exc
+    if bootstrap_retry_interval <= 0:
+        raise ValueError("bootstrap_retry_interval must be a positive integer")
+    config["bootstrap_retry_interval"] = bootstrap_retry_interval
 
     if "default_seeds" in config:
         default_seeds_raw = config["default_seeds"]

@@ -1,4 +1,4 @@
-import socket, threading
+import socket, threading, time
 from pathlib import Path
 from queue import Queue
 from typing import Tuple, Optional
@@ -208,6 +208,8 @@ def communication_setup(node: "Node", config: dict):
         )
         node.outgoing_queue.put((handshake_message.to_bytes(), (host, port)))
         node.logger.info("Sent bootstrap handshake to %s:%s", host, port)
+    if bootstrap_peers:
+        node._bootstrap_last_attempt = time.time()
 
     node.logger.info(
         "Communication ready (incoming_port=%s, outgoing_socket_initialized=%s, bootstrap_count=%s)",
