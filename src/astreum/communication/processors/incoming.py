@@ -68,7 +68,13 @@ def process_incoming_messages(node: "Node") -> None:
         try:
             message.decrypt(peer.shared_key_bytes)
         except Exception as exc:
-            node.logger.warning("Error decrypting message from %s: %s", peer.address, exc)
+            node.logger.warning(
+                "Error decrypting message from %s (len=%s, enc_len=%s, exc=%s)",
+                peer.address,
+                len(data),
+                len(message.encrypted) if message.encrypted is not None else None,
+                exc,
+            )
             continue
 
         match message.topic:
