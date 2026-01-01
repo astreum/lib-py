@@ -42,6 +42,8 @@ class Route:
 
     def add_peer(self, peer_public_key: PeerKey, peer: Optional[Peer] = None):
         peer_public_key_bytes = self._normalize_peer_key(peer_public_key)
+        if peer_public_key_bytes == self.relay_public_key_bytes:
+            return
         bucket_idx = self._matching_leading_bits(self.relay_public_key_bytes, peer_public_key_bytes)
         if len(self.buckets[bucket_idx]) < self.bucket_size:
             bucket = self.buckets[bucket_idx]
@@ -52,6 +54,8 @@ class Route:
 
     def remove_peer(self, peer_public_key: PeerKey):
         peer_public_key_bytes = self._normalize_peer_key(peer_public_key)
+        if peer_public_key_bytes == self.relay_public_key_bytes:
+            return
         bucket_idx = self._matching_leading_bits(self.relay_public_key_bytes, peer_public_key_bytes)
         bucket = self.buckets.get(bucket_idx)
         if not bucket:
