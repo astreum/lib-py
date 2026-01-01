@@ -20,11 +20,7 @@ def _process_peers_latest_block(
     )
     new_fork = Fork(head=latest_block_hash)
 
-    current_fork_heads = {
-        fk.head for fk in node.forks.values() if fk.head != latest_block_hash
-    }
-
-    new_fork.validate(storage_get=node.storage_get, stop_heads=current_fork_heads)
+    new_fork.verify(node)
 
     if new_fork.validated_upto and new_fork.validated_upto in node.forks:
         ref = node.forks[new_fork.validated_upto]
