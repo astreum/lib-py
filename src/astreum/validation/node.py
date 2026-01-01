@@ -6,6 +6,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from astreum.utils.bytes import hex_to_bytes
+from astreum.communication.models.message import Message, MessageTopic
+from astreum.communication.models.ping import Ping
 from astreum.validation.genesis import create_genesis_block
 from astreum.validation.workers import make_validation_worker
 from astreum.verification.node import verify_blockchain
@@ -23,23 +25,15 @@ def validate_blockchain(self, validator_secret_key: Ed25519PrivateKey):
     if latest_block_hex is not None:
         self.latest_block_hash = hex_to_bytes(latest_block_hex, expected_length=32)
 
-    self.latest_block_hash = getattr(self, "latest_block_hash", None)
-    self.latest_block = getattr(self, "latest_block", None)
-    self.nonce_time_ms = getattr(self, "nonce_time_ms", 0)
+    self.nonce_time_ms = 0
     
     self.logger.info(
         "Consensus latest_block_hash preset: %s",
-        self.latest_block_hash.hex()
-        if isinstance(self.latest_block_hash, (bytes, bytearray))
-        else self.latest_block_hash,
+        self.latest_block_hash,
     )
 
-    self._validation_transaction_queue = getattr(
-        self, "_validation_transaction_queue", Queue()
-    )
-    self._validation_stop_event = getattr(
-        self, "_validation_stop_event", threading.Event()
-    )
+    self._validation_transaction_queue = Queue()
+    self._validation_stop_event = threading.Event()
 
     def enqueue_transaction_hash(tx_hash: bytes) -> None:
         """Schedule a transaction hash for validation processing."""
@@ -99,6 +93,14 @@ def validate_blockchain(self, validator_secret_key: Ed25519PrivateKey):
                     atom.object_id(),
                     exc,
                 )
+            try:
+                self._cold_storage_set(atom.object_id(), atom)
+            except Exception as exc:
+                self.logger.warning(
+                    "Unable to persist genesis atom %s to cold storage: %s",
+                    atom.object_id(),
+                    exc,
+                )
 
         self.latest_block_hash = genesis_hash
         self.latest_block = genesis_block
@@ -111,10 +113,7 @@ def validate_blockchain(self, validator_secret_key: Ed25519PrivateKey):
             else self.latest_block_hash,
         )
 
-    validation_thread = getattr(self, "consensus_validation_thread", None)
-    if validation_thread is None:
-        raise RuntimeError("Consensus validation not initialized; connect the node first.")
-
+    validation_thread = self.consensus_validation_thread
     if validation_thread.is_alive():
         self.logger.debug("Consensus validation thread already running")
     else:
@@ -125,3 +124,46 @@ def validate_blockchain(self, validator_secret_key: Ed25519PrivateKey):
         validation_thread.start()
 
     # ping all peers to announce validation capability
+    try:
+        ping_payload = Ping(
+            is_validator=bool(self.validation_public_key),
+            latest_block=self.latest_block_hash,
+        ).to_bytes()
+    except Exception as exc:
+        self.logger.debug("Failed to build validation ping payload: %s", exc)
+        return
+
+    if self.outgoing_queue and self.peers:
+        with self.peers_lock:
+            peers = list(self.peers.items())
+        for peer_key, peer in peers:
+            peer_hex = (
+                peer_key.hex()
+                if isinstance(peer_key, (bytes, bytearray))
+                else peer_key
+            )
+            address = peer.address
+            if not address:
+                self.logger.debug(
+                    "Skipping validation ping to %s; address missing",
+                    peer_hex,
+                )
+                continue
+            try:
+                ping_msg = Message(
+                    topic=MessageTopic.PING,
+                    content=ping_payload,
+                    sender=self.relay_public_key,
+                )
+                ping_msg.encrypt(peer.shared_key_bytes)
+                self.outgoing_queue.put((ping_msg.to_bytes(), address))
+                self.logger.debug(
+                    "Queued validation ping to %s (%s)",
+                    address,
+                    peer_hex,
+                )
+            except Exception:
+                self.logger.exception(
+                    "Failed queueing validation ping to %s",
+                    address,
+                )
