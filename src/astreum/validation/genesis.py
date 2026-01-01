@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, List
 
+from .constants import BURN_ADDRESS, TREASURY_ADDRESS
 from .models.account import Account
 from .models.accounts import Accounts
 from .models.block import Block
@@ -9,10 +10,6 @@ from ..storage.models.atom import ZERO32
 from ..storage.models.trie import Trie
 from ..utils.integer import int_to_bytes
 from time import time
-
-TREASURY_ADDRESS = b"\x01" * 32
-BURN_ADDRESS = b"\x00" * 32
-
 
 def create_genesis_block(
     node: Any,

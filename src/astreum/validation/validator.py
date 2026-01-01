@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from typing import Any, Dict, Optional, Tuple
 
-from .genesis import TREASURY_ADDRESS
+from .constants import TREASURY_ADDRESS
 from .models.account import Account
 from .models.accounts import Accounts
 from .models.block import Block

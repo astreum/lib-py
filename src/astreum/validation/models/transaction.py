@@ -6,7 +6,7 @@ from typing import Any, List, Optional, Tuple
 from ...storage.models.atom import Atom, AtomKind, ZERO32
 from ...utils.integer import bytes_to_int, int_to_bytes
 from .account import Account
-from ..genesis import TREASURY_ADDRESS
+from ..constants import TREASURY_ADDRESS
 from .receipt import STATUS_FAILED, Receipt, STATUS_SUCCESS
 
 @dataclass
