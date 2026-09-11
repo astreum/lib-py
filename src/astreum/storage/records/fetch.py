@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 def parse_slot(node: "Node", value: Any) -> tuple[bytes, int] | None:
     """Classify a storage-trie value as a ``StorageSlot``.
 
-    A slot is ``Link(head_hash=record_hash, tail=Int(sequence))``.  Anything
+    A slot is ``Link(head_hash=storage_id, tail=Int(sequence))``.  Anything
     else (a record header, malformed data, an unresolved hash) is not a slot.
 
     Args:
@@ -23,7 +23,7 @@ def parse_slot(node: "Node", value: Any) -> tuple[bytes, int] | None:
         value: The storage-trie value to classify.
 
     Returns:
-        A ``(record_hash, sequence)`` tuple, or ``None`` if the value
+        A ``(storage_id, sequence)`` tuple, or ``None`` if the value
         is not a slot.
     """
     if value is None or getattr(value, "_tag", None) != "link":
@@ -79,14 +79,14 @@ def collect_record_slots(
     node: "Node",
     tree: RadixTree,
     block_expr: Any,
-    record_hash: bytes,
+    storage_id: bytes,
     new_count: int,
 ) -> list[bytes]:
     """Walk a block expr, deriving its record's slot list.
 
     For each descendant link-node hash the storage trie is consulted:
 
-    * a ``StorageSlot`` whose ``record_hash`` matches *record_hash* fills
+    * a ``StorageSlot`` whose ``storage_id`` matches *storage_id* fills
       its position (``sequence``) in a ``new_count * 32`` zero-filled concat
       and its subtree is still walked (descendants are also this record's
       slots);
@@ -101,7 +101,7 @@ def collect_record_slots(
         node: A Node instance providing config and storage access.
         tree: The storage-account radix trie to consult.
         block_expr: The block expr whose descendants are walked.
-        record_hash: The 32-byte key identifying this record.
+        storage_id: The 32-byte key identifying this record.
         new_count: The record's slot count; sizes the returned concat.
 
     Returns:
@@ -121,14 +121,14 @@ def collect_record_slots(
             continue
         seen.add(h)
 
-        if h != record_hash:
+        if h != storage_id:
             value = get_from_radix_tree(tree, node, h)
             if value is not None:
                 slot = parse_slot(node, value)
                 if slot is None:
                     continue
-                slot_record, sequence = slot
-                if slot_record != record_hash:
+                slot_storage_id, sequence = slot
+                if slot_storage_id != storage_id:
                     continue
                 if 0 <= sequence < new_count:
                     offset = sequence * 32
@@ -144,7 +144,7 @@ def collect_record_slots(
 
 def fetch_and_store_record(
     node: "Node",
-    record_hash: bytes,
+    storage_id: bytes,
     tree: RadixTree,
     new_count: int,
 ) -> bool:
@@ -162,7 +162,7 @@ def fetch_and_store_record(
 
     Args:
         node: A Node instance providing config and storage access.
-        record_hash: The 32-byte key identifying this record.
+        storage_id: The 32-byte key identifying this record.
         tree: The storage-account radix trie to consult.
         new_count: The record's slot count.
 
@@ -172,7 +172,7 @@ def fetch_and_store_record(
     """
     from astreum.storage.exprs.cascade import get_expr
 
-    root = get_expr(node, record_hash)  # hot -> cold -> network (indexed provider)
+    root = get_expr(node, storage_id)  # hot -> cold -> network (indexed provider)
     if root is None:
         return False
     put_expr_in_cold_storage(node, root)
@@ -190,14 +190,14 @@ def fetch_and_store_record(
             continue
         seen.add(h)
 
-        if h != record_hash:
+        if h != storage_id:
             value = get_from_radix_tree(tree, node, h)
             if value is not None:
                 slot = parse_slot(node, value)
                 if slot is None:
                     continue
-                slot_record, sequence = slot
-                if slot_record != record_hash:
+                slot_storage_id, sequence = slot
+                if slot_storage_id != storage_id:
                     continue
                 if 0 <= sequence < new_count:
                     concat[sequence * 32 : sequence * 32 + 32] = h
@@ -221,4 +221,4 @@ def fetch_and_store_record(
             stack.append(expr._tail)
 
     slot_ids = [bytes(concat[i : i + 32]) for i in range(0, len(concat), 32)]
-    return put_record_in_cold_storage(node, record_hash, slot_ids)
+    return put_record_in_cold_storage(node, storage_id, slot_ids)

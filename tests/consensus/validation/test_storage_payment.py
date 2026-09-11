@@ -4,8 +4,8 @@ A storage-payment rewards a provider for hosting atom data by proving
 continued availability via a challenge-response PoW mechanism.
 
 Claim format (link list):
-  Link(Bytes(storage_record_id),
-    Link(Bytes(storage_slot_id),
+  Link(Bytes(storage_id),
+    Link(Bytes(slot_id),
       Link(Int(nonce), NIL)))
 """
 
@@ -55,14 +55,14 @@ from _helpers import (
 # ---------- helpers ----------
 
 def _build_claim_expr(
-    storage_record_id: bytes,
-    storage_slot_id: bytes,
+    storage_id: bytes,
+    slot_id: bytes,
     nonce: int,
 ) -> Expr:
     return link(
-        bytes_(storage_record_id),
+        bytes_(storage_id),
         link(
-            bytes_(storage_slot_id),
+            bytes_(slot_id),
             link(int_(nonce), NIL),
         ),
     )
@@ -78,10 +78,10 @@ def _build_claim_payload(claims: list[tuple[bytes, bytes, int]]) -> Expr:
 
 def _compute_challenge_index(
     last_payment_block_hash: bytes,
-    storage_record_id: bytes,
+    storage_id: bytes,
     new_count: int,
 ) -> int:
-    seed = blake3(last_payment_block_hash + storage_record_id).digest()
+    seed = blake3(last_payment_block_hash + storage_id).digest()
     return int.from_bytes(seed[:8], "little", signed=False) % new_count
 
 
@@ -129,11 +129,11 @@ class TestStoragePayment(unittest.TestCase):
 
     def _seed_storage_slot(
         self,
-        storage_record_id: bytes,
+        storage_id: bytes,
         sequence: int,
     ) -> bytes:
         slot = StorageSlot(
-            record_hash=storage_record_id,
+            storage_id=storage_id,
             sequence=sequence,
         )
         slot_hash = store_expr_tree(self.node, slot.expr())
@@ -147,18 +147,18 @@ class TestStoragePayment(unittest.TestCase):
 
     def _build_successful_claim(
         self,
-        storage_record_id: bytes,
+        storage_id: bytes,
         sender_pk: bytes,
         last_payment_block_hash: bytes,
         new_count: int,
     ) -> tuple[bytes, int]:
         """Build a valid claim payload (nonce=0, incumbent)."""
         challenge_index = _compute_challenge_index(
-            last_payment_block_hash, storage_record_id, new_count,
+            last_payment_block_hash, storage_id, new_count,
         )
-        slot_id = self._seed_storage_slot(storage_record_id, challenge_index)
+        slot_id = self._seed_storage_slot(storage_id, challenge_index)
         # Incumbent → base_bits=0, so nonce=0 always works
-        payload = _build_claim_payload([(storage_record_id, slot_id, 0)])
+        payload = _build_claim_payload([(storage_id, slot_id, 0)])
         store_expr_tree(self.node, payload)
         return payload, challenge_index
 
@@ -300,7 +300,7 @@ class TestStoragePayment(unittest.TestCase):
         self.assertEqual(self.block.receipts[-1].status, STATUS_FAILED)
 
     def test_no_contract_fails(self):
-        """storage_record_id not in storage trie → claim skipped → fails."""
+        """storage_id not in storage trie → claim skipped → fails."""
         sender_pk, sender_key = seed_sender_account(self.block, balance=1_000_000)
         missing_id = os.urandom(32)
         slot_id = os.urandom(32)
@@ -414,7 +414,7 @@ class TestStoragePayment(unittest.TestCase):
         sender_pk, sender_key = seed_sender_account(self.block, balance=1_000_000)
         storage_account = self.block.accounts.get_account(STORAGE_ADDRESS, self.node)
 
-        storage_record_id = get_block_expr(self.prev_block).hash()
+        storage_id = get_block_expr(self.prev_block).hash()
 
         # Commit prev_block expr to storage (replicating transactions.py:205-217)
         result = generate_initial_storage_record(self.node, self.block, get_block_expr(self.prev_block))
@@ -423,7 +423,7 @@ class TestStoragePayment(unittest.TestCase):
         record.mint = True
         record.last_payment_winner = sender_pk  # make sender the incumbent → base_bits=0
 
-        put_in_radix_tree(storage_account.data, self.node, storage_record_id, record.expr())
+        put_in_radix_tree(storage_account.data, self.node, storage_id, record.expr())
         for h, slot in slot_map.items():
             put_in_radix_tree(storage_account.data, self.node, h, slot.expr())
         for tn in storage_account.data.nodes.values():
@@ -437,7 +437,7 @@ class TestStoragePayment(unittest.TestCase):
         # Use the first slot from slot_map, patching its sequence to match challenge_index
         lbh = record.last_payment_block_hash
         challenge_index = int.from_bytes(
-            blake3(lbh + storage_record_id).digest()[:8], "little", signed=False
+            blake3(lbh + storage_id).digest()[:8], "little", signed=False
         ) % record.new_count
         first_expr_id, first_slot = next(iter(slot_map.items()))
         first_slot.sequence = challenge_index
@@ -450,7 +450,7 @@ class TestStoragePayment(unittest.TestCase):
         self.block.pending_exprs.append(first_slot.expr())
 
         # Build claim
-        payload = _build_claim_payload([(storage_record_id, slot_id, 0)])
+        payload = _build_claim_payload([(storage_id, slot_id, 0)])
         store_expr_tree(self.node, payload)
 
         flush_pending(self.node, self.block)

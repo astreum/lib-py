@@ -90,7 +90,7 @@ class StorageRecord:
 
 @dataclass
 class StorageSlot:
-    record_hash: bytes
+    storage_id: bytes
     sequence: int
     _expr: Optional[Expr] = field(default=None, repr=False, compare=False)
 
@@ -98,7 +98,7 @@ class StorageSlot:
         if self._expr is not None:
             return self._expr
         return Expr("link",
-            head_hash=self.record_hash,
+            head_hash=self.storage_id,
             tail=int_(self.sequence),
         )
 
@@ -119,7 +119,7 @@ class StorageSlot:
         if not get_expr_tag(tail, node) == "int":
             return None
         obj = cls(
-            record_hash=expr._head_hash,
+            storage_id=expr._head_hash,
             sequence=get_expr_value(tail, node),
         )
         obj._expr = expr

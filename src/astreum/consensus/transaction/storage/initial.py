@@ -33,7 +33,7 @@ def generate_initial_storage_record(
     if existing is not None:
         return None  # Already registered — nothing to do
 
-    record_hash = root_hash
+    storage_id = root_hash
     slot_map: dict[bytes, StorageSlot] = {}
     found_exprs: list[bytes] = []
     total_new_size = 0
@@ -46,7 +46,7 @@ def generate_initial_storage_record(
                 found_exprs.append(h)
             return  # Already slotted or shared reference — skip entire subtree
         slot_map[h] = StorageSlot(
-            record_hash=record_hash,
+            storage_id=storage_id,
             sequence=len(slot_map),
         )
         total_new_size += sub_expr.size()

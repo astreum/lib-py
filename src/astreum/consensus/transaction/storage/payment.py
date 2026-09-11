@@ -51,7 +51,7 @@ def _required_bits(*, sender: bytes, last_payment_winner: bytes,
 def _parse_claim(claim_expr: Expr) -> tuple[bytes, bytes, int] | None:
     """Parse a single claim from its Expr representation.
 
-    Claim format: Link(Bytes(storage_record_id), Link(Bytes(storage_slot_id), Link(Int(nonce), NIL)))
+    Claim format: Link(Bytes(storage_id), Link(Bytes(slot_id), Link(Int(nonce), NIL)))
     """
     if not claim_expr._tag == "link":
         return None
@@ -59,18 +59,18 @@ def _parse_claim(claim_expr: Expr) -> tuple[bytes, bytes, int] | None:
     tail = claim_expr._tail
     if not head._tag == "bytes" or not tail._tag == "link":
         return None
-    storage_record_id = head.value
+    storage_id = head.value
     head2 = tail._head
     tail2 = tail._tail
     if not head2._tag == "bytes" or not tail2._tag == "link":
         return None
-    storage_slot_id = head2.value
+    slot_id = head2.value
     head3 = tail2._head
     tail3 = tail2._tail
     if not head3._tag == "int" or tail3 is not NIL:
         return None
     nonce = head3.value
-    return storage_record_id, storage_slot_id, nonce
+    return storage_id, slot_id, nonce
 
 
 def _verify_single_claim(
@@ -81,10 +81,10 @@ def _verify_single_claim(
     claim: tuple[bytes, bytes, int],
 ) -> bool:
     """Verify and pay out a single storage claim. Returns True on success."""
-    storage_record_id, storage_slot_id, nonce = claim
+    storage_id, slot_id, nonce = claim
 
     # 1. Fetch StorageRecord from storage trie
-    contract_head = get_from_radix_tree(storage_account.data, node, storage_record_id)
+    contract_head = get_from_radix_tree(storage_account.data, node, storage_id)
     if not contract_head or contract_head == ZERO32:
         return False
     record = StorageRecord.from_storage(node, contract_head.hash())
@@ -96,23 +96,23 @@ def _verify_single_claim(
         return False
 
     # 2. Derive challenge index
-    challenge_seed = blake3(last_payment_block_hash + storage_record_id).digest()
+    challenge_seed = blake3(last_payment_block_hash + storage_id).digest()
     challenge_index = (
         int.from_bytes(challenge_seed[:8], "little", signed=False) % record.new_count
     )
 
     # 3. Fetch StorageSlot from storage trie, verify it belongs to this record
-    slot = StorageSlot.from_storage(node, storage_slot_id)
+    slot = StorageSlot.from_storage(node, slot_id)
     if slot is None:
         return False
-    if slot.record_hash != storage_record_id:
+    if slot.storage_id != storage_id:
         return False
     if slot.sequence != challenge_index:
         return False
 
     # 4. Fetch data via STORAGE_GET from network
     from astreum.storage.exprs import get_expr_from_local_storage
-    data_expr = get_expr_from_local_storage(node, storage_slot_id)
+    data_expr = get_expr_from_local_storage(node, slot_id)
     if data_expr is None:
         return False
 
@@ -124,8 +124,8 @@ def _verify_single_claim(
     work_hash = blake3(
         last_payment_block_hash
         + sender_bytes
-        + storage_record_id
-        + storage_slot_id
+        + storage_id
+        + slot_id
         + fetched_data_bytes
         + nonce_encoded
     ).digest()
@@ -175,7 +175,7 @@ def handle_storage_payment_contract(
     Multi-claim: each claim is verified independently.  Invalid claims are
     silently skipped.  The transaction succeeds if at least one claim is valid.
     The record is updated only for the last valid claim (all share the same
-    ``storage_record_id`` per the plan — or we could support multiple records
+    ``storage_id`` per the plan — or we could support multiple records
     by tracking the last update per record key).
 
     Returns (any_valid, total_minted) where total_minted is the sum of payouts
@@ -199,13 +199,13 @@ def handle_storage_payment_contract(
 
         # Verify each claim; collect the last valid record update data
         last_valid_record: StorageRecord | None = None
-        last_valid_storage_record_id: bytes | None = None
+        last_valid_storage_id: bytes | None = None
         any_valid = False
         minted_sum = 0
 
-        for storage_record_id, storage_slot_id, nonce in parsed_claims:
+        for storage_id, slot_id, nonce in parsed_claims:
             # Fetch StorageRecord
-            contract_head = get_from_radix_tree(storage_account.data, node, storage_record_id)
+            contract_head = get_from_radix_tree(storage_account.data, node, storage_id)
             if not contract_head or contract_head == ZERO32:
                 continue
             record = StorageRecord.from_storage(node, contract_head.hash())
@@ -217,23 +217,23 @@ def handle_storage_payment_contract(
                 continue
 
             # Derive challenge index
-            challenge_seed = blake3(last_payment_block_hash + storage_record_id).digest()
+            challenge_seed = blake3(last_payment_block_hash + storage_id).digest()
             challenge_index = (
                 int.from_bytes(challenge_seed[:8], "little", signed=False) % record.new_count
             )
 
             # Fetch StorageSlot, verify it belongs to this record
-            slot = StorageSlot.from_storage(node, storage_slot_id)
+            slot = StorageSlot.from_storage(node, slot_id)
             if slot is None:
                 continue
-            if slot.record_hash != storage_record_id:
+            if slot.storage_id != storage_id:
                 continue
             if slot.sequence != challenge_index:
                 continue
 
             # Fetch data from network
             from astreum.storage.exprs import get_expr_from_local_storage
-            data_expr = get_expr_from_local_storage(node, storage_slot_id)
+            data_expr = get_expr_from_local_storage(node, slot_id)
             if data_expr is None:
                 continue
 
@@ -243,8 +243,8 @@ def handle_storage_payment_contract(
             work_hash = blake3(
                 last_payment_block_hash
                 + sender_bytes
-                + storage_record_id
-                + storage_slot_id
+                + storage_id
+                + slot_id
                 + fetched_data_bytes
                 + nonce_encoded
             ).digest()
@@ -279,7 +279,7 @@ def handle_storage_payment_contract(
                 new_size=record.new_size,
                 new_count=record.new_count,
             )
-            last_valid_storage_record_id = storage_record_id
+            last_valid_storage_id = storage_id
             any_valid = True
 
         if not any_valid:
@@ -287,7 +287,7 @@ def handle_storage_payment_contract(
 
         # Update the storage trie for the last valid record
         updated_record_head = last_valid_record.expr().hash()
-        put_in_radix_tree(storage_account.data, node, last_valid_storage_record_id, updated_record_head)
+        put_in_radix_tree(storage_account.data, node, last_valid_storage_id, updated_record_head)
         storage_account.data_hash = storage_account.data.root_hash
 
         inner_exprs, _ = resolve_inner_exprs(node, last_valid_record.expr())

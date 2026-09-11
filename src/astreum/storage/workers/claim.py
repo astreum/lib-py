@@ -24,14 +24,14 @@ if TYPE_CHECKING:
 
 def _compute_pow_and_challenge(
     node: Node,
-    record_id: bytes,
+    storage_id: bytes,
     record: StorageRecord,
 ) -> tuple[bytes, bytes, int] | None:
     """Compute a PoW claim for the given record.
 
     The challenged slot's data id is resolved from the record's value blob in
     the records table (byte offset = sequence).  Returns
-    (storage_record_id, storage_slot_id, nonce) or None if unavailable.
+    (storage_id, slot_id, nonce) or None if unavailable.
     """
     last_payment_block_hash = record.last_payment_block_hash
     if len(last_payment_block_hash) != 32:
@@ -40,24 +40,24 @@ def _compute_pow_and_challenge(
         return None
 
     # Determine which slot to challenge
-    challenge_seed = blake3(last_payment_block_hash + record_id).digest()
+    challenge_seed = blake3(last_payment_block_hash + storage_id).digest()
     challenge_index = (
         int.from_bytes(challenge_seed[:8], "little", signed=False) % record.new_count
     )
 
     # Resolve the challenged slot from the records table value blob
-    value = get_record_from_cold_storage(node, record_id)
+    value = get_record_from_cold_storage(node, storage_id)
     if value is None:
         return None
     offset = challenge_index * 32
     if offset + 32 > len(value):
         return None
-    storage_slot_id = value[offset : offset + 32]
-    if storage_slot_id == ZERO32 or len(storage_slot_id) != 32:
+    slot_id = value[offset : offset + 32]
+    if slot_id == ZERO32 or len(slot_id) != 32:
         return None
 
     # Fetch the actual data
-    data_expr = get_expr_from_local_storage(node, storage_slot_id)
+    data_expr = get_expr_from_local_storage(node, slot_id)
     if data_expr is None:
         return None
 
@@ -74,7 +74,6 @@ def _compute_pow_and_challenge(
     )
 
     # Brute-force PoW
-    storage_record_id = record_id
     nonce = 0
     max_nonce = 1 << 30
     while nonce < max_nonce:
@@ -82,13 +81,13 @@ def _compute_pow_and_challenge(
         work_hash = blake3(
             last_payment_block_hash
             + sender_bytes
-            + storage_record_id
-            + storage_slot_id
+            + storage_id
+            + slot_id
             + fetched_data_bytes
             + nonce_encoded
         ).digest()
         if _leading_zero_bits(work_hash) >= required_bits:
-            return storage_record_id, storage_slot_id, nonce
+            return storage_id, slot_id, nonce
         nonce += 1
 
     return None
@@ -127,11 +126,11 @@ def _build_multi_claim_tx(
 ) -> object:
     """Build a signed STORAGE_PAYMENT transaction with the given claims."""
     claims_expr = NIL
-    for storage_record_id, storage_slot_id, nonce in reversed(claims):
+    for storage_id, slot_id, nonce in reversed(claims):
         claim = link(
-            bytes_(storage_record_id),
+            bytes_(storage_id),
             link(
-                bytes_(storage_slot_id),
+                bytes_(slot_id),
                 link(int_(nonce), NIL),
             ),
         )
@@ -156,7 +155,7 @@ def _build_claims_for_records(
 ) -> list[tuple[bytes, bytes, int, int]]:
     """Evaluate every record in the records table and build eligible claims.
 
-    Returns ``(storage_record_id, storage_slot_id, nonce, payout)`` tuples,
+    Returns ``(storage_id, slot_id, nonce, payout)`` tuples,
     where ``payout = new_size × (block_height − last_payment_height)``
     mirrors the reward calculation in ``storage/payment.py`` so the submit
     gate can check the bundle's aggregate economics.
@@ -170,15 +169,15 @@ def _build_claims_for_records(
     if hasattr(latest_block, "accounts"):
         storage_account = latest_block.accounts.get_account(STORAGE_ADDRESS, node)
 
-    for record_id in iter_records_in_cold_storage(node):
-        if record_id in seen:
+    for storage_id in iter_records_in_cold_storage(node):
+        if storage_id in seen:
             continue
-        seen.add(record_id)
+        seen.add(storage_id)
 
         contract_head = None
         try:
             if storage_account is not None:
-                contract_head = get_from_radix_tree(storage_account.data, node, record_id)
+                contract_head = get_from_radix_tree(storage_account.data, node, storage_id)
         except Exception:
             continue
         if not contract_head:
@@ -188,22 +187,22 @@ def _build_claims_for_records(
         if record is None:
             continue
 
-        current_spacing = spacing_eras.get(record_id, 1)
+        current_spacing = spacing_eras.get(storage_id, 1)
         eras_elapsed = (latest_block.height - record.last_payment_height) // ERA_SIZE
         payout = record.new_size * (latest_block.height - record.last_payment_height)
 
         if record.last_payment_winner == node.storage_public_key_bytes:
             # We're incumbent
             if eras_elapsed >= current_spacing:
-                claim = _compute_pow_and_challenge(node, record_id, record)
+                claim = _compute_pow_and_challenge(node, storage_id, record)
                 if claim is not None:
                     claims_to_make.append((*claim, payout))
-                    spacing_eras[record_id] = min(current_spacing + 1, 4)
+                    spacing_eras[storage_id] = min(current_spacing + 1, 4)
         else:
             # Someone else is incumbent
-            spacing_eras[record_id] = 1  # reset
+            spacing_eras[storage_id] = 1  # reset
             if eras_elapsed >= 5:  # wall dropping (fib(8)=21, ~2Mx harder)
-                claim = _compute_pow_and_challenge(node, record_id, record)
+                claim = _compute_pow_and_challenge(node, storage_id, record)
                 if claim is not None:
                     claims_to_make.append((*claim, payout))
     return claims_to_make

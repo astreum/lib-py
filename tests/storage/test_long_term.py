@@ -111,7 +111,7 @@ class TestFetchAndStoreRecord(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.node = _make_node(self.temp_dir.name)
-        self.record_hash = b"\x0a" * 32
+        self.storage_id = b"\x0a" * 32
         self.leaf_a = link(int_(1), NIL)
         self.leaf_b = link(int_(2), NIL)
         self.other = link(int_(3), NIL)
@@ -124,7 +124,7 @@ class TestFetchAndStoreRecord(unittest.TestCase):
 
     def _run(self, root, trie_values, new_count):
         exprs = {
-            self.record_hash: root,
+            self.storage_id: root,
             self.leaf_a.hash(): self.leaf_a,
             self.leaf_b.hash(): self.leaf_b,
             self.other.hash(): self.other,
@@ -137,29 +137,29 @@ class TestFetchAndStoreRecord(unittest.TestCase):
             side_effect=lambda tree, n, h: trie_values.get(h),
         ):
             return fetch_and_store_record(
-                self.node, self.record_hash, SimpleNamespace(), new_count
+                self.node, self.storage_id, SimpleNamespace(), new_count
             )
 
-    def _slot(self, record_hash, sequence):
-        return StorageSlot(record_hash=record_hash, sequence=sequence).expr()
+    def _slot(self, storage_id, sequence):
+        return StorageSlot(storage_id=storage_id, sequence=sequence).expr()
 
     def test_slots_written_in_sequence_order(self):
         root = self._shallow_root(self.leaf_a, self.leaf_b)
         trie = {
-            self.leaf_a.hash(): self._slot(self.record_hash, 0),
-            self.leaf_b.hash(): self._slot(self.record_hash, 1),
+            self.leaf_a.hash(): self._slot(self.storage_id, 0),
+            self.leaf_b.hash(): self._slot(self.storage_id, 1),
         }
         self.assertTrue(self._run(root, trie, 2))
         self.assertEqual(
-            get_record_from_cold_storage(self.node, self.record_hash),
+            get_record_from_cold_storage(self.node, self.storage_id),
             self.leaf_a.hash() + self.leaf_b.hash(),
         )
 
     def test_cold_files_written_for_root_and_subexprs(self):
         root = self._shallow_root(self.leaf_a, self.leaf_b)
         trie = {
-            self.leaf_a.hash(): self._slot(self.record_hash, 0),
-            self.leaf_b.hash(): self._slot(self.record_hash, 1),
+            self.leaf_a.hash(): self._slot(self.storage_id, 0),
+            self.leaf_b.hash(): self._slot(self.storage_id, 1),
         }
         self.assertTrue(self._run(root, trie, 2))
         for expr in (root, self.leaf_a, self.leaf_b):
@@ -172,12 +172,12 @@ class TestFetchAndStoreRecord(unittest.TestCase):
         # list and its subtree is not walked.
         root = self._shallow_root(self.leaf_a, self.other)
         trie = {
-            self.leaf_a.hash(): self._slot(self.record_hash, 0),
+            self.leaf_a.hash(): self._slot(self.storage_id, 0),
             self.other.hash(): self._slot(b"\x99" * 32, 0),
         }
         self.assertTrue(self._run(root, trie, 2))
         self.assertEqual(
-            get_record_from_cold_storage(self.node, self.record_hash),
+            get_record_from_cold_storage(self.node, self.storage_id),
             self.leaf_a.hash() + ZERO32,
         )
         self.assertIsNone(get_expr_from_cold_storage(self.node, self.other.hash()))
@@ -187,21 +187,21 @@ class TestFetchAndStoreRecord(unittest.TestCase):
             "astreum.storage.exprs.cascade.get_expr", return_value=None
         ):
             result = fetch_and_store_record(
-                self.node, self.record_hash, SimpleNamespace(), 2
+                self.node, self.storage_id, SimpleNamespace(), 2
             )
         self.assertFalse(result)
-        self.assertIsNone(get_record_from_cold_storage(self.node, self.record_hash))
+        self.assertIsNone(get_record_from_cold_storage(self.node, self.storage_id))
 
     def test_idempotent_when_everything_local(self):
         root = self._shallow_root(self.leaf_a, self.leaf_b)
         trie = {
-            self.leaf_a.hash(): self._slot(self.record_hash, 0),
-            self.leaf_b.hash(): self._slot(self.record_hash, 1),
+            self.leaf_a.hash(): self._slot(self.storage_id, 0),
+            self.leaf_b.hash(): self._slot(self.storage_id, 1),
         }
         self.assertTrue(self._run(root, trie, 2))
-        first = get_record_from_cold_storage(self.node, self.record_hash)
+        first = get_record_from_cold_storage(self.node, self.storage_id)
         self.assertTrue(self._run(root, trie, 2))
-        self.assertEqual(get_record_from_cold_storage(self.node, self.record_hash), first)
+        self.assertEqual(get_record_from_cold_storage(self.node, self.storage_id), first)
 
 
 REC_HASH = b"\x0b" * 32

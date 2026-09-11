@@ -200,7 +200,7 @@ class TestBuildClaimsCollectsPayouts(unittest.TestCase):
         self.secret, self.public = _make_keys()
         self.pk = _public_bytes(self.public)
         self.other_pk = _public_bytes(ed25519.Ed25519PrivateKey.generate().public_key())
-        self.record_id = b"\x0c" * 32
+        self.storage_id = b"\x0c" * 32
         self.slot_id = b"\x0d" * 32
         self.contract_head = SimpleNamespace(hash=lambda: b"\x0e" * 32)
 
@@ -227,13 +227,13 @@ class TestBuildClaimsCollectsPayouts(unittest.TestCase):
             accounts=_AccountsStub(account=SimpleNamespace(data=None)),
         )
         with patch.object(
-            claim_mod, "iter_records_in_cold_storage", return_value=iter([self.record_id])
+            claim_mod, "iter_records_in_cold_storage", return_value=iter([self.storage_id])
         ), patch.object(claim_mod, "get_from_radix_tree", return_value=self.contract_head), patch.object(
             claim_mod.StorageRecord, "from_storage", return_value=self._record(winner)
         ), patch.object(
             claim_mod,
             "_compute_pow_and_challenge",
-            return_value=(self.record_id, self.slot_id, 7),
+            return_value=(self.storage_id, self.slot_id, 7),
         ):
             return _build_claims_for_records(node, latest_block, {})
 
@@ -242,14 +242,14 @@ class TestBuildClaimsCollectsPayouts(unittest.TestCase):
         node = self._node(self.other_pk)
         entries = self._run(node, self.other_pk, 6 * self.ERA_SIZE)
         self.assertEqual(
-            entries, [(self.record_id, self.slot_id, 7, 100 * 6 * self.ERA_SIZE)]
+            entries, [(self.storage_id, self.slot_id, 7, 100 * 6 * self.ERA_SIZE)]
         )
 
     def test_incumbent_branch_payout(self):
         node = self._node(self.pk)
         entries = self._run(node, self.pk, 2 * self.ERA_SIZE)
         self.assertEqual(
-            entries, [(self.record_id, self.slot_id, 7, 100 * 2 * self.ERA_SIZE)]
+            entries, [(self.storage_id, self.slot_id, 7, 100 * 2 * self.ERA_SIZE)]
         )
 
     def test_young_record_skipped(self):

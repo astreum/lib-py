@@ -85,9 +85,9 @@ def _long_term_store_one(node: "Node") -> bool:
         return False
     cursor = node.long_term_cursor % len(keys)
     node.long_term_cursor = cursor + 1
-    record_hash = keys[cursor]
+    storage_id = keys[cursor]
 
-    if get_record_from_cold_storage(node, record_hash) is not None:
+    if get_record_from_cold_storage(node, storage_id) is not None:
         return False  # already stored
 
     block = getattr(node, "latest_block", None)
@@ -98,11 +98,11 @@ def _long_term_store_one(node: "Node") -> bool:
         return False
 
     tree = RadixTree(root_hash=storage_account.data.root_hash)  # fresh per expr: bounded memory
-    new_count = parse_record_new_count(node, get_from_radix_tree(tree, node, record_hash))
+    new_count = parse_record_new_count(node, get_from_radix_tree(tree, node, storage_id))
     if new_count is None:
         return False
 
-    return fetch_and_store_record(node, record_hash, tree, new_count)
+    return fetch_and_store_record(node, storage_id, tree, new_count)
 
 
 def advertise_storage(astreum_node: "Node") -> None:
