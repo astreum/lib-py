@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import contextlib
+import os
 import socket
 import sys
 import threading
 import time
 import unittest
 from pathlib import Path
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT / "src"
@@ -18,16 +20,25 @@ if str(SRC_DIR) not in sys.path:
 from astreum.expression import (
     RESOLUTION_LIST,
     RESOLUTION_SINGLE,
+    ZERO32,
     Expr,
+    int_,
     resolve_inner_exprs,
     resolve_list_exprs,
 )
+from astreum.consensus.account import create_account
+from astreum.consensus.block.create import create_block
+from astreum.consensus.constants import STORAGE_ADDRESS
+from astreum.consensus.models.accounts import Accounts
 from astreum.node import Node
+from astreum.communication.node import connect_node
+from astreum.communication.disconnect import disconnect_node
 from astreum.communication.models.peer import get_peer
 from astreum.storage.exprs import get_expr
 from astreum.storage.exprs import get_expr_list
 from astreum.storage.exprs import put_expr_in_hot_storage
 from astreum.storage.advertisements import advertise_exprs
+from astreum.storage.radix import put_in_radix_tree
 from tests.storage.utils import generate_nearest_expr, generate_nearest_expr_list
 
 
@@ -45,11 +56,7 @@ class TestStorageIndexing(unittest.TestCase):
 
     @staticmethod
     def _shutdown_node(node: Node) -> None:
-        for attr in ("socket",):
-            sock = getattr(node, attr, None)
-            if sock is not None:
-                with contextlib.suppress(OSError):
-                    sock.close()
+        disconnect_node(node)
 
     @staticmethod
     def _get_free_port() -> int:
@@ -60,10 +67,19 @@ class TestStorageIndexing(unittest.TestCase):
     def _connect_nodes(self) -> tuple[Node, Node]:
         node_a_port = self._get_free_port()
         node_a = self._register_node(
-            Node({"port": node_a_port, "default_seed": None, "verbose": True})
+            Node(
+                {
+                    "port": node_a_port,
+                    "default_seed": None,
+                    "verbose": True,
+                    "storage_secret_key": Ed25519PrivateKey.generate(),
+                }
+            )
         )
 
-        node_a_thread = threading.Thread(target=node_a.connect, daemon=True)
+        node_a_thread = threading.Thread(
+            target=connect_node, args=(node_a,), daemon=True
+        )
         node_a_thread.start()
         node_a_thread.join(timeout=5)
         self.assertTrue(node_a.is_connected)
@@ -79,23 +95,25 @@ class TestStorageIndexing(unittest.TestCase):
                     "default_seed": None,
                     "additional_seeds": [f"{bootstrap_host}:{bootstrap_port}"],
                     "verbose": True,
+                    "storage_secret_key": Ed25519PrivateKey.generate(),
                 }
             )
         )
 
-        node_b_thread = threading.Thread(target=node_b.connect, daemon=True)
+        node_b_thread = threading.Thread(
+            target=connect_node, args=(node_b,), daemon=True
+        )
         node_b_thread.start()
         node_b_thread.join(timeout=5)
 
         self.assertTrue(node_b.is_connected)
 
-        node_a_peer_key = getattr(node_b, "relay_public_key_bytes", None)
-        node_b_peer_key = getattr(node_a, "relay_public_key_bytes", None)
+        node_a_peer_key = node_b.storage_public_key_bytes
+        node_b_peer_key = node_a.storage_public_key_bytes
         self.assertIsNotNone(node_a_peer_key)
         self.assertIsNotNone(node_b_peer_key)
 
         deadline = time.time() + 10
-
         while time.time() < deadline:
             if get_peer(node_a, node_a_peer_key):
                 break
@@ -103,6 +121,7 @@ class TestStorageIndexing(unittest.TestCase):
         else:
             self.fail("node_a did not register node_b before timeout")
 
+        deadline = time.time() + 10
         while time.time() < deadline:
             if get_peer(node_b, node_b_peer_key):
                 break
@@ -111,6 +130,42 @@ class TestStorageIndexing(unittest.TestCase):
             self.fail("node_b did not register node_a before timeout")
 
         return node_a, node_b
+
+    @staticmethod
+    def _commit_storage_keys(node: Node, *keys: bytes) -> None:
+        """Commit *keys* into *node*'s latest block storage-account trie.
+
+        The ``STORAGE_PUT`` admission gate requires the advertised expr to be
+        a key in the latest block's storage-account data trie.  Build a real
+        (in-memory) ``Block`` whose ``STORAGE_ADDRESS`` account holds a
+        ``RadixTree``, then insert the keys into that trie.
+        """
+        tree = getattr(node, "_test_storage_tree", None)
+        if tree is None:
+            block = create_block(
+                chain_id=node.config["chain_id"],
+                previous_block_hash=ZERO32,
+                previous_block=None,
+                height=0,
+                timestamp=0,
+                accounts_hash=ZERO32,
+                total_transaction_fee=0,
+                total_storage_fee=0,
+                transactions_hash=ZERO32,
+                receipts_hash=ZERO32,
+                difficulty=1,
+                validator_public_key_bytes=os.urandom(32),
+                expr_id=os.urandom(32),
+                accounts=Accounts(),
+            )
+            storage_account = create_account()
+            block.accounts.set_account(STORAGE_ADDRESS, storage_account)
+            tree = storage_account.data
+            node._test_storage_tree = tree
+            node.latest_block = block
+            node.latest_block_hash = block.expr_id
+        for key in keys:
+            put_in_radix_tree(tree, node, key, int_(0))
 
     def test_closest_atom_advertisement(self) -> None:
         """
@@ -123,8 +178,8 @@ class TestStorageIndexing(unittest.TestCase):
         """
         node_a, node_b = self._connect_nodes()
 
-        print(f"Node A ID: {node_a.relay_public_key_bytes.hex()}")
-        print(f"Node B ID: {node_b.relay_public_key_bytes.hex()}")
+        print(f"Node A ID: {node_a.storage_public_key_bytes.hex()}")
+        print(f"Node B ID: {node_b.storage_public_key_bytes.hex()}")
 
         def wait_for_index(expr_id: bytes, label: str) -> None:
             deadline = time.time() + 10
@@ -166,8 +221,8 @@ class TestStorageIndexing(unittest.TestCase):
             self.fail(f"Node B did not fetch the advertised {label}")
 
         target_expr = generate_nearest_expr(
-            node_a.relay_public_key_bytes,
-            node_b.relay_public_key_bytes,
+            node_a.storage_public_key_bytes,
+            node_b.storage_public_key_bytes,
         )
         expr_id = target_expr.hash()
 
@@ -175,6 +230,11 @@ class TestStorageIndexing(unittest.TestCase):
         exprs, _ = resolve_inner_exprs(node_a, target_expr)
         for expr in exprs:
             self.assertTrue(put_expr_in_hot_storage(node_a, expr), "node_a failed to store expr")
+
+        # Commit the expr and its sub-exprs into node_b's latest block before
+        # advertising: the admission gate rejects uncommitted exprs on both the
+        # incoming STORAGE_PUT and the fetched STORAGE_FOUND response.
+        self._commit_storage_keys(node_b, *(e.hash() for e in exprs))
 
         # Advertise it immediately
         print("Advertising expr from Node A...")
@@ -184,14 +244,15 @@ class TestStorageIndexing(unittest.TestCase):
 
         list_size = 4
         list_chain = generate_nearest_expr_list(
-            node_a.relay_public_key_bytes,
-            node_b.relay_public_key_bytes,
+            node_a.storage_public_key_bytes,
+            node_b.storage_public_key_bytes,
             list_size=list_size,
         )
         list_root_id = list_chain.hash()
         list_exprs, _ = resolve_inner_exprs(node_a, list_chain)
         for expr in list_exprs:
             self.assertTrue(put_expr_in_hot_storage(node_a, expr), "node_a failed to store list expr")
+        self._commit_storage_keys(node_b, *(e.hash() for e in list_exprs))
 
         print("Advertising list from Node A...")
         advertise_exprs(node_a, entries=[(list_root_id, RESOLUTION_LIST, None)])
