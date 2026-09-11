@@ -96,9 +96,11 @@ def handle_storage_response(node: "Node", peer: "Peer", message: Message) -> tup
                 sum(len(encode_expr_to_bytes(expr)) for expr in exprs),
             )
             hot_store_failures = 0
-            for expr in exprs:
+            for expr in exprs[1:]:
                 if not put_expr_in_hot_storage(node, expr):
                     hot_store_failures += 1
+            if not put_expr_in_hot_storage(node, exprs[0]):
+                hot_store_failures += 1
             if hot_store_failures:
                 return (
                     False,

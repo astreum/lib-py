@@ -17,11 +17,14 @@ from astreum.expression import (
     RESOLUTION_SINGLE,
     RESOLUTION_LIST,
     RESOLUTION_FULL,
+    RESOLUTION_RECORD,
+    ZERO32,
     collect_list,
     collect_full,
 )
 from astreum.expression.encoding import encode_expr_to_bytes
 from astreum.storage.exprs import get_expr_from_local_storage
+from astreum.storage.records import get_record_from_cold_storage
 from astreum.communication.util import xor_distance
 from astreum.storage.providers import provider_id_for_payload, provider_payload_for_id
 
@@ -37,6 +40,28 @@ def _collect_for_resolution(expr, desired: int) -> list:
     if desired >= RESOLUTION_LIST and expr._tag == "link":
         return collect_list(expr)
     return [expr]
+
+
+def _collect_record_exprs(node: "Node", root, storage_id: bytes) -> list | None:
+    """Assemble a record response: root plus locally-held slot data exprs.
+
+    Returns ``None`` when the records table has no entry for *storage_id*.
+    ``ZERO32`` slot positions are skipped; other records are left as hash
+    references.
+    """
+    blob = get_record_from_cold_storage(node, storage_id)
+    if blob is None:
+        return None
+    exprs = [root]
+    usable = len(blob) - (len(blob) % 32)
+    for offset in range(0, usable, 32):
+        slot_id = blob[offset : offset + 32]
+        if slot_id == ZERO32:
+            continue
+        slot_expr = get_expr_from_local_storage(node, slot_id)
+        if slot_expr is not None:
+            exprs.append(slot_expr)
+    return exprs
 
 
 def handle_storage_request(node: "Node", peer: "Peer", message: Message) -> tuple[bool, str | None]:
@@ -58,7 +83,16 @@ def handle_storage_request(node: "Node", peer: "Peer", message: Message) -> tupl
 
             local_atom = get_expr_from_local_storage(node, expr_id)
             if local_atom is not None:
-                exprs = _collect_for_resolution(local_atom, desired)
+                if desired == RESOLUTION_RECORD:
+                    exprs = _collect_record_exprs(node, local_atom, expr_id)
+                    if exprs is None:
+                        node.logger.debug(
+                            "STORAGE_GET %s requested as record but no records-table entry",
+                            expr_id.hex(),
+                        )
+                        return False, "not a record"
+                else:
+                    exprs = _collect_for_resolution(local_atom, desired)
                 shared_storage_size = sum(len(encode_expr_to_bytes(e)) for e in exprs)
                 if _requires_storage_channel(node, peer, shared_storage_size):
                     node.logger.info(
@@ -188,6 +222,24 @@ def handle_storage_request(node: "Node", peer: "Peer", message: Message) -> tupl
                     is_self_closest = self_distance <= peer_distance
 
             if is_self_closest:
+                from astreum.storage.admission import get_latest_storage_account
+                from astreum.storage.radix import get_from_radix_tree
+                from astreum.storage.records import parse_record_new_count
+
+                stored_value = None
+                storage_account = get_latest_storage_account(node)
+                if storage_account is not None:
+                    stored_value = get_from_radix_tree(
+                        storage_account.data, node, storage_request.expr_id
+                    )
+                if parse_record_new_count(node, stored_value) is None:
+                    node.logger.debug(
+                        "STORAGE_PUT skipped for %s from %s: not a record header",
+                        storage_request.expr_id.hex(),
+                        peer.address,
+                    )
+                    return True, None
+
                 node.logger.debug("Storing provider info for %s locally", storage_request.expr_id.hex())
                 provider_id = provider_id_for_payload(node, storage_request.data)
                 node.storage_index[storage_request.expr_id] = provider_id

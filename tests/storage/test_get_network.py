@@ -21,6 +21,7 @@ from astreum.expression import (
     RESOLUTION_SINGLE,
     RESOLUTION_LIST,
     RESOLUTION_FULL,
+    RESOLUTION_RECORD,
     int_,
     symbol,
     bytes_,
@@ -29,6 +30,7 @@ from astreum.expression import (
     collect_list,
     collect_full,
 )
+from astreum.communication.storage_request.handle import _collect_record_exprs
 from astreum.communication.storage_response.storage_found import (
     STORAGE_FOUND_PAYLOAD,
     encode_payload,
@@ -230,6 +232,65 @@ class TestObjectFoundCodec(unittest.TestCase):
         payload = (0).to_bytes(4, "big")
         with self.assertRaises(ValueError):
             decode_payload(payload)
+
+
+# ===========================================================================
+# TestCollectRecordExprs
+# ===========================================================================
+
+class TestCollectRecordExprs(unittest.TestCase):
+    """Unit tests for the record-aware serving assembly."""
+
+    def test_no_records_entry_returns_none(self) -> None:
+        node = _fake_node()
+        root = int_(1)
+        with patch(
+            "astreum.communication.storage_request.handle.get_record_from_cold_storage",
+            return_value=None,
+        ):
+            self.assertIsNone(_collect_record_exprs(node, root, root.hash()))
+
+    def test_root_first_and_slots_in_blob_order(self) -> None:
+        node = _fake_node()
+        root = int_(1)
+        slot_a = int_(2)
+        slot_b = int_(3)
+        blob = slot_a.hash() + ZERO32 + slot_b.hash()
+
+        def fake_local(_node, expr_id):
+            return {slot_a.hash(): slot_a, slot_b.hash(): slot_b}.get(expr_id)
+
+        with patch(
+            "astreum.communication.storage_request.handle.get_record_from_cold_storage",
+            return_value=blob,
+        ), patch(
+            "astreum.communication.storage_request.handle.get_expr_from_local_storage",
+            side_effect=fake_local,
+        ):
+            exprs = _collect_record_exprs(node, root, root.hash())
+
+        self.assertEqual(
+            [e.hash() for e in exprs],
+            [root.hash(), slot_a.hash(), slot_b.hash()],
+        )
+
+    def test_missing_and_zero_slots_are_skipped(self) -> None:
+        node = _fake_node()
+        root = int_(1)
+        present = int_(2)
+        missing = int_(3)
+        blob = present.hash() + ZERO32 + missing.hash()
+
+        with patch(
+            "astreum.communication.storage_request.handle.get_record_from_cold_storage",
+            return_value=blob,
+        ), patch(
+            "astreum.communication.storage_request.handle.get_expr_from_local_storage",
+            side_effect=lambda _node, h: present if h == present.hash() else None,
+        ):
+            exprs = _collect_record_exprs(node, root, root.hash())
+
+        self.assertEqual([e.hash() for e in exprs], [root.hash(), present.hash()])
 
 
 # ===========================================================================

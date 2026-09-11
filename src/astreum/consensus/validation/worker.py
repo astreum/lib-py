@@ -19,12 +19,13 @@ from astreum.consensus.block.encoding.decode import get_block_from_storage
 from astreum.consensus.transaction import Transaction, apply_transaction_obj
 from astreum.consensus.transaction.storage.initial import generate_initial_storage_record
 from astreum.consensus.transaction.storage.pending import add_pending_storage_contract, finalize_pending_storage_contract
+from astreum.consensus.transaction.storage.model import StorageRecord
 from astreum.storage.radix import get_radix_node_expr, put_in_radix_tree
 from astreum.storage.radix.node import radix_node_hash
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.validation.validator import current_validator
 from astreum.expression import ZERO32
-from astreum.expression import RESOLUTION_LIST
+from astreum.expression import RESOLUTION_RECORD
 from astreum.storage.advertisements import advertise_exprs
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.ping import Ping
@@ -43,24 +44,34 @@ def _process_trie_nodes(
     block: Block,
     nodes: Any,
     items: Any,
-) -> None:
+) -> list[bytes]:
+    """Generate storage records for a trie's nodes and return their storage ids.
+
+    The returned ids are the trie keys written for each freshly generated
+    record; already-registered nodes (``generate_initial_storage_record``
+    returns ``None``) contribute nothing.
+    """
+    generated: list[bytes] = []
     temp_exprs: dict[bytes, Expr] = {h: get_radix_node_expr(n) for h, n in items}
     for n in nodes:
         result = generate_initial_storage_record(node, block, get_radix_node_expr(n), temp_exprs, mint=True)
         if result is None:
             continue
         record, slot_map, _, _ = result
+        storage_id = radix_node_hash(n)
         storage_account = block.accounts.get_account(STORAGE_ADDRESS, node)
         if storage_account is not None:
-            put_in_radix_tree(storage_account.data, node, radix_node_hash(n), record.expr())
+            put_in_radix_tree(storage_account.data, node, storage_id, record.expr())
             for h, slot in slot_map.items():
                 put_in_radix_tree(storage_account.data, node, h, slot.expr())
             storage_account.data_hash = storage_account.data.root_hash
-        put_record_in_cold_storage(node, radix_node_hash(n), list(slot_map.keys()))
+        put_record_in_cold_storage(node, storage_id, list(slot_map.keys()))
         block.pending_exprs.append(record.expr())
         for slot in slot_map.values():
             block.pending_exprs.append(slot.expr())
         block.pending_exprs.append(get_radix_node_expr(n))
+        generated.append(storage_id)
+    return generated
 
 
 def make_validation_worker(
@@ -204,6 +215,8 @@ def make_validation_worker(
                 except Empty:
                     current_tx = None
 
+            storage_ids: list[bytes] = []
+
             if new_block.pending_storage_contracts:
                 contracts, _, refunds = finalize_pending_storage_contract(
                     node, new_block
@@ -213,6 +226,8 @@ def make_validation_worker(
                     for key, contract in contracts:
                         put_in_radix_tree(storage_account.data, node, key, contract.expr())
                         new_block.pending_exprs.append(contract.expr())
+                        if isinstance(contract, StorageRecord):
+                            storage_ids.append(key)
                     for trie_node in storage_account.data.nodes.values():
                         new_block.pending_exprs.append(get_radix_node_expr(trie_node))
                     storage_account.data_hash = storage_account.data.root_hash
@@ -296,8 +311,12 @@ def make_validation_worker(
                 for address, acct in new_block.accounts._cache.items():
                     if address == STORAGE_ADDRESS:
                         continue
-                    _process_trie_nodes(node, new_block, acct.data.nodes.values(), acct.data.nodes.items())
-                    _process_trie_nodes(node, new_block, acct.channels.nodes.values(), acct.channels.nodes.items())
+                    storage_ids.extend(
+                        _process_trie_nodes(node, new_block, acct.data.nodes.values(), acct.data.nodes.items())
+                    )
+                    storage_ids.extend(
+                        _process_trie_nodes(node, new_block, acct.channels.nodes.values(), acct.channels.nodes.items())
+                    )
 
                 seen = {e.hash() for e in pending_exprs}
                 for expr_item in extract_accounts_exprs(new_block.accounts):
@@ -384,13 +403,10 @@ def make_validation_worker(
             put_expr_in_cold_storage(node, get_block_expr(new_block))
 
             expires_at = time.time() + validator_advertisment_limit_seconds
-            advertisement_ids = [new_block_hash]
-            advertisement_ids.extend(
-                expr.hash() for expr in pending_exprs if expr.hash() != ZERO32
-            )
+            advertisement_ids = list(dict.fromkeys([new_block_hash, *storage_ids]))
             if advertisement_ids:
                 entries = [
-                    (expr_id, RESOLUTION_LIST, expires_at)
+                    (expr_id, RESOLUTION_RECORD, expires_at)
                     for expr_id in advertisement_ids
                 ]
                 advertised_ids, advertise_warning = advertise_exprs(node, entries=entries)

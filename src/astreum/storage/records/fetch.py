@@ -154,11 +154,12 @@ def fetch_and_store_record(
     Trie semantics mirror :func:`collect_record_slots` exactly: slot for this
     record fills its position and the subtree is still walked; slot for
     another record or a non-slot trie value skips the subtree; no trie value
-    walks through.  Children are fetched via :func:`get_expr` as encountered
-    and each fetched expr is cold-written immediately (which also sidesteps
-    hot-storage LRU eviction between fetch and write).  The records-table
-    entry is written only once the walk completes, so a failed walk leaves
-    the records table untouched.
+    walks through.  The root is fetched with ``RESOLUTION_RECORD`` so the
+    provider returns the record's own slot exprs alongside it; children are
+    then resolved from local storage only, and each resolved expr is
+    cold-written immediately (which also sidesteps hot-storage LRU eviction
+    between fetch and write).  The records-table entry is written only once
+    the walk completes, so a failed walk leaves the records table untouched.
 
     Args:
         node: A Node instance providing config and storage access.
@@ -170,9 +171,12 @@ def fetch_and_store_record(
         True on success, False if the record data could not be fetched
         or the records-table write failed.
     """
-    from astreum.storage.exprs.cascade import get_expr
+    from astreum.storage.exprs.network import get_expr_from_network
+    from astreum.expression import RESOLUTION_RECORD
 
-    root = get_expr(node, storage_id)  # hot -> cold -> network (indexed provider)
+    root = get_expr_from_local_storage(node, storage_id)
+    if root is None:
+        root = get_expr_from_network(node, storage_id, RESOLUTION_RECORD)
     if root is None:
         return False
     put_expr_in_cold_storage(node, root)
@@ -204,14 +208,16 @@ def fetch_and_store_record(
 
         put_expr_in_cold_storage(node, expr)
 
-        # Lazy resolution: one network fetch per child, as encountered.
+        # Children resolve from local storage only: the record-aware response
+        # already delivered this record's slots.  References into other records
+        # are left unresolved as hash references.
         if expr._head is None and expr._head_hash is not None:
-            resolved = get_expr(node, expr._head_hash)
+            resolved = get_expr_from_local_storage(node, expr._head_hash)
             if resolved is not None:
                 expr._head = resolved
                 expr._head_hash = None
         if expr._tail is None and expr._tail_hash is not None:
-            resolved = get_expr(node, expr._tail_hash)
+            resolved = get_expr_from_local_storage(node, expr._tail_hash)
             if resolved is not None:
                 expr._tail = resolved
                 expr._tail_hash = None

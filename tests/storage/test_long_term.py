@@ -130,7 +130,7 @@ class TestFetchAndStoreRecord(unittest.TestCase):
             self.other.hash(): self.other,
         }
         with patch(
-            "astreum.storage.exprs.cascade.get_expr",
+            "astreum.storage.records.fetch.get_expr_from_local_storage",
             side_effect=lambda n, h: exprs.get(h),
         ), patch(
             "astreum.storage.records.fetch.get_from_radix_tree",
@@ -184,7 +184,11 @@ class TestFetchAndStoreRecord(unittest.TestCase):
 
     def test_fetch_failure_writes_nothing(self):
         with patch(
-            "astreum.storage.exprs.cascade.get_expr", return_value=None
+            "astreum.storage.records.fetch.get_expr_from_local_storage",
+            return_value=None,
+        ), patch(
+            "astreum.storage.exprs.network.get_expr_from_network",
+            return_value=None,
         ):
             result = fetch_and_store_record(
                 self.node, self.storage_id, SimpleNamespace(), 2

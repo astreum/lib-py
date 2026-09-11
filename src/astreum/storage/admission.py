@@ -35,6 +35,15 @@ def is_expr_in_latest_block(node: "Node", expr_id: bytes) -> bool:
     return exists_in_radix_tree(storage_account.data, node, expr_id)
 
 
+def get_latest_storage_account(node: "Node") -> Optional["Account"]:
+    """Return the latest block's STORAGE_ADDRESS account, or None.
+
+    Public wrapper over the per-block-hash cached lookup in
+    :func:`_get_latest_storage_account`.
+    """
+    return _get_latest_storage_account(node)
+
+
 def _get_latest_storage_account(node: "Node") -> Optional["Account"]:
     """Fetch the STORAGE_ADDRESS account from ``node.latest_block``, cached per
     latest block hash so repeated admission checks cost one warm radix descent."""

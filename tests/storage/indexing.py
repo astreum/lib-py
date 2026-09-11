@@ -22,13 +22,13 @@ from astreum.expression import (
     RESOLUTION_SINGLE,
     ZERO32,
     Expr,
-    int_,
     resolve_inner_exprs,
     resolve_list_exprs,
 )
 from astreum.consensus.account import create_account
 from astreum.consensus.block.create import create_block
 from astreum.consensus.constants import STORAGE_ADDRESS
+from astreum.consensus.transaction.storage.model import StorageRecord
 from astreum.consensus.models.accounts import Accounts
 from astreum.node import Node
 from astreum.communication.node import connect_node
@@ -136,9 +136,10 @@ class TestStorageIndexing(unittest.TestCase):
         """Commit *keys* into *node*'s latest block storage-account trie.
 
         The ``STORAGE_PUT`` admission gate requires the advertised expr to be
-        a key in the latest block's storage-account data trie.  Build a real
+        a key in the latest block's storage-account data trie, and the index
+        gate requires its value to parse as a record header.  Build a real
         (in-memory) ``Block`` whose ``STORAGE_ADDRESS`` account holds a
-        ``RadixTree``, then insert the keys into that trie.
+        ``RadixTree``, then insert a ``StorageRecord`` header for each key.
         """
         tree = getattr(node, "_test_storage_tree", None)
         if tree is None:
@@ -164,8 +165,17 @@ class TestStorageIndexing(unittest.TestCase):
             node._test_storage_tree = tree
             node.latest_block = block
             node.latest_block_hash = block.expr_id
+        record_expr = StorageRecord(
+            creation_block_hash=ZERO32,
+            last_payment_block_hash=ZERO32,
+            last_payment_height=0,
+            last_payment_winner=ZERO32,
+            new_size=0,
+            new_count=0,
+            mint=True,
+        ).expr()
         for key in keys:
-            put_in_radix_tree(tree, node, key, int_(0))
+            put_in_radix_tree(tree, node, key, record_expr)
 
     def test_closest_atom_advertisement(self) -> None:
         """

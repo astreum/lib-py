@@ -10,7 +10,7 @@ from astreum.expression.encoding import encode_expr_to_bytes
 from astreum.expression import ZERO32, NIL
 from astreum.storage.radix import get_from_radix_tree, put_in_radix_tree
 from astreum.consensus.transaction.model import Transaction
-from astreum.consensus.transaction.storage.model import StorageRecord, StorageSlot
+from astreum.consensus.transaction.storage.model import StorageRecord
 from astreum.crypto.bloom_search import ERA_SIZE
 
 # Fib(13) = 233, largest fib <= 256-bit hash size
@@ -102,17 +102,28 @@ def _verify_single_claim(
     )
 
     # 3. Fetch StorageSlot from storage trie, verify it belongs to this record
-    slot = StorageSlot.from_storage(node, slot_id)
-    if slot is None:
+    from astreum.storage.records import parse_slot
+
+    parsed = parse_slot(node, get_from_radix_tree(storage_account.data, node, slot_id))
+    if parsed is None:
         return False
-    if slot.storage_id != storage_id:
+    parsed_storage_id, parsed_sequence = parsed
+    if parsed_storage_id != storage_id:
         return False
-    if slot.sequence != challenge_index:
+    if parsed_sequence != challenge_index:
         return False
 
-    # 4. Fetch data via STORAGE_GET from network
-    from astreum.storage.exprs import get_expr_from_local_storage
+    # 4. Fetch the slot data expr from local storage; pull the record if absent
+    from astreum.storage.exprs import (
+        get_expr_from_local_storage,
+        get_expr_from_network,
+    )
+    from astreum.expression import RESOLUTION_RECORD
+
     data_expr = get_expr_from_local_storage(node, slot_id)
+    if data_expr is None:
+        get_expr_from_network(node, storage_id, RESOLUTION_RECORD)
+        data_expr = get_expr_from_local_storage(node, slot_id)
     if data_expr is None:
         return False
 
@@ -223,17 +234,28 @@ def handle_storage_payment_contract(
             )
 
             # Fetch StorageSlot, verify it belongs to this record
-            slot = StorageSlot.from_storage(node, slot_id)
-            if slot is None:
+            from astreum.storage.records import parse_slot
+
+            parsed = parse_slot(node, get_from_radix_tree(storage_account.data, node, slot_id))
+            if parsed is None:
                 continue
-            if slot.storage_id != storage_id:
+            parsed_storage_id, parsed_sequence = parsed
+            if parsed_storage_id != storage_id:
                 continue
-            if slot.sequence != challenge_index:
+            if parsed_sequence != challenge_index:
                 continue
 
-            # Fetch data from network
-            from astreum.storage.exprs import get_expr_from_local_storage
+            # Fetch the slot data expr; pull the record if not local
+            from astreum.storage.exprs import (
+                get_expr_from_local_storage,
+                get_expr_from_network,
+            )
+            from astreum.expression import RESOLUTION_RECORD
+
             data_expr = get_expr_from_local_storage(node, slot_id)
+            if data_expr is None:
+                get_expr_from_network(node, storage_id, RESOLUTION_RECORD)
+                data_expr = get_expr_from_local_storage(node, slot_id)
             if data_expr is None:
                 continue
 
