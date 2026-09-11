@@ -31,7 +31,7 @@ class TestTxLogOperator(unittest.TestCase):
 
     def _fake_add(self, node, block, dst, key, value):
         entry = type('Entry', (), {
-            'header_id': value.hash() if hasattr(value, 'hash') else b'',
+            'storage_id': value.hash() if hasattr(value, 'hash') else b'',
             'slot_entries': [],
             'locked': [],
         })()

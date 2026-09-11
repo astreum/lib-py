@@ -13,7 +13,6 @@ class PendingStorageContract:
     destination_addr: bytes | None
     key: bytes | None
     sender_addr: bytes | None
-    header_id: bytes
     storage_id: bytes
     record: StorageRecord
     slot_entries: list[tuple[bytes, StorageSlot]]
@@ -42,7 +41,6 @@ def add_pending_storage_contract(
         return None
 
     record, slot_map, found_exprs, fee = result
-    header_id = record.expr().hash()
     storage_id = value.hash()
     slot_entries = [(h, slot) for h, slot in slot_map.items()]
 
@@ -50,7 +48,7 @@ def add_pending_storage_contract(
     # earlier contract that introduced it
     for eid in found_exprs:
         for entry in block.pending_storage_contracts:
-            entry_ids = {entry.header_id} | {sid for sid, _ in entry.slot_entries}
+            entry_ids = {entry.storage_id} | {sid for sid, _ in entry.slot_entries}
             if eid in entry_ids:
                 if eid not in entry.locked:
                     entry.locked.append(eid)
@@ -61,7 +59,6 @@ def add_pending_storage_contract(
             destination_addr=destination_addr,
             key=key,
             sender_addr=destination_addr,
-            header_id=header_id,
             storage_id=storage_id,
             record=record,
             slot_entries=slot_entries,
@@ -83,10 +80,10 @@ def _recompute_locked(pending):
     for entry in pending:
         entry.locked = []
     for later_idx, later in enumerate(pending):
-        later_ids = {later.header_id} | {sid for sid, _ in later.slot_entries}
+        later_ids = {later.storage_id} | {sid for sid, _ in later.slot_entries}
         for eid in later_ids:
             for earlier in pending[:later_idx]:
-                earlier_ids = {earlier.header_id} | {sid for sid, _ in earlier.slot_entries}
+                earlier_ids = {earlier.storage_id} | {sid for sid, _ in earlier.slot_entries}
                 if eid in earlier_ids:
                     if eid not in earlier.locked:
                         earlier.locked.append(eid)
@@ -157,13 +154,13 @@ def finalize_pending_storage_contract(
             seen.add(dk)
         elif entry.locked:
             # Overwritten but has locked dependencies
-            if entry.header_id in entry.locked:
+            if entry.storage_id in entry.locked:
                 # Full contract preserved — keep everything, no refund
                 contracts.append((entry.storage_id, entry.record))
                 for sid, slot in entry.slot_entries:
                     contracts.append((sid, slot))
             else:
-                deletes.append(entry.header_id)
+                deletes.append(entry.storage_id)
                 # Non-locked old slots → deletes
                 for sid, _ in entry.slot_entries:
                     if sid not in entry.locked:
@@ -180,7 +177,6 @@ def finalize_pending_storage_contract(
                     )
                     if locked_result is not None:
                         new_record, new_slot_map, _, new_fee = locked_result
-                        new_header_id = new_record.expr().hash()
                         new_storage_id = locked_value.hash()
                         contracts.append((new_storage_id, new_record))
                         for new_sid, new_slot in new_slot_map.items():
@@ -190,7 +186,7 @@ def finalize_pending_storage_contract(
                             refunds.append((entry.sender_addr, refund))
         else:
             # Overwritten, no locked IDs
-            deletes.append(entry.header_id)
+            deletes.append(entry.storage_id)
             for sid, _ in entry.slot_entries:
                 deletes.append(sid)
             refunds.append((entry.sender_addr, entry.storage_fee))
