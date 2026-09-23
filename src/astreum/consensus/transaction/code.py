@@ -14,6 +14,7 @@ class TransactionCode(IntEnum):
     TREASURY_BORROW = 0x21
     TREASURY_REPAY = 0x22
     TREASURY_CLOSE = 0x23
+    TREASURY_SELL = 0x24
 
     STORAGE_CREATE = 0x30
     STORAGE_PAYMENT = 0x31

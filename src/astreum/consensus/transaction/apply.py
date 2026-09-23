@@ -29,6 +29,7 @@ from astreum.consensus.transaction.treasury.record import (
 )
 from astreum.consensus.transaction.treasury.close import handle_treasury_close
 from astreum.consensus.transaction.treasury.repay import handle_treasury_repay
+from astreum.consensus.transaction.treasury.offers import handle_treasury_sell
 
 
 # Transaction codes whose handler credits the sender mid-flow (so a pre-check on
@@ -87,7 +88,11 @@ def _apply_tx_effects(
         raise ValueError("insufficient balance for transaction fee")
 
     transfer_amount = transaction.amount
-    if transaction.code in (TransactionCode.CHANNEL_WITHDRAW, TransactionCode.TREASURY_BORROW):
+    if transaction.code in (
+        TransactionCode.CHANNEL_WITHDRAW,
+        TransactionCode.TREASURY_BORROW,
+        TransactionCode.TREASURY_SELL,
+    ):
         transfer_amount = 0
 
     # Counter guard (top-level only): a valid tx carries counter equal to the
@@ -299,6 +304,20 @@ def _apply_tx_effects(
                     transfer_amount = 0
             else:
                 transfer_amount = 0
+
+        case TransactionCode.TREASURY_SELL:
+            transfer_amount = 0
+            treasury_account = block.accounts.get_account(address=TREASURY_ADDRESS, node=node)
+            recipient_account = treasury_account
+            if receipt_status == STATUS_SUCCESS:
+                receipt_status = handle_treasury_sell(
+                    node=node,
+                    block=block,
+                    transaction=transaction,
+                    transaction_hash=transaction_hash,
+                    sender_account=sender_account,
+                    treasury_account=treasury_account,
+                )
 
         case TransactionCode.STORAGE_CREATE:
             (recipient_account, is_recipient_new) = _get_or_create_recipient_account()

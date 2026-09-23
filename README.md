@@ -9,6 +9,7 @@ Python library to interact with the Astreum blockchain and its virtual machine.
 - [Configuration](#configuration)
 - [Validation Overview](#validation-overview)
 - [Transaction Overview](#transaction-overview)
+- [Treasury Overview](#treasury-overview)
 - [Query API](#query-api)
 - [Language Syntax](#language-syntax)
 - [Machine Overview](#machine-overview)
@@ -134,6 +135,69 @@ print(tx_hash.hex())
 ```
 
 The node must already be connected and have a `latest_block`; otherwise the function raises `RuntimeError`. It writes the transaction's atoms to local storage, advertises them on the P2P network, and sends the transaction hash to peers on the validation route.
+
+
+## Treasury Overview
+
+The treasury account (`TREASURY_ADDRESS`) tracks per-participant state in a `TreasuryUserRecord`, keyed by address inside the treasury account's own data trie: staked `balance`, a `loans_root_hash` trie of secured loans, `total_interest_paid`, and an `offers_root_hash` trie of posted limit offers.
+
+### Limit offers (`TREASURY_SELL`)
+
+A limit seller posts a fixed-size, fixed-duration, fixed-price offer of capacity with `TREASURY_SELL`. The offer is stored in the seller's own `TreasuryUserRecord.offers_root_hash` trie, keyed by the hash of the transaction that created it — no principal moves on a post; the offer only becomes economically active once claimed.
+
+```python
+from astreum.consensus.transaction import create_transaction
+from astreum.consensus.transaction.code import TransactionCode
+from astreum.consensus.constants import TREASURY_ADDRESS
+
+tx = create_transaction(
+    chain_id=node.config["chain_id"],
+    counter=sender_account.counter + 1,
+    sender=sender_public_key,
+    recipient=TREASURY_ADDRESS,
+    code=TransactionCode.TREASURY_SELL,
+    limit=1_000,     # capacity this offer covers
+    duration=8,       # term in blocks; must be a power of 2
+    price=50,         # flat fee paid to the seller at claim time
+    expiry=100_000,   # block height after which an unclaimed offer can never be claimed
+)
+tx.sign(sender_key)
+```
+
+| Parameter  | Type  | Description |
+|------------|-------|--------------|
+| `limit`    | `int` | Exact capacity this offer covers. Must be `> 0`. |
+| `duration` | `int` | Term in blocks. Must be `> 0` and a power of 2. |
+| `price`    | `int` | Flat fee paid to the seller, in ASTR, in full, at claim time. Must be `>= 0`. |
+| `expiry`   | `int` | Block height after which an unclaimed offer can never be claimed. Must be greater than the current block height. |
+
+### `claim_offer(...)`
+
+Consumer-specific transaction handlers claim a posted offer directly against the seller's offers trie:
+
+```python
+from astreum.consensus.transaction.treasury.offers import claim_offer
+from astreum.storage.radix import RadixTree
+
+offers_trie = RadixTree(root_hash=seller_user_record.offers_root_hash)
+updated_offer = claim_offer(
+    offers_trie=offers_trie,
+    node=node,
+    offer_transaction_id=offer_tx_hash,   # the TREASURY_SELL tx hash that created the offer
+    claimant_id=claimant_id,              # opaque 32-byte id, e.g. a loan transaction hash
+    current_height=block.height,
+)
+```
+
+| Parameter | Type | Description |
+|-----------|------|--------------|
+| `offers_trie` | `RadixTree` | The seller's offers trie, opened from `TreasuryUserRecord.offers_root_hash`. |
+| `node` | `Node` | Storage node used to resolve and persist trie/expr data. |
+| `offer_transaction_id` | `bytes` | The 32-byte `TREASURY_SELL` transaction hash identifying the offer. |
+| `claimant_id` | `bytes` | Opaque 32-byte id recorded as the claimant. |
+| `current_height` | `int` | Current block height, used to reject claims past `expiry`. |
+
+Returns the updated (claimed) `TreasuryCreditOffer`, or `None` if the offer doesn't exist, is already claimed, or is expired (`current_height >= expiry`). **A claim is permanent** — once `claimed_by` is set it never resets, and there is no "free" operation or transaction code to release it. `claim_offer` does not touch the seller's `TreasuryUserRecord.offers_root_hash` field itself — the caller must write the trie's new root hash back into that field.
 
 
 ## Query API
@@ -677,14 +741,4 @@ python3 -m unittest discover -s tests
 
 ### Test summary
 
-| Package       | Test files | Tests | Status |
-| ------------- | ---------- | ----- | ------ |
-| machine       | 50         | 507   | ✅     |
-| consensus     | 21         | 97    | ✅     |
-| communication | 2          | 6     | ✅     |
-| crypto        | 5          | 28    | ✅     |
-| storage       | 5          | 45    | ✅     |
-| node          | 6          | 8     | ✅     |
-| utils         | 1          | 2     | ✅     |
-
-Run a single package, e.g. `python3 -m unittest discover -s tests/machine`.
+Each package under `tests/` (`machine`, `consensus`, `communication`, `crypto`, `storage`, `node`, `utils`) is covered by its own suite. Run a single package, e.g. `python3 -m unittest discover -s tests/machine`.

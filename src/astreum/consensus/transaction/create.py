@@ -37,6 +37,10 @@ def create_transaction(
     channel_close_op: bool = False,
     expr_list_id: Optional[bytes] = None,
     program_hash: Optional[bytes] = None,
+    limit: Optional[int] = None,
+    duration: Optional[int] = None,
+    price: Optional[int] = None,
+    expiry: Optional[int] = None,
     data: Expr = NIL,
 ) -> Transaction:
     _validate_params(
@@ -53,6 +57,10 @@ def create_transaction(
         payer=payer,
         expr_list_id=expr_list_id,
         program_hash=program_hash,
+        limit=limit,
+        duration=duration,
+        price=price,
+        expiry=expiry,
     )
 
     data = _build_data_expr(
@@ -70,6 +78,10 @@ def create_transaction(
         channel_close_op=channel_close_op,
         expr_list_id=expr_list_id,
         program_hash=program_hash,
+        limit=limit,
+        duration=duration,
+        price=price,
+        expiry=expiry,
     )
 
     tx = Transaction(
@@ -104,6 +116,10 @@ def _validate_params(
     payer: Optional[bytes] = None,
     expr_list_id: Optional[bytes] = None,
     program_hash: Optional[bytes] = None,
+    limit: Optional[int] = None,
+    duration: Optional[int] = None,
+    price: Optional[int] = None,
+    expiry: Optional[int] = None,
 ) -> None:
     match code:
         case TransactionCode.TRANSFER:
@@ -162,6 +178,16 @@ def _validate_params(
             if loan_transaction_id is None or len(loan_transaction_id) != LOAN_TRANSACTION_ID_SIZE:
                 raise ValueError("TREASURY_CLOSE requires loan_transaction_id (32 bytes)")
 
+        case TransactionCode.TREASURY_SELL:
+            if limit is None or limit <= 0:
+                raise ValueError("TREASURY_SELL requires limit > 0")
+            if duration is None or duration <= 0 or (duration & (duration - 1)) != 0:
+                raise ValueError("TREASURY_SELL requires duration > 0 and a power of 2")
+            if price is None or price < 0:
+                raise ValueError("TREASURY_SELL requires price >= 0")
+            if expiry is None:
+                raise ValueError("TREASURY_SELL requires expiry")
+
         case TransactionCode.STORAGE_CREATE:
             if expr_list_id is None or len(expr_list_id) != EXPR_LIST_ID_SIZE:
                 raise ValueError("STORAGE_CREATE requires expr_list_id (32 bytes)")
@@ -191,6 +217,10 @@ def _build_data_expr(
     channel_close_op: bool = False,
     expr_list_id: Optional[bytes] = None,
     program_hash: Optional[bytes] = None,
+    limit: Optional[int] = None,
+    duration: Optional[int] = None,
+    price: Optional[int] = None,
+    expiry: Optional[int] = None,
 ) -> Expr:
     match code:
         case TransactionCode.CHANNEL_UPDATE:
@@ -222,6 +252,18 @@ def _build_data_expr(
 
         case TransactionCode.TREASURY_REPAY | TransactionCode.TREASURY_CLOSE:
             return link(Expr("link", head_hash=loan_transaction_id), NIL)
+
+        case TransactionCode.TREASURY_SELL:
+            return link(
+                int_(limit),  # type: ignore[arg-type]
+                link(
+                    int_(duration),  # type: ignore[arg-type]
+                    link(
+                        int_(price),  # type: ignore[arg-type]
+                        link(int_(expiry), NIL),  # type: ignore[arg-type]
+                    ),
+                ),
+            )
 
         case TransactionCode.STORAGE_CREATE:
             return link(Expr("link", head_hash=expr_list_id), NIL)
