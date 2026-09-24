@@ -43,6 +43,9 @@ class Block:
     pending_storage_contracts: List["PendingStorageContract"]
     bloom_tree: Optional["BloomTree"]
     pending_bloom_keys: set[bytes]
+    global_loaned: int
+    global_defaulted: int
+    global_loan_count: int
     _expr: Optional["Expr"]
     
     def __init__(
@@ -74,6 +77,9 @@ class Block:
         statistics: Optional[list] = None,
         pending_exprs: Optional[List[Expr]] = None,
         pending_storage_contracts: Optional[List["PendingStorageContract"]] = None,
+        global_loaned: int = 0,
+        global_defaulted: int = 0,
+        global_loan_count: int = 0,
     ) -> None:
         self.expr_id = expr_id
         self.chain_id = chain_id
@@ -106,6 +112,9 @@ class Block:
         self.pending_storage_contracts = list(pending_storage_contracts or [])
         self.bloom_tree = None
         self.pending_bloom_keys = set()
+        self.global_loaned = global_loaned
+        self.global_defaulted = global_defaulted
+        self.global_loan_count = global_loan_count
         self._expr = None
 
     def snapshot(self) -> tuple:
@@ -116,14 +125,36 @@ class Block:
         saved_pending_exprs = list(self.pending_exprs)
         saved_pending_storage = list(self.pending_storage_contracts)
         saved_total_mint = self.total_mint
-        return (saved_cache, saved_pending_exprs, saved_pending_storage, saved_total_mint)
+        saved_global_loaned = self.global_loaned
+        saved_global_defaulted = self.global_defaulted
+        saved_global_loan_count = self.global_loan_count
+        return (
+            saved_cache,
+            saved_pending_exprs,
+            saved_pending_storage,
+            saved_total_mint,
+            saved_global_loaned,
+            saved_global_defaulted,
+            saved_global_loan_count,
+        )
 
     def restore(self, snapshot: tuple) -> None:
-        saved_cache, saved_pending_exprs, saved_pending_storage, saved_total_mint = snapshot
+        (
+            saved_cache,
+            saved_pending_exprs,
+            saved_pending_storage,
+            saved_total_mint,
+            saved_global_loaned,
+            saved_global_defaulted,
+            saved_global_loan_count,
+        ) = snapshot
         self.accounts._cache = saved_cache
         self.pending_exprs = saved_pending_exprs
         self.pending_storage_contracts = saved_pending_storage
         self.total_mint = saved_total_mint
+        self.global_loaned = saved_global_loaned
+        self.global_defaulted = saved_global_defaulted
+        self.global_loan_count = saved_global_loan_count
 
     @property
     def total_fee(self) -> int:

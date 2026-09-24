@@ -172,6 +172,9 @@ def make_validation_worker(
                 accounts=accounts_snapshot,
                 transactions=[],
                 receipts=[],
+                global_loaned=getattr(previous_block, "global_loaned", 0) or 0,
+                global_defaulted=getattr(previous_block, "global_defaulted", 0) or 0,
+                global_loan_count=getattr(previous_block, "global_loan_count", 0) or 0,
             )
             node.logger.debug(
                 "Creating block #%s extending %s",

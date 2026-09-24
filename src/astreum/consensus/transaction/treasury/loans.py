@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from astreum.expression import Expr, resolve_inner_exprs
@@ -85,21 +86,13 @@ def _apply_treasury_loan_payment(
     if interest_delta is None:
         return None
 
-    updated_loan = TreasuryLoanRecord(
-        creation_block_number=loan.creation_block_number,
-        loan_type=loan.loan_type,
-        discounted_amount=loan.discounted_amount,
-        payment_amount=loan.payment_amount,
-        payment_interval_blocks=loan.payment_interval_blocks,
-        next_payment_block_number=next_payment_block_number,
-        payment_count=loan.payment_count,
-    )
+    updated_loan = replace(loan, next_payment_block_number=next_payment_block_number)
     updated_loan_head = updated_loan.expr().hash()
     put_in_radix_tree(loans_trie, node, loan_transaction_id, updated_loan_head)
     loan_exprs, _ = resolve_inner_exprs(node, updated_loan.expr())
 
-    updated_user_record = TreasuryUserRecord(
-        balance=user_record.balance,
+    updated_user_record = replace(
+        user_record,
         loans_root_hash=loans_trie.root_hash or ZERO32,
         total_interest_paid=user_record.total_interest_paid + interest_delta,
     )
@@ -180,11 +173,7 @@ def apply_treasury_loan_payments_from_stake_return(
                 treasury_account=treasury_account,
                 borrower=borrower,
                 loans_trie=loans_trie,
-                user_record=TreasuryUserRecord(
-                    balance=next_balance,
-                    loans_root_hash=current_user_record.loans_root_hash,
-                    total_interest_paid=current_user_record.total_interest_paid,
-                ),
+                user_record=replace(current_user_record, balance=next_balance),
                 loan_transaction_id=loan_transaction_id,
                 loan=loan,
                 amount=loan.payment_amount,
@@ -210,15 +199,7 @@ def apply_treasury_loan_payments_from_stake_return(
                 next_pass_loans.append(
                     (
                         loan_transaction_id,
-                        TreasuryLoanRecord(
-                            creation_block_number=loan.creation_block_number,
-                            loan_type=loan.loan_type,
-                            discounted_amount=loan.discounted_amount,
-                            payment_amount=loan.payment_amount,
-                            payment_interval_blocks=loan.payment_interval_blocks,
-                            next_payment_block_number=next_payment_block_number,
-                            payment_count=loan.payment_count,
-                        ),
+                        replace(loan, next_payment_block_number=next_payment_block_number),
                     )
                 )
 

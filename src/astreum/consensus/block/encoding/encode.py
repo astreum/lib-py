@@ -59,6 +59,9 @@ def block_to_expr(block: Block) -> Expr:
     body = link(int_(block.chain_id), body)
     body = link(Expr("link", head_hash=block.bloom_hash), body)
     body = link(Expr("link", head_hash=block.accounts_hash), body)
+    body = link(int_(block.global_loan_count), body)
+    body = link(int_(block.global_defaulted), body)
+    body = link(int_(block.global_loaned), body)
     block.body_hash = body.hash()
     expr: Expr = link(
         link(body, link(bytes_(block.signature), NIL)),

@@ -9,7 +9,9 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from astreum.consensus.transaction.treasury.record import (
+    LoanType,
     TreasuryCreditOffer,
+    TreasuryLoanRecord,
     TreasuryUserRecord,
 )
 from astreum.expression import Expr, ZERO32, resolve_list_exprs
@@ -45,6 +47,9 @@ class TestTreasuryRecord(unittest.TestCase):
             loans_root_hash=loans_root_hash,
             total_interest_paid=3,
             offers_root_hash=offers_root_hash,
+            loaned=11,
+            defaulted=5,
+            sold_limit=13,
         )
 
         expr = record.expr()
@@ -52,7 +57,7 @@ class TestTreasuryRecord(unittest.TestCase):
 
         nodes, missed = resolve_list_exprs(_FakeNode(), expr)
         self.assertFalse(missed)
-        self.assertEqual(len(nodes), 4)
+        self.assertEqual(len(nodes), 7)
 
         self.assertEqual(nodes[0]._tag, "int")
         self.assertEqual(nodes[0].value, 7)  # balance
@@ -66,6 +71,15 @@ class TestTreasuryRecord(unittest.TestCase):
         self.assertEqual(nodes[3]._tag, "link")
         self.assertEqual(nodes[3]._head_hash, offers_root_hash)  # offers_root_hash ref
 
+        self.assertEqual(nodes[4]._tag, "int")
+        self.assertEqual(nodes[4].value, 11)  # loaned
+
+        self.assertEqual(nodes[5]._tag, "int")
+        self.assertEqual(nodes[5].value, 5)  # defaulted
+
+        self.assertEqual(nodes[6]._tag, "int")
+        self.assertEqual(nodes[6].value, 13)  # sold_limit
+
     def test_from_storage_round_trip(self):
         node = _FakeNode()
         record = TreasuryUserRecord(
@@ -73,6 +87,9 @@ class TestTreasuryRecord(unittest.TestCase):
             loans_root_hash=b"\x03" * 32,
             total_interest_paid=9,
             offers_root_hash=b"\x04" * 32,
+            loaned=100,
+            defaulted=20,
+            sold_limit=30,
         )
         expr = record.expr()
         node.hot_storage[expr.hash()] = expr
@@ -83,6 +100,31 @@ class TestTreasuryRecord(unittest.TestCase):
         self.assertEqual(loaded.loans_root_hash, b"\x03" * 32)
         self.assertEqual(loaded.total_interest_paid, 9)
         self.assertEqual(loaded.offers_root_hash, b"\x04" * 32)
+        self.assertEqual(loaded.loaned, 100)
+        self.assertEqual(loaded.defaulted, 20)
+        self.assertEqual(loaded.sold_limit, 30)
+
+    def test_from_storage_accepts_legacy_four_field_shape(self):
+        # A record written before loaned/defaulted/sold_limit existed must
+        # still decode, defaulting the new fields to 0.
+        node = _FakeNode()
+        from astreum.expression import NIL, int_, link
+
+        legacy_expr = link(Expr("link", head_hash=b"\x04" * 32), NIL)
+        legacy_expr = link(int_(9), legacy_expr)
+        legacy_expr = link(Expr("link", head_hash=b"\x03" * 32), legacy_expr)
+        legacy_expr = link(int_(42), legacy_expr)
+        node.hot_storage[legacy_expr.hash()] = legacy_expr
+
+        loaded = TreasuryUserRecord.from_storage(node, legacy_expr.hash())
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.balance, 42)
+        self.assertEqual(loaded.loans_root_hash, b"\x03" * 32)
+        self.assertEqual(loaded.total_interest_paid, 9)
+        self.assertEqual(loaded.offers_root_hash, b"\x04" * 32)
+        self.assertEqual(loaded.loaned, 0)
+        self.assertEqual(loaded.defaulted, 0)
+        self.assertEqual(loaded.sold_limit, 0)
 
     def test_from_storage_rejects_wrong_field_count(self):
         # A 3-field record (pre-extension shape) must not be misread as valid.
@@ -98,6 +140,83 @@ class TestTreasuryRecord(unittest.TestCase):
 
         loaded = TreasuryUserRecord.from_storage(node, legacy_expr.hash())
         self.assertIsNone(loaded)
+
+
+class TestTreasuryLoanRecord(unittest.TestCase):
+    def _base_kwargs(self):
+        return dict(
+            creation_block_number=10,
+            loan_type=LoanType.UNSECURED,
+            discounted_amount=900,
+            payment_amount=100,
+            payment_interval_blocks=5,
+            next_payment_block_number=15,
+            payment_count=10,
+        )
+
+    def test_round_trip_with_claimed_offers(self):
+        node = _FakeNode()
+        seller_a = b"\x11" * 32
+        seller_b = b"\x22" * 32
+        offer_a = b"\x33" * 32
+        offer_b = b"\x44" * 32
+        record = TreasuryLoanRecord(
+            **self._base_kwargs(),
+            claimed_offers=[(seller_a, offer_a, 500), (seller_b, offer_b, 400)],
+            insurance_fee=17,
+            missed_count=0,
+        )
+        expr = record.expr()
+        node.hot_storage[expr.hash()] = expr
+
+        loaded = TreasuryLoanRecord.from_storage(node, expr.hash())
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.creation_block_number, 10)
+        self.assertEqual(loaded.loan_type, LoanType.UNSECURED)
+        self.assertEqual(loaded.discounted_amount, 900)
+        self.assertEqual(loaded.payment_amount, 100)
+        self.assertEqual(loaded.payment_interval_blocks, 5)
+        self.assertEqual(loaded.next_payment_block_number, 15)
+        self.assertEqual(loaded.payment_count, 10)
+        self.assertEqual(
+            loaded.claimed_offers,
+            [(seller_a, offer_a, 500), (seller_b, offer_b, 400)],
+        )
+        self.assertEqual(loaded.insurance_fee, 17)
+        self.assertEqual(loaded.missed_count, 0)
+
+    def test_round_trip_empty_claimed_offers(self):
+        node = _FakeNode()
+        record = TreasuryLoanRecord(
+            **{**self._base_kwargs(), "loan_type": LoanType.SECURED},
+        )
+        expr = record.expr()
+        node.hot_storage[expr.hash()] = expr
+
+        loaded = TreasuryLoanRecord.from_storage(node, expr.hash())
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.claimed_offers, [])
+        self.assertEqual(loaded.insurance_fee, 0)
+        self.assertEqual(loaded.missed_count, 0)
+
+    def test_from_storage_accepts_legacy_seven_field_shape(self):
+        node = _FakeNode()
+        from astreum.expression import NIL, int_, link
+
+        legacy_expr = link(int_(5), NIL)  # payment_interval_blocks
+        legacy_expr = link(int_(100), legacy_expr)  # payment_amount
+        legacy_expr = link(int_(15), legacy_expr)  # next_payment_block_number
+        legacy_expr = link(int_(int(LoanType.SECURED)), legacy_expr)  # loan_type
+        legacy_expr = link(int_(10), legacy_expr)  # payment_count
+        legacy_expr = link(int_(900), legacy_expr)  # discounted_amount
+        legacy_expr = link(int_(10), legacy_expr)  # creation_block_number
+        node.hot_storage[legacy_expr.hash()] = legacy_expr
+
+        loaded = TreasuryLoanRecord.from_storage(node, legacy_expr.hash())
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.claimed_offers, [])
+        self.assertEqual(loaded.insurance_fee, 0)
+        self.assertEqual(loaded.missed_count, 0)
 
 
 class TestTreasuryCreditOffer(unittest.TestCase):

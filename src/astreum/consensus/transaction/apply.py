@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Tuple
 
 from astreum.expression import Expr, NIL
@@ -249,12 +250,9 @@ def _apply_tx_effects(
                         receipt_status = STATUS_FAILED
                         transfer_amount = 0
                     else:
-                        updated_stake_record = TreasuryUserRecord(
-                            balance=(
-                                treasury_user_record.balance + transfer_amount
-                            ),
-                            loans_root_hash=treasury_user_record.loans_root_hash,
-                            total_interest_paid=treasury_user_record.total_interest_paid,
+                        updated_stake_record = replace(
+                            treasury_user_record,
+                            balance=treasury_user_record.balance + transfer_amount,
                         )
                         updated_record_head = updated_stake_record.expr().hash()
                         put_in_radix_tree(stake_trie, node, transaction.sender, updated_record_head)

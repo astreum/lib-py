@@ -139,7 +139,7 @@ The node must already be connected and have a `latest_block`; otherwise the func
 
 ## Treasury Overview
 
-The treasury account (`TREASURY_ADDRESS`) tracks per-participant state in a `TreasuryUserRecord`, keyed by address inside the treasury account's own data trie: staked `balance`, a `loans_root_hash` trie of secured loans, `total_interest_paid`, and an `offers_root_hash` trie of posted limit offers.
+The treasury account (`TREASURY_ADDRESS`) tracks per-participant state in a `TreasuryUserRecord`, keyed by address inside the treasury account's own data trie: staked `balance`, a `loans_root_hash` trie of secured loans, `total_interest_paid`, an `offers_root_hash` trie of posted limit offers, and three unsecured-lending counters — `loaned`, `defaulted`, and `sold_limit` (see below).
 
 ### Limit offers (`TREASURY_SELL`)
 
@@ -198,6 +198,36 @@ updated_offer = claim_offer(
 | `current_height` | `int` | Current block height, used to reject claims past `expiry`. |
 
 Returns the updated (claimed) `TreasuryCreditOffer`, or `None` if the offer doesn't exist, is already claimed, or is expired (`current_height >= expiry`). **A claim is permanent** — once `claimed_by` is set it never resets, and there is no "free" operation or transaction code to release it. `claim_offer` does not touch the seller's `TreasuryUserRecord.offers_root_hash` field itself — the caller must write the trie's new root hash back into that field.
+
+### Unsecured loans (`TREASURY_BORROW`, `loan_type=UNSECURED`)
+
+An unsecured borrow assembles its principal by claiming one or more limit offers instead of posting stake. The borrower references each offer as a `(seller_address, offer_transaction_id)` pair; the handler claims every offer (permanently, via `claim_offer`), requires their combined `limit` to cover the loan's discounted (present-value) amount, and disburses `discounted_amount - insurance_fee - sum(price)` to the borrower — the insurance fee and every seller's price are deducted up front, not billed separately.
+
+```python
+tx = create_transaction(
+    chain_id=node.config["chain_id"],
+    counter=sender_account.counter + 1,
+    sender=sender_public_key,
+    recipient=TREASURY_ADDRESS,
+    code=TransactionCode.TREASURY_BORROW,
+    amount=payment_amount,               # per-installment amount
+    payment_interval_blocks=10,
+    payment_count=5,
+    loan_type=LoanType.UNSECURED,
+    offer_refs=[(seller_public_key, offer_tx_hash)],  # one or more (seller, offer_tx_id) pairs
+)
+tx.sign(sender_key)
+```
+
+Each claimed offer's `duration` must equal `payment_interval_blocks * payment_count`, and a seller can never have more limit in play than they've paid in interest across their own borrowing history: `sold_limit + offer.limit <= total_interest_paid`. The **insurance fee** is derived entirely from network history — no fixed rate is set by either party:
+
+```
+insurance_fee = discounted_amount * (borrower.defaulted * gc + gd) // (borrower.loaned * gc + gl)
+```
+
+where `gc`/`gd`/`gl` are the block's running `global_loan_count`/`global_defaulted`/`global_loaned` totals. A first-ever unsecured loan on the network (`gc == 0`) pays `insurance_fee = 0`.
+
+**Defaults are recorded at repay/close time**, not via a separate claim mechanism: an installment still unpaid after its due block is written off on the next `TREASURY_REPAY`/`TREASURY_CLOSE` against that loan — added to the borrower's `defaulted` and the block's `global_defaulted` (both permanent), and the loan's schedule pointer advances past it the same way a real payment would. A loan whose every remaining installment is overdue closes as fully defaulted and refunds the submitted amount. Each backing seller's `sold_limit` is credited back once, when the loan finally reaches full payoff/close/write-off, in proportion to how much of the loan was actually paid: `offer.limit * (payment_count - missed_count) // payment_count`. Whatever isn't returned stays in `sold_limit` permanently — a seller's real, unrecoverable loss on that loan.
 
 
 ## Query API

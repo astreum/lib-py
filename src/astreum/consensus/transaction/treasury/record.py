@@ -36,12 +36,27 @@ class TreasuryUserRecord:
             posted limit offers (`TreasuryCreditOffer`), keyed by the
             `TREASURY_SELL` transaction hash that created each one. `ZERO32`
             if empty.
+        loaned: Cumulative unsecured principal (`discounted_amount`) this
+            account has borrowed, across all its unsecured loans. Feeds the
+            insurance rate `p` (see `treasury/borrow.py`).
+        defaulted: Cumulative amount permanently written off across this
+            account's own unsecured loans, as a borrower. Never reversed.
+            Feeds `p`.
+        sold_limit: This account's outstanding exposure as a limit seller:
+            the sum of `offer.limit` over every offer this account has sold
+            that is currently backing an open loan, plus the
+            permanently-lost share from any loan that defaulted while their
+            offer backed it. A seller's available capacity to sell further
+            limit is `total_interest_paid - sold_limit`.
     """
 
     balance: int = 0
     loans_root_hash: bytes = ZERO32
     total_interest_paid: int = 0
     offers_root_hash: bytes = ZERO32
+    loaned: int = 0
+    defaulted: int = 0
+    sold_limit: int = 0
     _expr: Optional[Expr] = field(default=None, repr=False, compare=False)
 
     def to_expr(self) -> Expr:
@@ -50,11 +65,14 @@ class TreasuryUserRecord:
         Returns:
             A `link`-list `Expr` of the record's fields in storage order:
             ``[balance, loans_root_hash, total_interest_paid,
-            offers_root_hash]``.
+            offers_root_hash, loaned, defaulted, sold_limit]``.
         """
         if self._expr is not None:
             return self._expr
-        detail: Expr = link(Expr("link", head_hash=self.offers_root_hash), NIL)
+        detail: Expr = link(int_(self.sold_limit), NIL)
+        detail = link(int_(self.defaulted), detail)
+        detail = link(int_(self.loaned), detail)
+        detail = link(Expr("link", head_hash=self.offers_root_hash), detail)
         detail = link(int_(self.total_interest_paid), detail)
         detail = link(Expr("link", head_hash=self.loans_root_hash), detail)
         detail = link(int_(self.balance), detail)
@@ -83,8 +101,9 @@ class TreasuryUserRecord:
 
         Returns:
             The decoded `TreasuryUserRecord`, or `None` if *head_hash* is
-            empty/`ZERO32`, unresolvable, or doesn't decode to exactly four
-            fields of the expected shape.
+            empty/`ZERO32`, unresolvable, or doesn't decode to a known field
+            count (4, the pre-unsecured-loan shape, or 7, the current
+            shape).
         """
         if not head_hash or head_hash == ZERO32:
             return None
@@ -94,7 +113,7 @@ class TreasuryUserRecord:
         nodes, missed = resolve_list_exprs(node, header)
         if missed:
             return None
-        if len(nodes) != 4:
+        if len(nodes) not in (4, 7):
             return None
         fields = []
         for n in nodes:
@@ -105,13 +124,16 @@ class TreasuryUserRecord:
                 fields.append(n._head_hash if n._head_hash is not None else ZERO32)
             else:
                 return None
-        if len(fields) != 4:
+        if len(fields) not in (4, 7):
             return None
         return cls(
             balance=fields[0],
             loans_root_hash=fields[1],
             total_interest_paid=fields[2],
             offers_root_hash=fields[3],
+            loaned=fields[4] if len(fields) == 7 else 0,
+            defaulted=fields[5] if len(fields) == 7 else 0,
+            sold_limit=fields[6] if len(fields) == 7 else 0,
         )
 
 
@@ -122,8 +144,91 @@ class TreasuryBorrowRequest:
     payment_count: int
 
 
+def _claimed_offers_to_expr(claimed_offers: list[tuple[bytes, bytes, int]]) -> Expr:
+    """Encode a loan's claimed-offers list as a nested `Expr` link-list.
+
+    Each entry is a 3-field sub-list: ``[seller_address,
+    offer_transaction_id, limit]``, where the two 32-byte ids are stored as
+    bare hash-carrying `link` nodes (the same convention used for
+    `claimed_by`/`loans_root_hash` elsewhere in this module) and ``limit``
+    is a plain int.
+
+    Args:
+        claimed_offers: The `(seller_address, offer_transaction_id, limit)`
+            triples to encode, in claim order.
+
+    Returns:
+        `NIL` if *claimed_offers* is empty, otherwise a `link`-list `Expr`
+        of the encoded entries.
+    """
+    if not claimed_offers:
+        return NIL
+    result: Expr = NIL
+    for seller, offer_transaction_id, limit in reversed(claimed_offers):
+        entry: Expr = link(
+            Expr("link", head_hash=seller),
+            link(Expr("link", head_hash=offer_transaction_id), link(int_(limit), NIL)),
+        )
+        result = link(entry, result)
+    return result
+
+
+def _claimed_offers_from_expr(
+    node: Any, claimed_offers_node: Expr
+) -> list[tuple[bytes, bytes, int]] | None:
+    """Decode a claimed-offers `Expr` (as produced by `_claimed_offers_to_expr`).
+
+    Args:
+        node: Storage node used to resolve any hash-only sub-exprs.
+        claimed_offers_node: The field's own `Expr`, either `NIL` (empty) or
+            a `link`-list of 3-field entries.
+
+    Returns:
+        The decoded list of `(seller_address, offer_transaction_id,
+        limit)` triples, or `None` if the shape doesn't match.
+    """
+    if claimed_offers_node is NIL:
+        return []
+    entry_nodes, missed = resolve_list_exprs(node, claimed_offers_node)
+    if missed:
+        return None
+    result: list[tuple[bytes, bytes, int]] = []
+    for entry_node in entry_nodes:
+        sub_nodes, sub_missed = resolve_list_exprs(node, entry_node)
+        if sub_missed or len(sub_nodes) != 3:
+            return None
+        seller_node, offer_node, limit_node = sub_nodes
+        if get_expr_tag(seller_node, node) != "link" or seller_node._head_hash is None:
+            return None
+        if get_expr_tag(offer_node, node) != "link" or offer_node._head_hash is None:
+            return None
+        if get_expr_tag(limit_node, node) != "int":
+            return None
+        result.append(
+            (
+                seller_node._head_hash,
+                offer_node._head_hash,
+                get_expr_value(limit_node, node),
+            )
+        )
+    return result
+
+
 @dataclass
 class TreasuryLoanRecord:
+    """Attributes:
+        claimed_offers: `(seller_address, offer_transaction_id, limit)`
+            triples this loan claimed at origination, needed at loan-end to
+            credit each backing seller's `sold_limit` back
+            (`treasury/repay.py`/`treasury/close.py`). Empty for `SECURED`
+            loans.
+        insurance_fee: The calculated fee the Treasury deducted at
+            origination. `0` for `SECURED` loans.
+        missed_count: Cumulative count of installments permanently written
+            off on this loan (`treasury/repay.py`/`treasury/close.py`).
+            Always `0` for `SECURED` loans, which have no write-off path.
+    """
+
     creation_block_number: int
     loan_type: LoanType
     discounted_amount: int
@@ -131,12 +236,18 @@ class TreasuryLoanRecord:
     payment_interval_blocks: int
     next_payment_block_number: int
     payment_count: int
+    claimed_offers: list[tuple[bytes, bytes, int]] = field(default_factory=list)
+    insurance_fee: int = 0
+    missed_count: int = 0
     _expr: Optional[Expr] = field(default=None, repr=False, compare=False)
 
     def to_expr(self) -> Expr:
         if self._expr is not None:
             return self._expr
-        detail: Expr = link(int_(self.payment_interval_blocks), NIL)
+        detail: Expr = link(int_(self.missed_count), NIL)
+        detail = link(int_(self.insurance_fee), detail)
+        detail = link(_claimed_offers_to_expr(self.claimed_offers), detail)
+        detail = link(int_(self.payment_interval_blocks), detail)
         detail = link(int_(self.payment_amount), detail)
         detail = link(int_(self.next_payment_block_number), detail)
         detail = link(int_(int(self.loan_type)), detail)
@@ -161,28 +272,46 @@ class TreasuryLoanRecord:
         nodes, missed = resolve_list_exprs(node, header)
         if missed:
             return None
-        if len(nodes) != 7:
+        if len(nodes) not in (7, 10):
             return None
-        fields = []
-        for n in nodes:
+        int_fields: list[int] = []
+        claimed_offers: list[tuple[bytes, bytes, int]] = []
+        insurance_fee = 0
+        missed_count = 0
+        for i, n in enumerate(nodes):
+            if len(nodes) == 10 and i == 7:
+                decoded = _claimed_offers_from_expr(node, n)
+                if decoded is None:
+                    return None
+                claimed_offers = decoded
+                continue
             if get_expr_tag(n, node) == "int":
-                fields.append(get_expr_value(n, node))
+                int_fields.append(get_expr_value(n, node))
             else:
                 return None
-        if len(fields) != 7:
-            return None
+        if len(nodes) == 7:
+            if len(int_fields) != 7:
+                return None
+        else:
+            if len(int_fields) != 9:
+                return None
+            insurance_fee = int_fields[7]
+            missed_count = int_fields[8]
         try:
-            loan_type = LoanType(fields[3])
+            loan_type = LoanType(int_fields[3])
         except ValueError:
             return None
         return cls(
-            creation_block_number=fields[0],
+            creation_block_number=int_fields[0],
             loan_type=loan_type,
-            discounted_amount=fields[1],
-            payment_count=fields[2],
-            next_payment_block_number=fields[4],
-            payment_amount=fields[5],
-            payment_interval_blocks=fields[6],
+            discounted_amount=int_fields[1],
+            payment_count=int_fields[2],
+            next_payment_block_number=int_fields[4],
+            payment_amount=int_fields[5],
+            payment_interval_blocks=int_fields[6],
+            claimed_offers=claimed_offers,
+            insurance_fee=insurance_fee,
+            missed_count=missed_count,
         )
 
 

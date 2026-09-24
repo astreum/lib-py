@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing import Optional, Sequence, Tuple, Union
 
 from astreum.expression import Expr, NIL, bytes_, int_, link
 from astreum.consensus.transaction.code import TransactionCode
@@ -41,6 +41,7 @@ def create_transaction(
     duration: Optional[int] = None,
     price: Optional[int] = None,
     expiry: Optional[int] = None,
+    offer_refs: Optional[Sequence[Tuple[bytes, bytes]]] = None,
     data: Expr = NIL,
 ) -> Transaction:
     _validate_params(
@@ -50,6 +51,7 @@ def create_transaction(
         loan_transaction_id=loan_transaction_id,
         payment_interval_blocks=payment_interval_blocks,
         payment_count=payment_count,
+        loan_type=loan_type,
         counterparty=counterparty,
         withdraw_signature=withdraw_signature,
         withdraw_counter=withdraw_counter,
@@ -61,6 +63,7 @@ def create_transaction(
         duration=duration,
         price=price,
         expiry=expiry,
+        offer_refs=offer_refs,
     )
 
     data = _build_data_expr(
@@ -82,6 +85,7 @@ def create_transaction(
         duration=duration,
         price=price,
         expiry=expiry,
+        offer_refs=offer_refs,
     )
 
     tx = Transaction(
@@ -109,6 +113,7 @@ def _validate_params(
     loan_transaction_id: Optional[bytes] = None,
     payment_interval_blocks: Optional[int] = None,
     payment_count: Optional[int] = None,
+    loan_type: Union[int, LoanType] = LoanType.SECURED,
     counterparty: Optional[bytes] = None,
     withdraw_signature: Optional[bytes] = None,
     withdraw_counter: Optional[int] = None,
@@ -120,6 +125,7 @@ def _validate_params(
     duration: Optional[int] = None,
     price: Optional[int] = None,
     expiry: Optional[int] = None,
+    offer_refs: Optional[Sequence[Tuple[bytes, bytes]]] = None,
 ) -> None:
     match code:
         case TransactionCode.TRANSFER:
@@ -165,6 +171,21 @@ def _validate_params(
                 raise ValueError("TREASURY_BORROW requires payment_interval_blocks > 0")
             if payment_count is None or payment_count <= 0:
                 raise ValueError("TREASURY_BORROW requires payment_count > 0")
+            if LoanType(loan_type) == LoanType.UNSECURED:
+                if not offer_refs:
+                    raise ValueError(
+                        "TREASURY_BORROW with loan_type=UNSECURED requires offer_refs"
+                    )
+                seen = set()
+                for seller, offer_transaction_id in offer_refs:
+                    if len(seller) != RECIPIENT_SIZE or len(offer_transaction_id) != LOAN_TRANSACTION_ID_SIZE:
+                        raise ValueError(
+                            "TREASURY_BORROW offer_refs entries must be (32-byte seller, 32-byte offer_transaction_id)"
+                        )
+                    key = (seller, offer_transaction_id)
+                    if key in seen:
+                        raise ValueError("TREASURY_BORROW offer_refs must not contain duplicates")
+                    seen.add(key)
 
         case TransactionCode.TREASURY_REPAY:
             if amount <= 0:
@@ -201,6 +222,33 @@ def _validate_params(
                 raise ValueError("CODE_ACCOUNT_CALL requires recipient")
 
 
+def _offer_refs_to_expr(offer_refs: Optional[Sequence[Tuple[bytes, bytes]]]) -> Expr:
+    """Encode a borrow's claimed-offer refs as a nested `Expr` link-list.
+
+    Each entry is a 2-field sub-list: ``[seller_address,
+    offer_transaction_id]``, both stored as bare hash-carrying `link` nodes
+    (the same convention used elsewhere in this module for 32-byte ids).
+
+    Args:
+        offer_refs: The `(seller_address, offer_transaction_id)` pairs to
+            encode, in claim order.
+
+    Returns:
+        `NIL` if *offer_refs* is empty/`None`, otherwise a `link`-list
+        `Expr` of the encoded entries.
+    """
+    if not offer_refs:
+        return NIL
+    result: Expr = NIL
+    for seller, offer_transaction_id in reversed(list(offer_refs)):
+        entry: Expr = link(
+            Expr("link", head_hash=seller),
+            link(Expr("link", head_hash=offer_transaction_id), NIL),
+        )
+        result = link(entry, result)
+    return result
+
+
 def _build_data_expr(
     *,
     code: TransactionCode,
@@ -221,6 +269,7 @@ def _build_data_expr(
     duration: Optional[int] = None,
     price: Optional[int] = None,
     expiry: Optional[int] = None,
+    offer_refs: Optional[Sequence[Tuple[bytes, bytes]]] = None,
 ) -> Expr:
     match code:
         case TransactionCode.CHANNEL_UPDATE:
@@ -246,7 +295,10 @@ def _build_data_expr(
                 int_(LoanType(loan_type)),
                 link(
                     int_(payment_interval_blocks),  # type: ignore[arg-type]
-                    link(int_(payment_count), NIL),  # type: ignore[arg-type]
+                    link(
+                        int_(payment_count),  # type: ignore[arg-type]
+                        link(_offer_refs_to_expr(offer_refs), NIL),
+                    ),
                 ),
             )
 

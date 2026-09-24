@@ -38,6 +38,9 @@ def create_block(
     statistics: Optional[list] = None,
     pending_exprs: Optional[List[Expr]] = None,
     pending_storage_contracts: Optional[List["PendingStorageContract"]] = None,
+    global_loaned: int = 0,
+    global_defaulted: int = 0,
+    global_loan_count: int = 0,
 ) -> Block:
     previous_block_hash = previous_block_hash or ZERO32
     accounts_hash = accounts_hash or ZERO32
@@ -80,4 +83,7 @@ def create_block(
         statistics=statistics,
         pending_exprs=pending_exprs,
         pending_storage_contracts=pending_storage_contracts,
+        global_loaned=global_loaned,
+        global_defaulted=global_defaulted,
+        global_loan_count=global_loan_count,
     )

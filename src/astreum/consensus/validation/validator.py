@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from dataclasses import replace
 from typing import Any, Dict, Optional, Tuple
 
 from astreum.expression import resolve_inner_exprs
@@ -92,11 +93,7 @@ def current_validator(
 
         record = treasury_user_records[validator_key]
         if record.loans_root_hash == ZERO32:
-            updated_record = TreasuryUserRecord(
-                balance=new_amount,
-                loans_root_hash=record.loans_root_hash,
-                total_interest_paid=record.total_interest_paid,
-            )
+            updated_record = replace(record, balance=new_amount)
             updated_record_head = updated_record.expr().hash()
             put_in_radix_tree(stake_trie, node, validator_key, updated_record_head)
             record_exprs, _ = resolve_inner_exprs(node, updated_record.expr())

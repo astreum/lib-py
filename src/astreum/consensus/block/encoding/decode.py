@@ -66,12 +66,15 @@ def get_block_from_storage(astreum_node: Any, block_hash: bytes) -> Block:
         raise ValueError(
             f"unable to resolve block body (missed={[h.hex()[:8] for h in missed]})"
         )
-    if len(body_nodes) != 15:
+    if len(body_nodes) != 18:
         raise ValueError(
-            f"malformed block body length (got={len(body_nodes)}, expected=15)"
+            f"malformed block body length (got={len(body_nodes)}, expected=18)"
         )
 
     (
+        global_loaned_node,
+        global_defaulted_node,
+        global_loan_count_node,
         accounts_node,
         bloom_hash_node,
         chain_id_node,
@@ -89,6 +92,12 @@ def get_block_from_storage(astreum_node: Any, block_hash: bytes) -> Block:
         statistics_node,
     ) = body_nodes
 
+    if not get_expr_tag(global_loaned_node, astreum_node) == "int":
+        raise ValueError("expected Int for global_loaned")
+    if not get_expr_tag(global_defaulted_node, astreum_node) == "int":
+        raise ValueError("expected Int for global_defaulted")
+    if not get_expr_tag(global_loan_count_node, astreum_node) == "int":
+        raise ValueError("expected Int for global_loan_count")
     if not get_expr_tag(accounts_node, astreum_node) == "link":
         raise ValueError("expected Link for accounts_hash")
     if not get_expr_tag(bloom_hash_node, astreum_node) == "link":
@@ -166,6 +175,9 @@ def get_block_from_storage(astreum_node: Any, block_hash: bytes) -> Block:
         expr_id=block_hash,
         body_hash=body.hash(),
         statistics=statistics,
+        global_loaned=get_expr_value(global_loaned_node, astreum_node),
+        global_defaulted=get_expr_value(global_defaulted_node, astreum_node),
+        global_loan_count=get_expr_value(global_loan_count_node, astreum_node),
     )
 
     block.bloom_tree = BloomTree(block.bloom_hash, astreum_node)

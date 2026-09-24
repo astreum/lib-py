@@ -106,6 +106,16 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
                 _hex(block.expr_id),
             )
             return False, "genesis total fee mismatch"
+        if (
+            getattr(block, "global_loaned", 0)
+            or getattr(block, "global_defaulted", 0)
+            or getattr(block, "global_loan_count", 0)
+        ):
+            node.logger.debug(
+                "Block verify genesis global credit totals mismatch block=%s",
+                _hex(block.expr_id),
+            )
+            return False, "genesis global credit totals mismatch"
         if block.accounts_hash is None:
             node.logger.debug(
                 "Block verify genesis missing accounts hash block=%s",
@@ -178,6 +188,10 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
     work_block.receipts = []
     work_block.receipts_trie = None
     work_block.total_mint = 0
+    work_block.pending_exprs = []
+    work_block.global_loaned = getattr(prev_block, "global_loaned", 0) or 0
+    work_block.global_defaulted = getattr(prev_block, "global_defaulted", 0) or 0
+    work_block.global_loan_count = getattr(prev_block, "global_loan_count", 0) or 0
 
     # Pre-commit previous block expr to storage data (replicating block builder)
     storage_account = work_block.accounts.get_account(STORAGE_ADDRESS, node)
@@ -269,6 +283,31 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
             block.total_fee,
         )
         return False, "total fee mismatch"
+
+    if getattr(block, "global_loaned", 0) != work_block.global_loaned:
+        node.logger.debug(
+            "Block verify global_loaned mismatch block=%s expected=%s actual=%s",
+            _hex(block.expr_id),
+            work_block.global_loaned,
+            getattr(block, "global_loaned", 0),
+        )
+        return False, "global_loaned mismatch"
+    if getattr(block, "global_defaulted", 0) != work_block.global_defaulted:
+        node.logger.debug(
+            "Block verify global_defaulted mismatch block=%s expected=%s actual=%s",
+            _hex(block.expr_id),
+            work_block.global_defaulted,
+            getattr(block, "global_defaulted", 0),
+        )
+        return False, "global_defaulted mismatch"
+    if getattr(block, "global_loan_count", 0) != work_block.global_loan_count:
+        node.logger.debug(
+            "Block verify global_loan_count mismatch block=%s expected=%s actual=%s",
+            _hex(block.expr_id),
+            work_block.global_loan_count,
+            getattr(block, "global_loan_count", 0),
+        )
+        return False, "global_loan_count mismatch"
 
     applied_transactions = list(work_block.transactions or [])
     if len(applied_transactions) != len(tx_hashes):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from astreum.expression import resolve_inner_exprs
@@ -165,10 +166,8 @@ def handle_treasury_sell(
     put_in_radix_tree(offers_trie, node, transaction_hash, offer_record_head)
     offer_exprs, _ = resolve_inner_exprs(node, offer_record.expr())
 
-    updated_user_record = TreasuryUserRecord(
-        balance=user_record.balance,
-        loans_root_hash=user_record.loans_root_hash,
-        total_interest_paid=user_record.total_interest_paid,
+    updated_user_record = replace(
+        user_record,
         offers_root_hash=offers_trie.root_hash or ZERO32,
     )
     updated_user_record_head = updated_user_record.expr().hash()
