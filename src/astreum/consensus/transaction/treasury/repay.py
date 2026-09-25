@@ -178,7 +178,14 @@ def handle_treasury_repay(
     put_in_radix_tree(treasury_account.data, node, transaction.sender, updated_user_record_head)
     treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
     if credit_treasury:
-        treasury_account.balance += transaction.amount
+        if loan.owner == TREASURY_ADDRESS:
+            treasury_account.balance += transaction.amount
+        else:
+            owner_account = block.accounts.get_account(address=loan.owner, node=node)
+            if owner_account is None:
+                return STATUS_FAILED
+            owner_account.balance += transaction.amount
+            block.accounts.set_account(loan.owner, owner_account)
     user_record_exprs, _ = resolve_inner_exprs(node, updated_user_record.expr())
 
     pending_exprs = loan_exprs + _trie_exprs(loans_trie) + user_record_exprs

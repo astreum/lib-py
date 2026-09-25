@@ -7,6 +7,7 @@ from typing import Any, Optional
 from astreum.expression import Expr, NIL, resolve_list_exprs, link, int_, get_expr_tag, get_expr_value
 from astreum.expression import ZERO32
 from astreum.storage.exprs import get_expr_list
+from astreum.consensus.constants import TREASURY_ADDRESS
 
 
 
@@ -227,6 +228,9 @@ class TreasuryLoanRecord:
         missed_count: Cumulative count of installments permanently written
             off on this loan (`treasury/repay.py`/`treasury/close.py`).
             Always `0` for `SECURED` loans, which have no write-off path.
+        owner: Current loan owner (32-byte address). The Treasury initially.
+            Applies to both SECURED and UNSECURED loans. Bought loans are
+            transferred to the buyer.
     """
 
     creation_block_number: int
@@ -239,12 +243,14 @@ class TreasuryLoanRecord:
     claimed_offers: list[tuple[bytes, bytes, int]] = field(default_factory=list)
     insurance_fee: int = 0
     missed_count: int = 0
+    owner: bytes = TREASURY_ADDRESS
     _expr: Optional[Expr] = field(default=None, repr=False, compare=False)
 
     def to_expr(self) -> Expr:
         if self._expr is not None:
             return self._expr
-        detail: Expr = link(int_(self.missed_count), NIL)
+        detail: Expr = link(Expr("link", head_hash=self.owner), NIL)
+        detail = link(int_(self.missed_count), detail)
         detail = link(int_(self.insurance_fee), detail)
         detail = link(_claimed_offers_to_expr(self.claimed_offers), detail)
         detail = link(int_(self.payment_interval_blocks), detail)
@@ -272,31 +278,33 @@ class TreasuryLoanRecord:
         nodes, missed = resolve_list_exprs(node, header)
         if missed:
             return None
-        if len(nodes) not in (7, 10):
+        if len(nodes) != 11:
             return None
         int_fields: list[int] = []
         claimed_offers: list[tuple[bytes, bytes, int]] = []
         insurance_fee = 0
         missed_count = 0
+        owner = TREASURY_ADDRESS
         for i, n in enumerate(nodes):
-            if len(nodes) == 10 and i == 7:
+            if i == 7:
                 decoded = _claimed_offers_from_expr(node, n)
                 if decoded is None:
                     return None
                 claimed_offers = decoded
                 continue
+            if i == 10:
+                if get_expr_tag(n, node) != "link" or n._head_hash is None:
+                    return None
+                owner = n._head_hash
+                continue
             if get_expr_tag(n, node) == "int":
                 int_fields.append(get_expr_value(n, node))
             else:
                 return None
-        if len(nodes) == 7:
-            if len(int_fields) != 7:
-                return None
-        else:
-            if len(int_fields) != 9:
-                return None
-            insurance_fee = int_fields[7]
-            missed_count = int_fields[8]
+        if len(int_fields) != 9:
+            return None
+        insurance_fee = int_fields[7]
+        missed_count = int_fields[8]
         try:
             loan_type = LoanType(int_fields[3])
         except ValueError:
@@ -312,6 +320,7 @@ class TreasuryLoanRecord:
             claimed_offers=claimed_offers,
             insurance_fee=insurance_fee,
             missed_count=missed_count,
+            owner=owner,
         )
 
 

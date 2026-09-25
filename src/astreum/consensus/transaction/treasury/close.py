@@ -187,10 +187,24 @@ def handle_treasury_close(
 
     if loan.loan_type == LoanType.UNSECURED:
         if credit_treasury:
-            treasury_account.balance += total_cost
+            if loan.owner == TREASURY_ADDRESS:
+                treasury_account.balance += total_cost
+            else:
+                owner_account = block.accounts.get_account(address=loan.owner, node=node)
+                if owner_account is None:
+                    return STATUS_FAILED
+                owner_account.balance += total_cost
+                block.accounts.set_account(loan.owner, owner_account)
     else:
         if credit_treasury:
-            treasury_account.balance += transaction.amount
+            if loan.owner == TREASURY_ADDRESS:
+                treasury_account.balance += transaction.amount
+            else:
+                owner_account = block.accounts.get_account(address=loan.owner, node=node)
+                if owner_account is None:
+                    return STATUS_FAILED
+                owner_account.balance += transaction.amount
+                block.accounts.set_account(loan.owner, owner_account)
 
     if loan.loan_type == LoanType.UNSECURED and refund_to_sender:
         sender_account = block.accounts.get_account(address=transaction.sender, node=node)

@@ -31,6 +31,8 @@ from astreum.consensus.transaction.treasury.record import (
 from astreum.consensus.transaction.treasury.close import handle_treasury_close
 from astreum.consensus.transaction.treasury.repay import handle_treasury_repay
 from astreum.consensus.transaction.treasury.offers import handle_treasury_sell
+from astreum.consensus.transaction.treasury.buy import handle_treasury_buy
+from astreum.consensus.transaction.treasury.claim import handle_treasury_claim
 
 
 # Transaction codes whose handler credits the sender mid-flow (so a pre-check on
@@ -93,6 +95,7 @@ def _apply_tx_effects(
         TransactionCode.CHANNEL_WITHDRAW,
         TransactionCode.TREASURY_BORROW,
         TransactionCode.TREASURY_SELL,
+        TransactionCode.TREASURY_BUY,
     ):
         transfer_amount = 0
 
@@ -315,6 +318,30 @@ def _apply_tx_effects(
                     transaction_hash=transaction_hash,
                     sender_account=sender_account,
                     treasury_account=treasury_account,
+                )
+
+        case TransactionCode.TREASURY_BUY:
+            transfer_amount = 0
+            treasury_account = block.accounts.get_account(address=TREASURY_ADDRESS, node=node)
+            recipient_account = treasury_account
+            if receipt_status == STATUS_SUCCESS:
+                receipt_status = handle_treasury_buy(
+                    node=node,
+                    block=block,
+                    transaction=transaction,
+                    transaction_hash=transaction_hash,
+                )
+
+        case TransactionCode.TREASURY_CLAIM:
+            transfer_amount = 0
+            treasury_account = block.accounts.get_account(address=TREASURY_ADDRESS, node=node)
+            recipient_account = treasury_account
+            if receipt_status == STATUS_SUCCESS:
+                receipt_status = handle_treasury_claim(
+                    node=node,
+                    block=block,
+                    transaction=transaction,
+                    transaction_hash=transaction_hash,
                 )
 
         case TransactionCode.STORAGE_CREATE:

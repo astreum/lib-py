@@ -155,6 +155,7 @@ def _handle_secured_borrow(
         payment_interval_blocks=request.payment_interval_blocks,
         next_payment_block_number=next_payment_block_number,
         payment_count=request.payment_count,
+        owner=TREASURY_ADDRESS,
     )
     loan_record_head = loan_record.expr().hash()
     loans_root_hash = user_record.loans_root_hash or ZERO32
@@ -309,6 +310,7 @@ def _handle_unsecured_borrow(
         claimed_offers=claimed_entries,
         insurance_fee=insurance_fee,
         missed_count=0,
+        owner=TREASURY_ADDRESS,
     )
     loan_record_head = loan_record.expr().hash()
 

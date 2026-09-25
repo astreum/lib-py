@@ -24,6 +24,7 @@ def _apply_treasury_loan_payment(
     node: Any,
     pending_exprs: list[Expr],
     treasury_account: Any,
+    accounts: Any,
     borrower: bytes,
     loans_trie: RadixTree,
     user_record: TreasuryUserRecord,
@@ -85,6 +86,15 @@ def _apply_treasury_loan_payment(
     )
     if interest_delta is None:
         return None
+
+    if loan.owner == TREASURY_ADDRESS:
+        treasury_account.balance += amount
+    else:
+        owner_account = accounts.get_account(loan.owner, node)
+        if owner_account is None:
+            return None
+        owner_account.balance += amount
+        accounts.set_account(loan.owner, owner_account)
 
     updated_loan = replace(loan, next_payment_block_number=next_payment_block_number)
     updated_loan_head = updated_loan.expr().hash()

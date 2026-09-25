@@ -15,6 +15,7 @@ from astreum.consensus.transaction.treasury.record import (
     TreasuryUserRecord,
 )
 from astreum.expression import Expr, ZERO32, resolve_list_exprs
+from astreum.consensus.constants import TREASURY_ADDRESS
 
 
 class _FakeNode:
@@ -160,11 +161,13 @@ class TestTreasuryLoanRecord(unittest.TestCase):
         seller_b = b"\x22" * 32
         offer_a = b"\x33" * 32
         offer_b = b"\x44" * 32
+        custom_owner = b"\xaa" * 32
         record = TreasuryLoanRecord(
             **self._base_kwargs(),
             claimed_offers=[(seller_a, offer_a, 500), (seller_b, offer_b, 400)],
             insurance_fee=17,
             missed_count=0,
+            owner=custom_owner,
         )
         expr = record.expr()
         node.hot_storage[expr.hash()] = expr
@@ -184,6 +187,7 @@ class TestTreasuryLoanRecord(unittest.TestCase):
         )
         self.assertEqual(loaded.insurance_fee, 17)
         self.assertEqual(loaded.missed_count, 0)
+        self.assertEqual(loaded.owner, custom_owner)
 
     def test_round_trip_empty_claimed_offers(self):
         node = _FakeNode()
@@ -198,25 +202,47 @@ class TestTreasuryLoanRecord(unittest.TestCase):
         self.assertEqual(loaded.claimed_offers, [])
         self.assertEqual(loaded.insurance_fee, 0)
         self.assertEqual(loaded.missed_count, 0)
+        self.assertEqual(loaded.owner, TREASURY_ADDRESS)
 
-    def test_from_storage_accepts_legacy_seven_field_shape(self):
+    def test_from_storage_rejects_legacy_shapes(self):
         node = _FakeNode()
         from astreum.expression import NIL, int_, link
 
-        legacy_expr = link(int_(5), NIL)  # payment_interval_blocks
-        legacy_expr = link(int_(100), legacy_expr)  # payment_amount
-        legacy_expr = link(int_(15), legacy_expr)  # next_payment_block_number
-        legacy_expr = link(int_(int(LoanType.SECURED)), legacy_expr)  # loan_type
-        legacy_expr = link(int_(10), legacy_expr)  # payment_count
-        legacy_expr = link(int_(900), legacy_expr)  # discounted_amount
-        legacy_expr = link(int_(10), legacy_expr)  # creation_block_number
-        node.hot_storage[legacy_expr.hash()] = legacy_expr
+        legacy_seven = link(int_(5), NIL)
+        legacy_seven = link(int_(100), legacy_seven)
+        legacy_seven = link(int_(15), legacy_seven)
+        legacy_seven = link(int_(int(LoanType.SECURED)), legacy_seven)
+        legacy_seven = link(int_(10), legacy_seven)
+        legacy_seven = link(int_(900), legacy_seven)
+        legacy_seven = link(int_(10), legacy_seven)
+        node.hot_storage[legacy_seven.hash()] = legacy_seven
 
-        loaded = TreasuryLoanRecord.from_storage(node, legacy_expr.hash())
-        self.assertIsNotNone(loaded)
-        self.assertEqual(loaded.claimed_offers, [])
-        self.assertEqual(loaded.insurance_fee, 0)
-        self.assertEqual(loaded.missed_count, 0)
+        loaded = TreasuryLoanRecord.from_storage(node, legacy_seven.hash())
+        self.assertIsNone(loaded)
+
+        seller = b"\x11" * 32
+        offer_tx = b"\x22" * 32
+        claimed_offers_list = link(
+            link(
+                Expr("link", head_hash=seller),
+                link(Expr("link", head_hash=offer_tx), link(int_(500), NIL)),
+            ),
+            NIL,
+        )
+        legacy_ten = link(int_(0), NIL)
+        legacy_ten = link(int_(17), legacy_ten)
+        legacy_ten = link(claimed_offers_list, legacy_ten)
+        legacy_ten = link(int_(5), legacy_ten)
+        legacy_ten = link(int_(100), legacy_ten)
+        legacy_ten = link(int_(15), legacy_ten)
+        legacy_ten = link(int_(int(LoanType.UNSECURED)), legacy_ten)
+        legacy_ten = link(int_(10), legacy_ten)
+        legacy_ten = link(int_(900), legacy_ten)
+        legacy_ten = link(int_(10), legacy_ten)
+        node.hot_storage[legacy_ten.hash()] = legacy_ten
+
+        loaded = TreasuryLoanRecord.from_storage(node, legacy_ten.hash())
+        self.assertIsNone(loaded)
 
 
 class TestTreasuryCreditOffer(unittest.TestCase):
