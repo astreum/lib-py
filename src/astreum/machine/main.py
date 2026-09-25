@@ -34,9 +34,6 @@ class Machine():
                 data=dict(env.data),
                 parent=self.library.get(parent_hash),
             )
-            if self.node is not None:
-                from astreum.storage.exprs import put_expr_in_hot_storage
-                put_expr_in_hot_storage(self.node, env_expr)
         return env_hash
 
     def run(self, expr: "Expr", env: "Env" = None):
