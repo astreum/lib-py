@@ -1,4 +1,3 @@
-import uuid
 from typing import TYPE_CHECKING, List
 
 from astreum.machine.environment import Env
@@ -29,9 +28,12 @@ def handle_stack_apply(machine: "Machine", stack: List[Expr], env) -> None:
     tag = fn_val._tail.value
 
     if tag == "lex":
-        env_uuid_bytes = body._head._value
+        env_ref = body._head
+        if get_expr_tag(env_ref) != "env":
+            raise OpError("closure of non-env capture")
+        env_hash = env_ref._head_hash
         body = body._tail
-        parent = machine.library[uuid.UUID(bytes=env_uuid_bytes)]
+        parent = machine.library[env_hash]
     elif tag == "dyn":
         parent = env
     elif tag == "pure":

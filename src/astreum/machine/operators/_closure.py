@@ -20,10 +20,10 @@ def handle_stack_closure(machine: "Machine", stack: List[Expr], env) -> None:
 
     machine.meter.charge_bytes(params.size() + body.size())
 
-    env_uuid = machine.snapshot_env(env)
-    env_uuid_expr = Expr("bytes", value=env_uuid.bytes)
-    body_with_uuid = link(env_uuid_expr, body)
-    closure_val = link(link(body_with_uuid, params), symbol("lex"))
+    env_hash = machine.snapshot_env(env)
+    env_ref = Expr("link", head_hash=env_hash, tail=symbol("env"))
+    body_with_env = link(env_ref, body)
+    closure_val = link(link(body_with_env, params), symbol("lex"))
     stack.append(closure_val)
 
 

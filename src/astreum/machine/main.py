@@ -1,9 +1,8 @@
 from queue import Queue
 import threading
-import uuid
 from typing import Dict, Optional
 
-from astreum.machine.environment import Env
+from astreum.machine.environment import Env, env_to_radix_tree
 from astreum.expression import Expr, NIL
 from astreum.machine.meter import Meter, MeterExceededError
 from astreum.machine.evaluator import evaluation
@@ -22,18 +21,23 @@ class Machine():
         self.block: Optional[object] = None
         self.logs: list[Expr] = []
         self.log_contract_entries: list = []
-        self.library: Dict[uuid.UUID, Env] = {}
-    
-    def snapshot_env(self, env: Env) -> uuid.UUID:
+        self.library: Dict[bytes, Env] = {}
+
+    def snapshot_env(self, env: Env) -> bytes:
         if env is None:
             env = Env()
-        parent_uuid = None
-        if env.parent is not None:
-            parent_uuid = self.snapshot_env(env.parent)
-        snapshot = Env(data=dict(env.data), parent=self.library[parent_uuid] if parent_uuid else None)
-        env_uuid = uuid.uuid4()
-        self.library[env_uuid] = snapshot
-        return env_uuid
+        parent_hash = self.snapshot_env(env.parent) if env.parent else None
+        env_expr = env_to_radix_tree(env, self.node, parent_hash)
+        env_hash = env_expr.hash()
+        if env_hash not in self.library:
+            self.library[env_hash] = Env(
+                data=dict(env.data),
+                parent=self.library.get(parent_hash),
+            )
+            if self.node is not None:
+                from astreum.storage.exprs import put_expr_in_hot_storage
+                put_expr_in_hot_storage(self.node, env_expr)
+        return env_hash
 
     def run(self, expr: "Expr", env: "Env" = None):
         if env is None:
