@@ -113,15 +113,17 @@ class TestTransactionMessage(unittest.TestCase):
         self.assertIsNone(decode_transaction_message(b""))
         self.assertIsNone(decode_transaction_message(b"\x00"))
         self.assertIsNone(decode_transaction_message(b"\x01\x00\x00\x00\x05hello"))
+        # Well-formed page header but a multi-page message: not a transaction
+        self.assertIsNone(decode_transaction_message(b"\x01\x00\x01\x00\x02\x00\x01"))
         self.assertIsNone(decode_transaction_message(b"\x99junkjunkjunk"))
 
     def test_decode_nontx_header_returns_none(self) -> None:
         # A validly-framed payload whose root tail is not symbol("transaction")
         from astreum.expression import Expr, NIL, symbol
-        from astreum.communication.storage_response.storage_found import encode_payload
+        from astreum.communication.storage_response.storage_found import encode_found_pages
 
         root = Expr("link", head=Expr("link", head=NIL, tail=NIL), tail=symbol("blob"))
-        payload = encode_payload([root])
+        payload = encode_found_pages([root])[0]
         self.assertIsNone(decode_transaction_message(payload))
 
     def test_apply_uses_whole_message(self) -> None:

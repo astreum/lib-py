@@ -11,9 +11,8 @@ from astreum.expression.expr import (
     bytes_,
 )
 from astreum.communication.storage_response.storage_found import (
-    STORAGE_FOUND_PAYLOAD,
-    encode_payload,
-    decode_payload,
+    decode_found_page,
+    encode_found_pages,
 )
 
 if TYPE_CHECKING:
@@ -24,6 +23,17 @@ if TYPE_CHECKING:
 # (TYPE_SYMBOLS, with precomputed hashes), so they never need to travel on the
 # wire: the receiver rebuilds them from their hashes.
 _KNOWN_TYPE_EXPRS = {s.hash(): s for s in TYPE_SYMBOLS.values()}
+
+
+def _encode_single_page(exprs: List[Expr]) -> bytes:
+    """Frame ``exprs`` as one ``STORAGE_FOUND`` page (``1/1``)."""
+    def _no_skip(expr: Expr, size: int) -> None:
+        raise ValueError("transaction expr too large for one page")
+
+    pages = encode_found_pages(exprs, on_skip=_no_skip)
+    if len(pages) != 1:
+        raise ValueError("transaction message does not fit one page")
+    return pages[0]
 
 
 def encode_transaction_message(tx_exprs: List[Expr]) -> bytes:
@@ -68,7 +78,7 @@ def encode_transaction_message(tx_exprs: List[Expr]) -> bytes:
         _walk(e.tail)
 
     _walk(tx_exprs[0])
-    return encode_payload(expanded)
+    return _encode_single_page(expanded)
 
 
 def decode_transaction_message(content: bytes) -> Optional["Transaction"]:
@@ -79,13 +89,11 @@ def decode_transaction_message(content: bytes) -> Optional["Transaction"]:
     """
     if not content:
         return None
-    if content[0] != STORAGE_FOUND_PAYLOAD:
-        return None
     try:
-        exprs = decode_payload(content[1:])
+        page, total, exprs = decode_found_page(content)
     except Exception:
         return None
-    if not exprs:
+    if page != 1 or total != 1 or not exprs:
         return None
 
     expr_map = {e.hash(): e for e in exprs}

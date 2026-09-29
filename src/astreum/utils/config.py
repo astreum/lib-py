@@ -18,6 +18,7 @@ DEFAULT_STORAGE_REQUEST_MINIMUM_PRICE = 1
 DEFAULT_STORAGE_REQUEST_PRICE_INTERVAL_SECONDS = 5.0
 DEFAULT_STORAGE_FETCH_INTERVAL_SECONDS = 0.25
 DEFAULT_STORAGE_FETCH_RETRIES = 8
+DEFAULT_EXPR_REQUEST_TTL_SECONDS = 4.0
 DEFAULT_LONG_TERM_STORAGE_INTERVAL_SECONDS = 5.0
 DEFAULT_INCOMING_QUEUE_SIZE_LIMIT_BYTES = 64 * 1024 * 1024  # 64 MiB
 DEFAULT_INCOMING_QUEUE_TIMEOUT_SECONDS = 1.0
@@ -30,6 +31,8 @@ DEFAULT_MESSAGE_TIMESTAMP_WINDOW_SECONDS = 60
 # 1280 (IPv6 minimum MTU) - 40 (IPv6 header) - 8 (UDP header): a datagram of
 # this size is never IP-fragmented on any IPv4/IPv6 path.
 DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES = 1232
+# Most pages one STORAGE_FOUND reply may span (about 4 MiB at ~65 KB a page).
+DEFAULT_STORAGE_FOUND_MAX_PAGES = 64
 
 
 def config_setup(config: Dict = {}):
@@ -266,6 +269,23 @@ def config_setup(config: Dict = {}):
         raise ValueError("storage_fetch_retries must be a non-negative integer")
     config["storage_fetch_retries"] = storage_fetch_retries
 
+    expr_request_ttl_raw = config.get("expr_request_ttl")
+    if expr_request_ttl_raw is None:
+        expr_request_ttl = 2.0 * storage_fetch_retries * storage_fetch_interval
+        if expr_request_ttl <= 0:
+            expr_request_ttl = DEFAULT_EXPR_REQUEST_TTL_SECONDS
+    else:
+        if isinstance(expr_request_ttl_raw, bool) or not isinstance(
+            expr_request_ttl_raw, (int, float)
+        ):
+            raise ValueError(
+                f"expr_request_ttl must be a number: {expr_request_ttl_raw!r}"
+            )
+        expr_request_ttl = float(expr_request_ttl_raw)
+        if expr_request_ttl <= 0:
+            raise ValueError("expr_request_ttl must be a positive number")
+    config["expr_request_ttl"] = expr_request_ttl
+
     long_term_raw = config.get("long_term_storage", False)
     if not isinstance(long_term_raw, bool):
         raise ValueError("long_term_storage must be a boolean")
@@ -309,6 +329,19 @@ def config_setup(config: Dict = {}):
             "storage_put_batch_max_bytes too small to hold at least 2 entries"
         )
     config["storage_put_batch_max_bytes"] = batch_budget
+
+    found_pages_raw = config.get(
+        "storage_found_max_pages", DEFAULT_STORAGE_FOUND_MAX_PAGES
+    )
+    if isinstance(found_pages_raw, bool) or not isinstance(found_pages_raw, int):
+        raise ValueError(
+            f"storage_found_max_pages must be an integer: {found_pages_raw!r}"
+        )
+    if found_pages_raw <= 0:
+        raise ValueError("storage_found_max_pages must be a positive integer")
+    if found_pages_raw > 0xFFFF:
+        raise ValueError("storage_found_max_pages must be at most 65535")
+    config["storage_found_max_pages"] = found_pages_raw
 
     fair_use_limit_raw = config.get("fair_use_limit", DEFAULT_FAIR_USE_LIMIT_BYTES)
     try:

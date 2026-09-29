@@ -33,8 +33,8 @@ from astreum.expression import (
 from astreum.communication.storage_request.handle import _collect_record_exprs
 from astreum.communication.storage_response.storage_found import (
     STORAGE_FOUND_PAYLOAD,
-    encode_payload,
-    decode_payload,
+    encode_found_pages,
+    decode_found_page,
 )
 from astreum.storage.exprs.network import (
     _collect_missing_hashes,
@@ -184,54 +184,53 @@ class TestCollectMissingHashes(unittest.TestCase):
 # ===========================================================================
 
 class TestObjectFoundCodec(unittest.TestCase):
-    """Tests for encode_payload / decode_payload roundtrip."""
+    """Tests for encode_found_pages / decode_found_page roundtrip."""
 
     def test_single_roundtrip(self) -> None:
         expr = int_(42)
-        encoded = encode_payload([expr])
-        decoded = decode_payload(encoded[1:])  # strip type byte
+        pages = encode_found_pages([expr])
+        self.assertEqual(len(pages), 1)
+        page, total, decoded = decode_found_page(pages[0])
+        self.assertEqual((page, total), (1, 1))
         self.assertEqual(len(decoded), 1)
         self.assertEqual(decoded[0].hash(), expr.hash())
 
     def test_multi_roundtrip(self) -> None:
         exprs = [int_(i) for i in range(5)]
-        encoded = encode_payload(exprs)
-        decoded = decode_payload(encoded[1:])
+        _, _, decoded = decode_found_page(encode_found_pages(exprs)[0])
         self.assertEqual(len(decoded), 5)
         for original, got in zip(exprs, decoded):
             self.assertEqual(original.hash(), got.hash())
 
     def test_type_byte_is_1(self) -> None:
-        encoded = encode_payload([int_(1)])
+        encoded = encode_found_pages([int_(1)])[0]
         self.assertEqual(encoded[0], STORAGE_FOUND_PAYLOAD)
         self.assertEqual(encoded[0], 1)
 
     def test_link_roundtrip(self) -> None:
-        head = int_(10)
-        tail = int_(20)
-        root = link(head, tail)
-        encoded = encode_payload([root])
-        decoded = decode_payload(encoded[1:])
+        root = link(int_(10), int_(20))
+        _, _, decoded = decode_found_page(encode_found_pages([root])[0])
         self.assertEqual(decoded[0].hash(), root.hash())
 
-    def test_decode_empty_returns_empty_list(self) -> None:
-        result = decode_payload(b"")
-        self.assertEqual(result, [])
+    def test_decode_empty_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            decode_found_page(b"")
 
     def test_decode_truncated_length_raises(self) -> None:
+        header = bytes([1, 0, 1, 0, 1, 0, 1])
         with self.assertRaises(ValueError):
-            decode_payload(b"\x00\x01")  # 2 bytes < 4-byte length prefix
+            decode_found_page(header + b"\x00\x01")  # 2 bytes < 4-byte length prefix
 
     def test_decode_truncated_payload_raises(self) -> None:
-        # Valid length prefix claiming 100 bytes, but only 2 bytes follow
-        payload = (100).to_bytes(4, "big") + b"\x00\x01"
+        header = bytes([1, 0, 1, 0, 1, 0, 1])
+        payload = header + (100).to_bytes(4, "big") + b"\x00\x01"
         with self.assertRaises(ValueError):
-            decode_payload(payload)
+            decode_found_page(payload)
 
     def test_decode_invalid_length_zero_raises(self) -> None:
-        payload = (0).to_bytes(4, "big")
+        header = bytes([1, 0, 1, 0, 1, 0, 1])
         with self.assertRaises(ValueError):
-            decode_payload(payload)
+            decode_found_page(header + (0).to_bytes(4, "big"))
 
 
 # ===========================================================================

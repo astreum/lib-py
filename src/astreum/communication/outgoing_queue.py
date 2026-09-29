@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Tuple
 
-from astreum.communication.message_pow import NONCE_SIZE, calculate_message_nonce
+from astreum.communication.message_pow import (
+    MAX_UDP_DATAGRAM_BYTES,
+    NONCE_SIZE,
+    calculate_message_nonce,
+)
 
 if TYPE_CHECKING:
     from astreum.communication.models.message import Message
@@ -23,6 +27,16 @@ def enqueue_outgoing(
         message.sender_public_key_bytes = node.config["relay_public_key_bytes"]
 
     payload = message.to_bytes()
+
+    if NONCE_SIZE + len(payload) > MAX_UDP_DATAGRAM_BYTES:
+        node.logger.warning(
+            "Dropping oversized outgoing message (bytes=%s limit=%s address=%s topic=%s)",
+            NONCE_SIZE + len(payload),
+            MAX_UDP_DATAGRAM_BYTES,
+            address,
+            getattr(message, "topic", None),
+        )
+        return False
 
     try:
         difficulty_value = int(difficulty)

@@ -11,7 +11,10 @@ from astreum.communication.storage_request.payment_required import (
 from astreum.communication.storage_request.peer_contact import encode_peer_contact_bytes
 from astreum.communication.storage_response.code import StorageResponseCode
 from astreum.communication.storage_response.model import StorageResponse
-from astreum.communication.storage_response.storage_found import encode_payload
+from astreum.communication.storage_response.storage_found import (
+    encode_found_pages,
+    found_page_expr_bytes,
+)
 from astreum.communication.outgoing_queue import enqueue_outgoing
 from astreum.expression import (
     RESOLUTION_SINGLE,
@@ -24,6 +27,7 @@ from astreum.expression import (
 )
 from astreum.expression.encoding import encode_expr_to_bytes
 from astreum.storage.exprs import get_expr_from_local_storage
+from astreum.storage.requests import DEFAULT_STORAGE_FOUND_MAX_PAGES
 from astreum.storage.records import get_record_from_cold_storage
 from astreum.communication.util import xor_distance
 from astreum.storage.providers import provider_id_for_payload, provider_payload_for_id
@@ -204,25 +208,59 @@ def handle_storage_request(node: "Node", peer: "Peer", message: Message) -> tupl
                     len(exprs),
                     peer.address,
                 )
-                resp = StorageResponse(
-                    code=StorageResponseCode.STORAGE_FOUND,
-                    data=encode_payload(exprs),
-                    expr_id=expr_id,
+                def _skip(expr, size: int) -> None:
+                    node.logger.error(
+                        "STORAGE_FOUND for %s: skipping oversized expr %s (%d bytes)",
+                        expr_id.hex(),
+                        expr.hash().hex(),
+                        size,
+                    )
+
+                try:
+                    payloads = encode_found_pages(exprs, on_skip=_skip)
+                except ValueError as exc:
+                    node.logger.error(
+                        "STORAGE_FOUND for %s not sent: %s", expr_id.hex(), exc
+                    )
+                    return False, "root expr too large"
+                max_pages = (getattr(node, "config", None) or {}).get(
+                    "storage_found_max_pages", DEFAULT_STORAGE_FOUND_MAX_PAGES
                 )
-                resp_msg = Message(
-                    topic=MessageTopic.STORAGE_RESPONSE,
-                    body=resp.to_bytes(),
-                    sender_public_key_bytes=node.storage_public_key_bytes,
+                if len(payloads) > max_pages:
+                    node.logger.error(
+                        "STORAGE_FOUND for %s not sent: %d pages exceeds storage_found_max_pages=%d",
+                        expr_id.hex(),
+                        len(payloads),
+                        max_pages,
+                    )
+                    return False, "response too large"
+                payload_sizes = [found_page_expr_bytes(p) for p in payloads]
+                node.logger.debug(
+                    "STORAGE_FOUND for %s split into %d pages",
+                    expr_id.hex(),
+                    len(payloads),
                 )
-                resp_msg.encrypt(peer.shared_key_bytes)
-                queued = enqueue_outgoing(
-                    node,
-                    peer.address,
-                    message=resp_msg,
-                    difficulty=peer.difficulty,
-                )
-                if queued:
-                    increment_peer_metric(peer, "shared_storage_upload", shared_storage_size)
+
+                for found_payload, payload_size in zip(payloads, payload_sizes):
+                    resp = StorageResponse(
+                        code=StorageResponseCode.STORAGE_FOUND,
+                        data=found_payload,
+                        expr_id=expr_id,
+                    )
+                    resp_msg = Message(
+                        topic=MessageTopic.STORAGE_RESPONSE,
+                        body=resp.to_bytes(),
+                        sender_public_key_bytes=node.storage_public_key_bytes,
+                    )
+                    resp_msg.encrypt(peer.shared_key_bytes)
+                    queued = enqueue_outgoing(
+                        node,
+                        peer.address,
+                        message=resp_msg,
+                        difficulty=peer.difficulty,
+                    )
+                    if queued:
+                        increment_peer_metric(peer, "shared_storage_upload", payload_size)
                 return True, None
 
             if expr_id in node.storage_index:

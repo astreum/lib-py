@@ -6,7 +6,7 @@ from time import sleep
 from typing import Optional
 
 from astreum.storage.exprs.local import get_expr_from_local_storage
-from astreum.storage.requests import add_expr_req
+from astreum.storage.requests import claim_expr_req, pop_expr_req
 from astreum.expression import Expr, RESOLUTION_SINGLE, RESOLUTION_LIST, RESOLUTION_FULL
 
 
@@ -69,13 +69,21 @@ def _send_storage_request(node, expr_id: bytes, resolution: int) -> Optional[str
                     sender_public_key_bytes=node.storage_public_key_bytes,
                 )
                 message.encrypt(shared_key_bytes)
-                add_expr_req(node, expr_id, resolution)
-                queued = enqueue_outgoing(
-                    node,
-                    (provider_address, provider_port),
-                    message=message,
-                    difficulty=1,
-                )
+                if not claim_expr_req(node, expr_id, resolution):
+                    node.logger.debug("GET for %s already pending", expr_id.hex())
+                    return None
+                try:
+                    queued = enqueue_outgoing(
+                        node,
+                        (provider_address, provider_port),
+                        message=message,
+                        difficulty=1,
+                    )
+                except Exception:
+                    pop_expr_req(node, expr_id)
+                    raise
+                if not queued:
+                    pop_expr_req(node, expr_id)
                 if queued:
                     node.logger.debug(
                         "Requested %s %s from indexed provider %s:%s",
@@ -122,7 +130,9 @@ def _send_storage_request(node, expr_id: bytes, resolution: int) -> Optional[str
         return f"failed to build storage request: {exc}"
 
     message.encrypt(closest_peer.shared_key_bytes)
-    add_expr_req(node, expr_id, resolution)
+    if not claim_expr_req(node, expr_id, resolution):
+        node.logger.debug("GET for %s already pending", expr_id.hex())
+        return None
 
     try:
         queued = enqueue_outgoing(
@@ -131,6 +141,8 @@ def _send_storage_request(node, expr_id: bytes, resolution: int) -> Optional[str
             message=message,
             difficulty=closest_peer.difficulty,
         )
+        if not queued:
+            pop_expr_req(node, expr_id)
         if queued:
             node.logger.debug(
                 "Queued STORAGE_GET %s for %s to peer %s",
@@ -146,6 +158,7 @@ def _send_storage_request(node, expr_id: bytes, resolution: int) -> Optional[str
                 closest_peer.address,
             )
     except Exception as exc:
+        pop_expr_req(node, expr_id)
         return f"failed to queue STORAGE_GET: {exc}"
     return None
 

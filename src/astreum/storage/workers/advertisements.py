@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from astreum.consensus.constants import STORAGE_ADDRESS
 from astreum.storage.advertisements import advertise_exprs
 from astreum.storage.radix import RadixTree, get_from_radix_tree
+from astreum.storage.requests import prune_expired_expr_reqs
 from astreum.storage.records import (
     fetch_and_store_record,
     get_record_from_cold_storage,
@@ -124,9 +125,7 @@ def advertise_storage(astreum_node: "Node") -> None:
             already initialized (``setup_storage`` must have been called).
     """
     price_interval = float(astreum_node.config.get("storage_request_price_interval") or 0)
-    if price_interval <= 0:
-        astreum_node.logger.info("Storage advertiser disabled (no price interval configured)")
-        return
+    prune_interval = float(astreum_node.config.get("expr_request_ttl") or 0)
 
     long_term_interval = float(
         getattr(astreum_node, "long_term_storage_interval", 0) or 0
@@ -148,6 +147,7 @@ def advertise_storage(astreum_node: "Node") -> None:
     now = time.monotonic()
     next_price_at = now if price_interval > 0 else None
     next_long_term_at = now if long_term_enabled and long_term_interval > 0 else None
+    next_prune_at = now + prune_interval if prune_interval > 0 else None
 
     while not stop.is_set():
         now = time.monotonic()
@@ -168,7 +168,19 @@ def advertise_storage(astreum_node: "Node") -> None:
             while next_long_term_at <= now:
                 next_long_term_at += long_term_interval
 
-        deadlines = [d for d in (next_price_at, next_long_term_at) if d is not None]
+        if next_prune_at is not None and now >= next_prune_at:
+            try:
+                removed = prune_expired_expr_reqs(astreum_node)
+                if removed:
+                    astreum_node.logger.debug("Pruned %d expired expr requests", removed)
+            except Exception as exc:
+                astreum_node.logger.exception("Expr request prune failed: %s", exc)
+            while next_prune_at <= now:
+                next_prune_at += prune_interval
+
+        deadlines = [
+            d for d in (next_price_at, next_long_term_at, next_prune_at) if d is not None
+        ]
         if not deadlines:
             stop.wait(1.0)
             continue

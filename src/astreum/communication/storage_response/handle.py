@@ -2,10 +2,8 @@ from typing import TYPE_CHECKING
 
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import increment_peer_metric
-from astreum.communication.storage_response.storage_found import (
-    STORAGE_FOUND_PAYLOAD,
-    decode_payload,
-)
+from astreum.communication.storage_response.cull import cull_to_resolution
+from astreum.communication.storage_response.storage_found import decode_found_page
 from astreum.communication.storage_response.code import StorageResponseCode
 from astreum.communication.storage_response.model import StorageResponse
 from astreum.communication.storage_response.storage_payment_required import decode_storage_payment_required
@@ -13,8 +11,13 @@ from astreum.communication.storage_response.storage_provider import decode_stora
 from astreum.communication.storage_response.retry import _retry_pending_storage_get_via_peer_contact
 from astreum.expression import Expr
 from astreum.expression.encoding import encode_expr_to_bytes
-from astreum.storage.exprs import put_expr_in_hot_storage
-from astreum.storage.requests import has_expr_req, pop_expr_req
+from astreum.storage.exprs import get_expr_from_local_storage, put_expr_in_hot_storage
+from astreum.storage.requests import (
+    StageResult,
+    has_expr_req,
+    pop_expr_req,
+    stage_found_page,
+)
 
 if TYPE_CHECKING:
     from astreum.communication import Node
@@ -44,19 +47,8 @@ def handle_storage_response(node: "Node", peer: "Peer", message: Message) -> tup
                 )
                 return False, "STORAGE_FOUND payload missing content"
 
-            payload_type = payload[0]
-            body = payload[1:]
-
-            if payload_type != STORAGE_FOUND_PAYLOAD:
-                node.logger.debug(
-                    "Unknown STORAGE_FOUND payload type %s for %s",
-                    payload_type,
-                    storage_response.expr_id.hex(),
-                )
-                return False, f"unknown STORAGE_FOUND payload type {payload_type}"
-
             try:
-                exprs = decode_payload(body)
+                page, total, page_exprs = decode_found_page(payload)
             except Exception as exc:
                 node.logger.debug(
                     "Invalid STORAGE_FOUND payload for %s: %s",
@@ -65,41 +57,70 @@ def handle_storage_response(node: "Node", peer: "Peer", message: Message) -> tup
                 )
                 return False, "invalid STORAGE_FOUND payload"
 
-            if not exprs:
+            result, request = stage_found_page(
+                node,
+                storage_response.expr_id,
+                peer.public_key_bytes,
+                page,
+                total,
+                page_exprs,
+            )
+            if result is StageResult.IGNORED:
                 node.logger.debug(
-                    "STORAGE_FOUND payload for %s contained no exprs",
+                    "STORAGE_FOUND page %d/%d for %s ignored",
+                    page,
+                    total,
                     storage_response.expr_id.hex(),
                 )
-                return False, "STORAGE_FOUND payload contained no exprs"
+                return True, None
+            if result is StageResult.STAGED:
+                return True, None
 
-            root_id = exprs[0].hash()
-            if storage_response.expr_id != root_id:
-                node.logger.debug(
-                    "STORAGE_FOUND root ID mismatch (expected=%s got=%s)",
-                    storage_response.expr_id.hex(),
-                    root_id.hex(),
-                )
-                return False, "STORAGE_FOUND root ID mismatch"
+            # Every page has arrived; the request is already popped. Nothing
+            # has touched hot storage yet.
+            root_id = storage_response.expr_id
+            exprs = [e for n in sorted(request.pages) for e in request.pages[n]]
 
             from astreum.storage.admission import is_expr_in_latest_block
-            if not is_expr_in_latest_block(node, storage_response.expr_id):
+            if not is_expr_in_latest_block(node, root_id):
                 node.logger.debug(
                     "STORAGE_FOUND rejected for %s: uncommitted data",
-                    storage_response.expr_id.hex(),
+                    root_id.hex(),
                 )
                 return False, "uncommitted data rejected"
 
-            pop_expr_req(node, root_id)
+            root = next((e for e in exprs if e.hash() == root_id), None)
+            if root is None:
+                node.logger.debug(
+                    "STORAGE_FOUND root ID mismatch (expected=%s)", root_id.hex()
+                )
+                return False, "STORAGE_FOUND root ID mismatch"
+
+            kept = cull_to_resolution(
+                root,
+                exprs,
+                request.payload_type,
+                resolve_local=lambda h: get_expr_from_local_storage(node, h),
+            )
+            if len(kept) < len(exprs):
+                node.logger.debug(
+                    "STORAGE_FOUND for %s: dropped %d of %d exprs outside resolution %s",
+                    root_id.hex(),
+                    len(exprs) - len(kept),
+                    len(exprs),
+                    request.payload_type,
+                )
+
             increment_peer_metric(
                 peer,
                 "shared_storage_download",
-                sum(len(encode_expr_to_bytes(expr)) for expr in exprs),
+                sum(len(encode_expr_to_bytes(expr)) for expr in kept),
             )
             hot_store_failures = 0
-            for expr in exprs[1:]:
+            for expr in kept[1:]:
                 if not put_expr_in_hot_storage(node, expr):
                     hot_store_failures += 1
-            if not put_expr_in_hot_storage(node, exprs[0]):
+            if not put_expr_in_hot_storage(node, root):
                 hot_store_failures += 1
             if hot_store_failures:
                 return (
