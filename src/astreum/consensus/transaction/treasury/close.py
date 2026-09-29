@@ -15,7 +15,7 @@ from astreum.consensus.transaction.treasury.record import (
     TreasuryUserRecord,
 )
 from astreum.consensus.transaction.treasury.utils import (
-    _return_claimed_offer_limits,
+    _release_guarantees,
     _trie_exprs,
 )
 
@@ -218,7 +218,7 @@ def handle_treasury_close(
     if write_off_amount:
         block.global_defaulted = getattr(block, "global_defaulted", 0) + write_off_amount
 
-    pending_exprs = pending_exprs + _return_claimed_offer_limits(
+    pending_exprs = pending_exprs + _release_guarantees(
         node, treasury_account, updated_loan
     )
 

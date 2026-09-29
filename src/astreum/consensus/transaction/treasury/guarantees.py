@@ -10,7 +10,7 @@ from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.transaction.treasury.record import (
-    TreasuryCreditOffer,
+    TreasuryGuarantee,
     TreasuryUserRecord,
 )
 from astreum.consensus.transaction.treasury.utils import _trie_exprs
@@ -65,7 +65,7 @@ def _current_height(block: object) -> int:
     )
 
 
-def handle_treasury_sell(
+def handle_treasury_guarantee(
     *,
     node: Any,
     block: object,
@@ -74,37 +74,37 @@ def handle_treasury_sell(
     sender_account: Any,
     treasury_account: Any,
 ) -> int:
-    """Post a new `TreasuryCreditOffer` into the sender's own offers trie.
+    """Post a new `TreasuryGuarantee` into the sender's own guarantees trie.
 
-    Validates the offer's fields (``limit``, ``duration``, ``price``,
+    Validates the guarantee's fields (``amount``, ``duration``, ``price``,
     ``expiry``), loads (or creates, on first post) the sender's
-    `TreasuryUserRecord`, inserts the offer into that record's
-    ``offers_root_hash`` trie keyed by *transaction_hash*, and writes the
-    updated record back. No principal moves on a post — the offer only
+    `TreasuryUserRecord`, inserts the guarantee into that record's
+    ``guarantees_root_hash`` trie keyed by *transaction_hash*, and writes the
+    updated record back. No principal moves on a post — the guarantee only
     becomes economically active once a consumer claims it (see
-    `claim_offer`).
+    `claim_guarantee`).
 
     Args:
         node: Storage node used to resolve and persist trie/expr data.
-        block: The block currently being applied against; the offer's
+        block: The block currently being applied against; the guarantee's
             validity is checked against this block's height and its pending
-            exprs are extended with everything the offer/record needs
+            exprs are extended with everything the guarantee/record needs
             persisted.
-        transaction: The decoded `TREASURY_SELL` transaction. Its ``data``
-            must decode to four ints: ``limit``, ``duration``, ``price``,
+        transaction: The decoded `TREASURY_GUARANTEE` transaction. Its ``data``
+            must decode to four ints: ``amount``, ``duration``, ``price``,
             ``expiry`` (in that order).
         transaction_hash: The 32-byte hash of *transaction*; used as the
-            offer's key inside the seller's offers trie.
+            guarantee's key inside the guarantor's guarantees trie.
         sender_account: The sender's account (unused directly here — no
             balance changes happen on a post — kept for handler-signature
             consistency with the other treasury handlers).
         treasury_account: The `TREASURY_ADDRESS` account. Its ``data`` trie
-            holds every seller's `TreasuryUserRecord`, keyed by sender
+            holds every guarantor's `TreasuryUserRecord`, keyed by sender
             address.
 
     Returns:
         `STATUS_SUCCESS` on success, `STATUS_FAILED` if any guard fails
-        (wrong recipient/sender, malformed data, non-positive `limit`,
+        (wrong recipient/sender, malformed data, non-positive `amount`,
         non-pow2 `duration`, negative `price`, already-expired `expiry`, or
         a colliding transaction hash).
     """
@@ -118,22 +118,22 @@ def handle_treasury_sell(
     nodes = _data_nodes(transaction.data)
     if len(nodes) != 4:
         return STATUS_FAILED
-    limit_node, duration_node, price_node, expiry_node = nodes
+    amount_node, duration_node, price_node, expiry_node = nodes
     if (
-        limit_node._tag != "int"
+        amount_node._tag != "int"
         or duration_node._tag != "int"
         or price_node._tag != "int"
         or expiry_node._tag != "int"
     ):
         return STATUS_FAILED
 
-    limit = limit_node.value
+    amount = amount_node.value
     duration = duration_node.value
     price = price_node.value
     expiry = expiry_node.value
 
     current_height = _current_height(block)
-    if limit <= 0:
+    if amount <= 0:
         return STATUS_FAILED
     if duration <= 0 or (duration & (duration - 1)) != 0:
         return STATUS_FAILED
@@ -147,28 +147,28 @@ def handle_treasury_sell(
     if user_record is None:
         user_record = TreasuryUserRecord()
 
-    offer_record = TreasuryCreditOffer(
-        limit=limit,
+    guarantee_record = TreasuryGuarantee(
+        amount=amount,
         duration=duration,
         price=price,
         expiry=expiry,
         claimed_by=ZERO32,
     )
-    offer_record_head = offer_record.expr().hash()
+    guarantee_record_head = guarantee_record.expr().hash()
 
-    offers_root_hash = user_record.offers_root_hash or ZERO32
-    offers_trie = RadixTree(
-        root_hash=None if offers_root_hash == ZERO32 else offers_root_hash
+    guarantees_root_hash = user_record.guarantees_root_hash or ZERO32
+    guarantees_trie = RadixTree(
+        root_hash=None if guarantees_root_hash == ZERO32 else guarantees_root_hash
     )
-    if get_from_radix_tree(offers_trie, node, transaction_hash) is not None:
+    if get_from_radix_tree(guarantees_trie, node, transaction_hash) is not None:
         return STATUS_FAILED
 
-    put_in_radix_tree(offers_trie, node, transaction_hash, offer_record_head)
-    offer_exprs, _ = resolve_inner_exprs(node, offer_record.expr())
+    put_in_radix_tree(guarantees_trie, node, transaction_hash, guarantee_record_head)
+    guarantee_exprs, _ = resolve_inner_exprs(node, guarantee_record.expr())
 
     updated_user_record = replace(
         user_record,
-        offers_root_hash=offers_trie.root_hash or ZERO32,
+        guarantees_root_hash=guarantees_trie.root_hash or ZERO32,
     )
     updated_user_record_head = updated_user_record.expr().hash()
     put_in_radix_tree(
@@ -181,66 +181,66 @@ def handle_treasury_sell(
     user_record_exprs, _ = resolve_inner_exprs(node, updated_user_record.expr())
     _extend_pending_exprs(
         block,
-        offer_exprs + _trie_exprs(offers_trie) + user_record_exprs,
+        guarantee_exprs + _trie_exprs(guarantees_trie) + user_record_exprs,
     )
     return STATUS_SUCCESS
 
 
-def claim_offer(
+def claim_guarantee(
     *,
-    offers_trie: RadixTree,
+    guarantees_trie: RadixTree,
     node: Any,
-    offer_transaction_id: bytes,
+    guarantee_transaction_id: bytes,
     claimant_id: bytes,
     current_height: int,
-) -> TreasuryCreditOffer | None:
-    """Claim an available offer in *offers_trie* by its posting transaction id.
+) -> TreasuryGuarantee | None:
+    """Claim an available guarantee in *guarantees_trie* by its posting transaction id.
 
     A claim is permanent: once ``claimed_by`` is set it never resets, the
-    offer stays claimed in the seller's record forever. There is no "free"
+    guarantee stays claimed in the guarantor's record forever. There is no "free"
     operation and no transaction code to release a claim.
 
-    Does not touch the seller's ``TreasuryUserRecord.offers_root_hash``
-    field itself — the caller must write ``offers_trie.root_hash`` back
+    Does not touch the guarantor's ``TreasuryUserRecord.guarantees_root_hash``
+    field itself — the caller must write ``guarantees_trie.root_hash`` back
     into that field after the call, since the caller is the one holding the
-    seller's record in the current transaction's working set (possibly
-    alongside several other sellers' records in one transaction, e.g. a
-    multi-offer claim).
+    guarantor's record in the current transaction's working set (possibly
+    alongside several other guarantors' records in one transaction, e.g. a
+    multi-guarantee claim).
 
     Args:
-        offers_trie: The seller's offers trie, opened from
-            ``TreasuryUserRecord.offers_root_hash``.
+        guarantees_trie: The guarantor's guarantees trie, opened from
+            ``TreasuryUserRecord.guarantees_root_hash``.
         node: Storage node used to resolve and persist trie/expr data.
-        offer_transaction_id: The 32-byte `TREASURY_SELL` transaction hash
-            identifying the offer to claim (the key it was stored under).
+        guarantee_transaction_id: The 32-byte `TREASURY_GUARANTEE` transaction hash
+            identifying the guarantee to claim (the key it was stored under).
         claimant_id: Opaque 32-byte id to record as the claimant (e.g. a
-            loan transaction hash). The offer mechanism itself is agnostic
+            loan transaction hash). The guarantee mechanism itself is agnostic
             to what this id represents.
         current_height: The current block height, used to reject claims on
-            an offer whose ``expiry`` has already passed.
+            a guarantee whose ``expiry`` has already passed.
 
     Returns:
-        The updated (claimed) `TreasuryCreditOffer` on success, or ``None``
-        if the offer doesn't exist, is already claimed
-        (``offer.claimed_by != ZERO32``), or is expired
-        (``current_height >= offer.expiry``).
+        The updated (claimed) `TreasuryGuarantee` on success, or ``None``
+        if the guarantee doesn't exist, is already claimed
+        (``guarantee.claimed_by != ZERO32``), or is expired
+        (``current_height >= guarantee.expiry``).
     """
-    offer_head = get_from_radix_tree(offers_trie, node, offer_transaction_id)
-    offer = TreasuryCreditOffer.from_storage(node, offer_head or ZERO32)
-    if offer is None:
+    guarantee_head = get_from_radix_tree(guarantees_trie, node, guarantee_transaction_id)
+    guarantee = TreasuryGuarantee.from_storage(node, guarantee_head or ZERO32)
+    if guarantee is None:
         return None
-    if offer.claimed_by != ZERO32:
+    if guarantee.claimed_by != ZERO32:
         return None
-    if current_height >= offer.expiry:
+    if current_height >= guarantee.expiry:
         return None
 
-    updated_offer = TreasuryCreditOffer(
-        limit=offer.limit,
-        duration=offer.duration,
-        price=offer.price,
-        expiry=offer.expiry,
+    updated_guarantee = TreasuryGuarantee(
+        amount=guarantee.amount,
+        duration=guarantee.duration,
+        price=guarantee.price,
+        expiry=guarantee.expiry,
         claimed_by=claimant_id,
     )
-    updated_offer_head = updated_offer.expr().hash()
-    put_in_radix_tree(offers_trie, node, offer_transaction_id, updated_offer_head)
-    return updated_offer
+    updated_guarantee_head = updated_guarantee.expr().hash()
+    put_in_radix_tree(guarantees_trie, node, guarantee_transaction_id, updated_guarantee_head)
+    return updated_guarantee

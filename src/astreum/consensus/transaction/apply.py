@@ -30,7 +30,7 @@ from astreum.consensus.transaction.treasury.record import (
 )
 from astreum.consensus.transaction.treasury.close import handle_treasury_close
 from astreum.consensus.transaction.treasury.repay import handle_treasury_repay
-from astreum.consensus.transaction.treasury.offers import handle_treasury_sell
+from astreum.consensus.transaction.treasury.guarantees import handle_treasury_guarantee
 from astreum.consensus.transaction.treasury.buy import handle_treasury_buy
 from astreum.consensus.transaction.treasury.claim import handle_treasury_claim
 
@@ -94,7 +94,7 @@ def _apply_tx_effects(
     if transaction.code in (
         TransactionCode.CHANNEL_WITHDRAW,
         TransactionCode.TREASURY_BORROW,
-        TransactionCode.TREASURY_SELL,
+        TransactionCode.TREASURY_GUARANTEE,
         TransactionCode.TREASURY_BUY,
     ):
         transfer_amount = 0
@@ -306,12 +306,12 @@ def _apply_tx_effects(
             else:
                 transfer_amount = 0
 
-        case TransactionCode.TREASURY_SELL:
+        case TransactionCode.TREASURY_GUARANTEE:
             transfer_amount = 0
             treasury_account = block.accounts.get_account(address=TREASURY_ADDRESS, node=node)
             recipient_account = treasury_account
             if receipt_status == STATUS_SUCCESS:
-                receipt_status = handle_treasury_sell(
+                receipt_status = handle_treasury_guarantee(
                     node=node,
                     block=block,
                     transaction=transaction,

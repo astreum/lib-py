@@ -17,7 +17,7 @@ from astreum.consensus.transaction.treasury.record import (
 from astreum.consensus.transaction.treasury.utils import (
     _interest_paid_delta,
     _paid_payment_count,
-    _return_claimed_offer_limits,
+    _release_guarantees,
     _trie_exprs,
 )
 
@@ -194,7 +194,7 @@ def handle_treasury_repay(
         block.global_defaulted = getattr(block, "global_defaulted", 0) + write_off_amount
 
     if next_payment_block_number == 0:
-        pending_exprs = pending_exprs + _return_claimed_offer_limits(
+        pending_exprs = pending_exprs + _release_guarantees(
             node, treasury_account, updated_loan
         )
 

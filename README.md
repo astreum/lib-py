@@ -139,11 +139,11 @@ The node must already be connected and have a `latest_block`; otherwise the func
 
 ## Treasury Overview
 
-The treasury account (`TREASURY_ADDRESS`) tracks per-participant state in a `TreasuryUserRecord`, keyed by address inside the treasury account's own data trie: staked `balance`, a `loans_root_hash` trie of secured loans, `total_interest_paid`, an `offers_root_hash` trie of posted limit offers, and three unsecured-lending counters — `loaned`, `defaulted`, and `sold_limit` (see below).
+The treasury account (`TREASURY_ADDRESS`) tracks per-participant state in a `TreasuryUserRecord`, keyed by address inside the treasury account's own data trie: staked `balance`, a `loans_root_hash` trie of secured loans, `total_interest_paid`, a `guarantees_root_hash` trie of posted guarantees, and three unsecured-lending counters — `loaned`, `defaulted`, and `guaranteed` (see below).
 
-### Limit offers (`TREASURY_SELL`)
+### Guarantees (`TREASURY_GUARANTEE`)
 
-A limit seller posts a fixed-size, fixed-duration, fixed-price offer of capacity with `TREASURY_SELL`. The offer is stored in the seller's own `TreasuryUserRecord.offers_root_hash` trie, keyed by the hash of the transaction that created it — no principal moves on a post; the offer only becomes economically active once claimed.
+A guarantor sells a fixed-size, fixed-duration, fixed-price guarantee with `TREASURY_GUARANTEE`. The guarantee is stored in the guarantor's own `TreasuryUserRecord.guarantees_root_hash` trie, keyed by the hash of the transaction that created it — no principal moves on a post; the guarantee only becomes economically active once claimed by a borrower. If the borrower defaults, the guarantor does not pay ASTR: that share of their guarantee capacity is permanently consumed instead.
 
 ```python
 from astreum.consensus.transaction import create_transaction
@@ -155,35 +155,35 @@ tx = create_transaction(
     counter=sender_account.counter + 1,
     sender=sender_public_key,
     recipient=TREASURY_ADDRESS,
-    code=TransactionCode.TREASURY_SELL,
-    limit=1_000,     # capacity this offer covers
+    code=TransactionCode.TREASURY_GUARANTEE,
+    guarantee_amount=1_000,  # capacity this guarantee covers
     duration=8,       # term in blocks; must be a power of 2
-    price=50,         # flat fee paid to the seller at claim time
-    expiry=100_000,   # block height after which an unclaimed offer can never be claimed
+    price=50,         # flat fee paid to the guarantor at claim time
+    expiry=100_000,   # block height after which an unclaimed guarantee can never be claimed
 )
 tx.sign(sender_key)
 ```
 
 | Parameter  | Type  | Description |
 |------------|-------|--------------|
-| `limit`    | `int` | Exact capacity this offer covers. Must be `> 0`. |
+| `guarantee_amount` | `int` | Exact capacity this guarantee covers. Must be `> 0`. |
 | `duration` | `int` | Term in blocks. Must be `> 0` and a power of 2. |
-| `price`    | `int` | Flat fee paid to the seller, in ASTR, in full, at claim time. Must be `>= 0`. |
-| `expiry`   | `int` | Block height after which an unclaimed offer can never be claimed. Must be greater than the current block height. |
+| `price`    | `int` | Flat fee paid to the guarantor, in ASTR, in full, at claim time. Must be `>= 0`. |
+| `expiry`   | `int` | Block height after which an unclaimed guarantee can never be claimed. Must be greater than the current block height. |
 
-### `claim_offer(...)`
+### `claim_guarantee(...)`
 
-Consumer-specific transaction handlers claim a posted offer directly against the seller's offers trie:
+Consumer-specific transaction handlers claim a posted guarantee directly against the guarantor's guarantees trie:
 
 ```python
-from astreum.consensus.transaction.treasury.offers import claim_offer
+from astreum.consensus.transaction.treasury.guarantees import claim_guarantee
 from astreum.storage.radix import RadixTree
 
-offers_trie = RadixTree(root_hash=seller_user_record.offers_root_hash)
-updated_offer = claim_offer(
-    offers_trie=offers_trie,
+guarantees_trie = RadixTree(root_hash=guarantor_user_record.guarantees_root_hash)
+updated_guarantee = claim_guarantee(
+    guarantees_trie=guarantees_trie,
     node=node,
-    offer_transaction_id=offer_tx_hash,   # the TREASURY_SELL tx hash that created the offer
+    guarantee_transaction_id=guarantee_tx_hash,   # the TREASURY_GUARANTEE tx hash that created the guarantee
     claimant_id=claimant_id,              # opaque 32-byte id, e.g. a loan transaction hash
     current_height=block.height,
 )
@@ -191,17 +191,17 @@ updated_offer = claim_offer(
 
 | Parameter | Type | Description |
 |-----------|------|--------------|
-| `offers_trie` | `RadixTree` | The seller's offers trie, opened from `TreasuryUserRecord.offers_root_hash`. |
+| `guarantees_trie` | `RadixTree` | The guarantor's guarantees trie, opened from `TreasuryUserRecord.guarantees_root_hash`. |
 | `node` | `Node` | Storage node used to resolve and persist trie/expr data. |
-| `offer_transaction_id` | `bytes` | The 32-byte `TREASURY_SELL` transaction hash identifying the offer. |
+| `guarantee_transaction_id` | `bytes` | The 32-byte `TREASURY_GUARANTEE` transaction hash identifying the guarantee. |
 | `claimant_id` | `bytes` | Opaque 32-byte id recorded as the claimant. |
 | `current_height` | `int` | Current block height, used to reject claims past `expiry`. |
 
-Returns the updated (claimed) `TreasuryCreditOffer`, or `None` if the offer doesn't exist, is already claimed, or is expired (`current_height >= expiry`). **A claim is permanent** — once `claimed_by` is set it never resets, and there is no "free" operation or transaction code to release it. `claim_offer` does not touch the seller's `TreasuryUserRecord.offers_root_hash` field itself — the caller must write the trie's new root hash back into that field.
+Returns the updated (claimed) `TreasuryGuarantee`, or `None` if the guarantee doesn't exist, is already claimed, or is expired (`current_height >= expiry`). **A claim is permanent** — once `claimed_by` is set it never resets, and there is no "free" operation or transaction code to release it. `claim_guarantee` does not touch the guarantor's `TreasuryUserRecord.guarantees_root_hash` field itself — the caller must write the trie's new root hash back into that field.
 
 ### Unsecured loans (`TREASURY_BORROW`, `loan_type=UNSECURED`)
 
-An unsecured borrow assembles its principal by claiming one or more limit offers instead of posting stake. The borrower references each offer as a `(seller_address, offer_transaction_id)` pair; the handler claims every offer (permanently, via `claim_offer`), requires their combined `limit` to cover the loan's discounted (present-value) amount, and disburses `discounted_amount - insurance_fee - sum(price)` to the borrower — the insurance fee and every seller's price are deducted up front, not billed separately.
+An unsecured borrow assembles its principal by claiming one or more guarantees instead of posting stake. The borrower references each guarantee as a `(guarantor_address, guarantee_transaction_id)` pair; the handler claims every guarantee (permanently, via `claim_guarantee`), requires their combined `amount` to cover the loan's discounted (present-value) amount, and disburses `discounted_amount - insurance_fee - sum(price)` to the borrower — the insurance fee and every guarantor's price are deducted up front, not billed separately.
 
 ```python
 tx = create_transaction(
@@ -214,12 +214,12 @@ tx = create_transaction(
     payment_interval_blocks=10,
     payment_count=5,
     loan_type=LoanType.UNSECURED,
-    offer_refs=[(seller_public_key, offer_tx_hash)],  # one or more (seller, offer_tx_id) pairs
+    guarantee_refs=[(guarantor_public_key, guarantee_tx_hash)],  # one or more (guarantor, guarantee_tx_id) pairs
 )
 tx.sign(sender_key)
 ```
 
-Each claimed offer's `duration` must equal `payment_interval_blocks * payment_count`, and a seller can never have more limit in play than they've paid in interest across their own borrowing history: `sold_limit + offer.limit <= total_interest_paid`. The **insurance fee** is derived entirely from network history — no fixed rate is set by either party:
+Each claimed guarantee's `duration` must equal `payment_interval_blocks * payment_count`, and a guarantor can never have more guaranteed than they've paid in interest across their own borrowing history: `guaranteed + guarantee.amount <= total_interest_paid`. The **insurance fee** is derived entirely from network history — no fixed rate is set by either party:
 
 ```
 insurance_fee = discounted_amount * (borrower.defaulted * gc + gd) // (borrower.loaned * gc + gl)
@@ -227,7 +227,7 @@ insurance_fee = discounted_amount * (borrower.defaulted * gc + gd) // (borrower.
 
 where `gc`/`gd`/`gl` are the block's running `global_loan_count`/`global_defaulted`/`global_loaned` totals. A first-ever unsecured loan on the network (`gc == 0`) pays `insurance_fee = 0`.
 
-**Defaults are recorded at repay/close time**, not via a separate claim mechanism: an installment still unpaid after its due block is written off on the next `TREASURY_REPAY`/`TREASURY_CLOSE` against that loan — added to the borrower's `defaulted` and the block's `global_defaulted` (both permanent), and the loan's schedule pointer advances past it the same way a real payment would. A loan whose every remaining installment is overdue closes as fully defaulted and refunds the submitted amount. Each backing seller's `sold_limit` is credited back once, when the loan finally reaches full payoff/close/write-off, in proportion to how much of the loan was actually paid: `offer.limit * (payment_count - missed_count) // payment_count`. Whatever isn't returned stays in `sold_limit` permanently — a seller's real, unrecoverable loss on that loan.
+**Defaults are recorded at repay/close time**, not via a separate claim mechanism: an installment still unpaid after its due block is written off on the next `TREASURY_REPAY`/`TREASURY_CLOSE` against that loan — added to the borrower's `defaulted` and the block's `global_defaulted` (both permanent), and the loan's schedule pointer advances past it the same way a real payment would. A loan whose every remaining installment is overdue closes as fully defaulted and refunds the submitted amount. Each backing guarantor's `guaranteed` is credited back once, when the loan finally reaches full payoff/close/write-off, in proportion to how much of the loan was actually paid: `guarantee.amount * (payment_count - missed_count) // payment_count`. Whatever isn't returned stays in `guaranteed` permanently — the guarantor's unrecoverable loss of capacity on that loan.
 
 
 ## Query API

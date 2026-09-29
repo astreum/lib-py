@@ -69,60 +69,60 @@ def _interest_paid_delta(
     return interest_after - interest_before
 
 
-def _return_claimed_offer_limits(
+def _release_guarantees(
     node,
     treasury_account,
     loan: TreasuryLoanRecord,
 ) -> list[Expr]:
-    """Return each backing seller's proportional share of limit at loan-end.
+    """Return each backing guarantor's proportional share of guarantee at loan-end.
 
     Called once a loan's ``next_payment_block_number`` reaches ``0``
     (whether via a clean payoff, a close, or a full write-off). For every
-    ``(seller_address, offer_transaction_id, limit)`` this loan claimed at
-    origination, credits that seller's ``sold_limit`` back by
-    ``limit * paid_count // payment_count``, where ``paid_count =
+    ``(guarantor_address, guarantee_transaction_id, guarantee_amount)`` this loan claimed at
+    origination, credits that guarantor's ``guaranteed`` back by
+    ``guarantee_amount * paid_count // payment_count``, where ``paid_count =
     payment_count - loan.missed_count`` — the remainder stays in
-    ``sold_limit`` permanently as the seller's loss on this loan. A no-op
-    for `SECURED` loans (`claimed_offers` is always empty for those).
+    ``guaranteed`` permanently as the guarantor's loss on this loan. A no-op
+    for `SECURED` loans (`claimed_guarantees` is always empty for those).
 
     Args:
         node: Storage node used to resolve and persist trie/expr data.
         treasury_account: The `TREASURY_ADDRESS` account; its ``data`` trie
-            holds every seller's `TreasuryUserRecord`, keyed by seller
-            address. Mutated in place (multiple sellers' slots may be
+            holds every guarantor's `TreasuryUserRecord`, keyed by guarantor
+            address. Mutated in place (multiple guarantors' slots may be
             written in one call); ``data_hash`` is refreshed before return.
         loan: The loan that just reached full payoff/close/write-off, with
             its *final* ``missed_count`` already applied.
 
     Returns:
-        Pending exprs for every updated seller record, to be extended onto
+        Pending exprs for every updated guarantor record, to be extended onto
         the caller's own pending-expr list.
     """
-    if not loan.claimed_offers or loan.payment_count <= 0:
+    if not loan.claimed_guarantees or loan.payment_count <= 0:
         return []
 
     paid_count = max(0, loan.payment_count - loan.missed_count)
-    returned_by_seller: dict[bytes, int] = {}
-    for seller_address, _offer_transaction_id, limit in loan.claimed_offers:
-        returned = limit * paid_count // loan.payment_count
-        returned_by_seller[seller_address] = returned_by_seller.get(seller_address, 0) + returned
+    returned_by_guarantor: dict[bytes, int] = {}
+    for guarantor_address, _guarantee_transaction_id, guarantee_amount in loan.claimed_guarantees:
+        returned = guarantee_amount * paid_count // loan.payment_count
+        returned_by_guarantor[guarantor_address] = returned_by_guarantor.get(guarantor_address, 0) + returned
 
     pending_exprs: list[Expr] = []
-    for seller_address, returned in returned_by_seller.items():
+    for guarantor_address, returned in returned_by_guarantor.items():
         if returned <= 0:
             continue
-        seller_record_head = get_from_radix_tree(treasury_account.data, node, seller_address)
-        seller_record = TreasuryUserRecord.from_storage(node, seller_record_head or ZERO32)
-        if seller_record is None:
+        guarantor_record_head = get_from_radix_tree(treasury_account.data, node, guarantor_address)
+        guarantor_record = TreasuryUserRecord.from_storage(node, guarantor_record_head or ZERO32)
+        if guarantor_record is None:
             continue
-        updated_seller_record = replace(
-            seller_record,
-            sold_limit=max(0, seller_record.sold_limit - returned),
+        updated_guarantor_record = replace(
+            guarantor_record,
+            guaranteed=max(0, guarantor_record.guaranteed - returned),
         )
-        updated_head = updated_seller_record.expr().hash()
-        put_in_radix_tree(treasury_account.data, node, seller_address, updated_head)
-        seller_exprs, _ = resolve_inner_exprs(node, updated_seller_record.expr())
-        pending_exprs.extend(seller_exprs)
+        updated_head = updated_guarantor_record.expr().hash()
+        put_in_radix_tree(treasury_account.data, node, guarantor_address, updated_head)
+        guarantor_exprs, _ = resolve_inner_exprs(node, updated_guarantor_record.expr())
+        pending_exprs.extend(guarantor_exprs)
 
     if pending_exprs:
         treasury_account.data_hash = treasury_account.data.root_hash or ZERO32

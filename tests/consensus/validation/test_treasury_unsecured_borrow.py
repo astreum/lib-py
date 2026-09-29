@@ -1,11 +1,11 @@
 """Validation tests for the unsecured TREASURY_BORROW (0x21) path.
 
-An unsecured borrow assembles its principal by claiming one or more limit
-offers (`docs/plans/archive/2026-09-21-limit-offers.md`) instead of posting
+An unsecured borrow assembles its principal by claiming one or more
+guarantees (`docs/plans/archive/2026-09-21-limit-offers.md`) instead of posting
 stake. The borrower receives ``discounted_amount - insurance_fee -
-sum(price)``; the Treasury keeps the insurance fee; each claimed offer's
-seller is paid its `price` and has its `sold_limit` increased by the
-offer's `limit`.
+sum(price)``; the Treasury keeps the insurance fee; each claimed guarantee's
+guarantor is paid its `price` and has its `guaranteed` increased by the
+guarantee's `amount`.
 """
 
 import os
@@ -29,7 +29,7 @@ from astreum.consensus.transaction.treasury.discount import (
 )
 from astreum.consensus.transaction.treasury.record import (
     LoanType,
-    TreasuryCreditOffer,
+    TreasuryGuarantee,
     TreasuryLoanRecord,
     TreasuryUserRecord,
 )
@@ -44,7 +44,7 @@ from _helpers import (
     make_block,
     make_previous_block,
     seed_sender_account,
-    seed_seller_with_offer,
+    seed_guarantor_with_guarantee,
     seed_storage_account,
     seed_treasury_account,
     store_tx,
@@ -79,30 +79,30 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
             rate_denominator=rate_frac[1],
         )
 
-    def _make_borrow_tx(self, sender_pk, sender_key, *, amount, offer_refs, counter=0):
+    def _make_borrow_tx(self, sender_pk, sender_key, *, amount, guarantee_refs, counter=0):
         return create_transaction(
             chain_id=1, counter=counter, sender=sender_pk, recipient=TREASURY_ADDRESS,
             amount=amount, code=TransactionCode.TREASURY_BORROW,
             payment_interval_blocks=INTERVAL, payment_count=COUNT,
-            loan_type=LoanType.UNSECURED, offer_refs=offer_refs,
+            loan_type=LoanType.UNSECURED, guarantee_refs=guarantee_refs,
             secret_key=sender_key,
         )
 
-    def _seed_offer(self, *, seller_pk, offer_tx_id, limit, price=0, expiry=1000,
-                     duration=DURATION, total_interest_paid=None, sold_limit=0):
+    def _seed_guarantee(self, *, guarantor_pk, guarantee_tx_id, guarantee_amount, price=0, expiry=1000,
+                     duration=DURATION, total_interest_paid=None, guaranteed=0):
         if total_interest_paid is None:
-            total_interest_paid = limit
-        offer = TreasuryCreditOffer(limit=limit, duration=duration, price=price, expiry=expiry)
-        seed_seller_with_offer(
+            total_interest_paid = guarantee_amount
+        guarantee = TreasuryGuarantee(amount=guarantee_amount, duration=duration, price=price, expiry=expiry)
+        seed_guarantor_with_guarantee(
             self.node, self.treasury,
-            seller=seller_pk, offer_transaction_id=offer_tx_id, offer=offer,
-            total_interest_paid=total_interest_paid, sold_limit=sold_limit,
+            guarantor=guarantor_pk, guarantee_transaction_id=guarantee_tx_id, guarantee=guarantee,
+            total_interest_paid=total_interest_paid, guaranteed=guaranteed,
         )
-        return offer
+        return guarantee
 
     # --- success ---
 
-    def test_single_offer_covers_loan(self):
+    def test_single_guarantee_covers_loan(self):
         sender_pk, sender_key = seed_sender_account(self.block, balance=10_000_000)
         payment_amount = 100
         discounted = self._discounted_amount(payment_amount)
@@ -111,17 +111,17 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
         self.treasury = seed_treasury_account(
             self.node, self.block, treasury_balance=discounted + 1000,
         )
-        seller_pk = os.urandom(32)
-        offer_tx_id = os.urandom(32)
+        guarantor_pk = os.urandom(32)
+        guarantee_tx_id = os.urandom(32)
         price = 10
-        offer = self._seed_offer(
-            seller_pk=seller_pk, offer_tx_id=offer_tx_id,
-            limit=discounted, price=price,
+        guarantee = self._seed_guarantee(
+            guarantor_pk=guarantor_pk, guarantee_tx_id=guarantee_tx_id,
+            guarantee_amount=discounted, price=price,
         )
 
         tx = self._make_borrow_tx(
             sender_pk, sender_key, amount=payment_amount,
-            offer_refs=[(seller_pk, offer_tx_id)],
+            guarantee_refs=[(guarantor_pk, guarantee_tx_id)],
         )
         tx_hash = store_tx(self.node, tx)
         sender_before = self.block.accounts.get_account(sender_pk, self.node).balance
@@ -133,7 +133,7 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
         self.assertEqual(receipt.status, STATUS_SUCCESS)
 
         sender = self.block.accounts.get_account(sender_pk, self.node)
-        seller = self.block.accounts.get_account(seller_pk, self.node)
+        guarantor = self.block.accounts.get_account(guarantor_pk, self.node)
         treasury = self.block.accounts.get_account(TREASURY_ADDRESS, self.node)
 
         # First-ever unsecured loan on the network -> insurance_fee == 0.
@@ -142,8 +142,8 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
             sender.balance,
             sender_before + net_amount - receipt.transaction_fee - receipt.storage_fee,
         )
-        self.assertIsNotNone(seller)
-        self.assertEqual(seller.balance, price)
+        self.assertIsNotNone(guarantor)
+        self.assertEqual(guarantor.balance, price)
         self.assertEqual(treasury.balance, (discounted + 1000) - discounted)
 
         borrower_head = get_from_radix_tree(treasury.data, self.node, sender_pk)
@@ -157,17 +157,17 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
         self.assertIsNotNone(loan)
         self.assertEqual(loan.loan_type, LoanType.UNSECURED)
         self.assertEqual(loan.insurance_fee, 0)
-        self.assertEqual(loan.claimed_offers, [(seller_pk, offer_tx_id, discounted)])
+        self.assertEqual(loan.claimed_guarantees, [(guarantor_pk, guarantee_tx_id, discounted)])
 
-        seller_head = get_from_radix_tree(treasury.data, self.node, seller_pk)
-        seller_record = TreasuryUserRecord.from_storage(self.node, seller_head)
-        self.assertIsNotNone(seller_record)
-        self.assertEqual(seller_record.sold_limit, discounted)
+        guarantor_head = get_from_radix_tree(treasury.data, self.node, guarantor_pk)
+        guarantor_record = TreasuryUserRecord.from_storage(self.node, guarantor_head)
+        self.assertIsNotNone(guarantor_record)
+        self.assertEqual(guarantor_record.guaranteed, discounted)
 
         self.assertEqual(self.block.global_loaned, discounted)
         self.assertEqual(self.block.global_loan_count, 1)
 
-    def test_multiple_offers_from_different_sellers(self):
+    def test_multiple_guarantees_from_different_guarantors(self):
         sender_pk, sender_key = seed_sender_account(self.block, balance=10_000_000)
         payment_amount = 100
         discounted = self._discounted_amount(payment_amount)
@@ -175,18 +175,18 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
         self.treasury = seed_treasury_account(
             self.node, self.block, treasury_balance=discounted + 1000,
         )
-        seller_a = os.urandom(32)
-        seller_b = os.urandom(32)
-        offer_a_id = os.urandom(32)
-        offer_b_id = os.urandom(32)
+        guarantor_a = os.urandom(32)
+        guarantor_b = os.urandom(32)
+        guarantee_a_id = os.urandom(32)
+        guarantee_b_id = os.urandom(32)
         half = discounted // 2
         remainder = discounted - half
-        self._seed_offer(seller_pk=seller_a, offer_tx_id=offer_a_id, limit=half, price=5)
-        self._seed_offer(seller_pk=seller_b, offer_tx_id=offer_b_id, limit=remainder, price=7)
+        self._seed_guarantee(guarantor_pk=guarantor_a, guarantee_tx_id=guarantee_a_id, guarantee_amount=half, price=5)
+        self._seed_guarantee(guarantor_pk=guarantor_b, guarantee_tx_id=guarantee_b_id, guarantee_amount=remainder, price=7)
 
         tx = self._make_borrow_tx(
             sender_pk, sender_key, amount=payment_amount,
-            offer_refs=[(seller_a, offer_a_id), (seller_b, offer_b_id)],
+            guarantee_refs=[(guarantor_a, guarantee_a_id), (guarantor_b, guarantee_b_id)],
         )
         tx_hash = store_tx(self.node, tx)
 
@@ -197,33 +197,33 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
         self.assertEqual(receipt.status, STATUS_SUCCESS)
 
         treasury = self.block.accounts.get_account(TREASURY_ADDRESS, self.node)
-        seller_a_acct = self.block.accounts.get_account(seller_a, self.node)
-        seller_b_acct = self.block.accounts.get_account(seller_b, self.node)
-        self.assertEqual(seller_a_acct.balance, 5)
-        self.assertEqual(seller_b_acct.balance, 7)
+        guarantor_a_acct = self.block.accounts.get_account(guarantor_a, self.node)
+        guarantor_b_acct = self.block.accounts.get_account(guarantor_b, self.node)
+        self.assertEqual(guarantor_a_acct.balance, 5)
+        self.assertEqual(guarantor_b_acct.balance, 7)
 
-        seller_a_head = get_from_radix_tree(treasury.data, self.node, seller_a)
-        seller_a_record = TreasuryUserRecord.from_storage(self.node, seller_a_head)
-        self.assertEqual(seller_a_record.sold_limit, half)
+        guarantor_a_head = get_from_radix_tree(treasury.data, self.node, guarantor_a)
+        guarantor_a_record = TreasuryUserRecord.from_storage(self.node, guarantor_a_head)
+        self.assertEqual(guarantor_a_record.guaranteed, half)
 
-        seller_b_head = get_from_radix_tree(treasury.data, self.node, seller_b)
-        seller_b_record = TreasuryUserRecord.from_storage(self.node, seller_b_head)
-        self.assertEqual(seller_b_record.sold_limit, remainder)
+        guarantor_b_head = get_from_radix_tree(treasury.data, self.node, guarantor_b)
+        guarantor_b_record = TreasuryUserRecord.from_storage(self.node, guarantor_b_head)
+        self.assertEqual(guarantor_b_record.guaranteed, remainder)
 
     # --- failures ---
 
-    def test_unknown_offer_ref_fails(self):
+    def test_unknown_guarantee_ref_fails(self):
         sender_pk, sender_key = seed_sender_account(self.block, balance=10_000_000)
         payment_amount = 100
         discounted = self._discounted_amount(payment_amount)
         self.treasury = seed_treasury_account(
             self.node, self.block, treasury_balance=discounted + 1000,
         )
-        seller_pk = os.urandom(32)
-        # Note: no offer ever seeded for seller_pk / offer_tx_id.
+        guarantor_pk = os.urandom(32)
+        # Note: no guarantee ever seeded for guarantor_pk / guarantee_tx_id.
         tx = self._make_borrow_tx(
             sender_pk, sender_key, amount=payment_amount,
-            offer_refs=[(seller_pk, os.urandom(32))],
+            guarantee_refs=[(guarantor_pk, os.urandom(32))],
         )
         tx_hash = store_tx(self.node, tx)
 
@@ -232,18 +232,18 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
 
     def test_duplicate_ref_rejected_at_create(self):
         sender_pk, sender_key = seed_sender_account(self.block, balance=10_000_000)
-        seller_pk = os.urandom(32)
-        offer_tx_id = os.urandom(32)
+        guarantor_pk = os.urandom(32)
+        guarantee_tx_id = os.urandom(32)
         with self.assertRaises(ValueError):
             self._make_borrow_tx(
                 sender_pk, sender_key, amount=100,
-                offer_refs=[(seller_pk, offer_tx_id), (seller_pk, offer_tx_id)],
+                guarantee_refs=[(guarantor_pk, guarantee_tx_id), (guarantor_pk, guarantee_tx_id)],
             )
 
-    def test_empty_offer_refs_rejected_at_create(self):
+    def test_empty_guarantee_refs_rejected_at_create(self):
         sender_pk, sender_key = seed_sender_account(self.block, balance=10_000_000)
         with self.assertRaises(ValueError):
-            self._make_borrow_tx(sender_pk, sender_key, amount=100, offer_refs=[])
+            self._make_borrow_tx(sender_pk, sender_key, amount=100, guarantee_refs=[])
 
     def test_mismatched_duration_fails(self):
         sender_pk, sender_key = seed_sender_account(self.block, balance=10_000_000)
@@ -252,63 +252,63 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
         self.treasury = seed_treasury_account(
             self.node, self.block, treasury_balance=discounted + 1000,
         )
-        seller_pk = os.urandom(32)
-        offer_tx_id = os.urandom(32)
-        self._seed_offer(
-            seller_pk=seller_pk, offer_tx_id=offer_tx_id,
-            limit=discounted, duration=DURATION * 2,
+        guarantor_pk = os.urandom(32)
+        guarantee_tx_id = os.urandom(32)
+        self._seed_guarantee(
+            guarantor_pk=guarantor_pk, guarantee_tx_id=guarantee_tx_id,
+            guarantee_amount=discounted, duration=DURATION * 2,
         )
 
         tx = self._make_borrow_tx(
             sender_pk, sender_key, amount=payment_amount,
-            offer_refs=[(seller_pk, offer_tx_id)],
+            guarantee_refs=[(guarantor_pk, guarantee_tx_id)],
         )
         tx_hash = store_tx(self.node, tx)
 
         apply_transaction(self.node, self.block, tx_hash)
         self.assertEqual(self.block.receipts[-1].status, STATUS_FAILED)
 
-    def test_insufficient_combined_limit_fails(self):
+    def test_insufficient_combined_guarantee_amount_fails(self):
         sender_pk, sender_key = seed_sender_account(self.block, balance=10_000_000)
         payment_amount = 100
         discounted = self._discounted_amount(payment_amount)
         self.treasury = seed_treasury_account(
             self.node, self.block, treasury_balance=discounted + 1000,
         )
-        seller_pk = os.urandom(32)
-        offer_tx_id = os.urandom(32)
-        self._seed_offer(
-            seller_pk=seller_pk, offer_tx_id=offer_tx_id,
-            limit=discounted - 1,
+        guarantor_pk = os.urandom(32)
+        guarantee_tx_id = os.urandom(32)
+        self._seed_guarantee(
+            guarantor_pk=guarantor_pk, guarantee_tx_id=guarantee_tx_id,
+            guarantee_amount=discounted - 1,
         )
 
         tx = self._make_borrow_tx(
             sender_pk, sender_key, amount=payment_amount,
-            offer_refs=[(seller_pk, offer_tx_id)],
+            guarantee_refs=[(guarantor_pk, guarantee_tx_id)],
         )
         tx_hash = store_tx(self.node, tx)
 
         apply_transaction(self.node, self.block, tx_hash)
         self.assertEqual(self.block.receipts[-1].status, STATUS_FAILED)
 
-    def test_seller_over_capacity_fails(self):
+    def test_guarantor_over_capacity_fails(self):
         sender_pk, sender_key = seed_sender_account(self.block, balance=10_000_000)
         payment_amount = 100
         discounted = self._discounted_amount(payment_amount)
         self.treasury = seed_treasury_account(
             self.node, self.block, treasury_balance=discounted + 1000,
         )
-        seller_pk = os.urandom(32)
-        offer_tx_id = os.urandom(32)
-        # total_interest_paid too low relative to the offer's limit.
-        self._seed_offer(
-            seller_pk=seller_pk, offer_tx_id=offer_tx_id,
-            limit=discounted, total_interest_paid=discounted - 1,
+        guarantor_pk = os.urandom(32)
+        guarantee_tx_id = os.urandom(32)
+        # total_interest_paid too low relative to the guarantee's amount.
+        self._seed_guarantee(
+            guarantor_pk=guarantor_pk, guarantee_tx_id=guarantee_tx_id,
+            guarantee_amount=discounted, total_interest_paid=discounted - 1,
         )
 
         tx = self._make_borrow_tx(
             sender_pk, sender_key, amount=payment_amount,
-            offer_refs=[(seller_pk, offer_tx_id)],
+            guarantee_refs=[(guarantor_pk, guarantee_tx_id)],
         )
         tx_hash = store_tx(self.node, tx)
 
@@ -322,9 +322,9 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
         self.treasury = seed_treasury_account(
             self.node, self.block, treasury_balance=discounted + 1000,
         )
-        seller_pk = os.urandom(32)
-        offer_tx_id = os.urandom(32)
-        self._seed_offer(seller_pk=seller_pk, offer_tx_id=offer_tx_id, limit=discounted)
+        guarantor_pk = os.urandom(32)
+        guarantee_tx_id = os.urandom(32)
+        self._seed_guarantee(guarantor_pk=guarantor_pk, guarantee_tx_id=guarantee_tx_id, guarantee_amount=discounted)
 
         # Seed network history: half the network's loans have defaulted.
         self.block.global_loan_count = 10
@@ -333,7 +333,7 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
 
         tx = self._make_borrow_tx(
             sender_pk, sender_key, amount=payment_amount,
-            offer_refs=[(seller_pk, offer_tx_id)],
+            guarantee_refs=[(guarantor_pk, guarantee_tx_id)],
         )
         tx_hash = store_tx(self.node, tx)
         sender_before = self.block.accounts.get_account(sender_pk, self.node).balance
@@ -369,17 +369,17 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
         self.treasury = seed_treasury_account(
             self.node, self.block, treasury_balance=discounted + 1000,
         )
-        seller_pk = os.urandom(32)
-        offer_tx_id = os.urandom(32)
+        guarantor_pk = os.urandom(32)
+        guarantee_tx_id = os.urandom(32)
         # Price alone consumes the entire discounted amount.
-        self._seed_offer(
-            seller_pk=seller_pk, offer_tx_id=offer_tx_id,
-            limit=discounted, price=discounted,
+        self._seed_guarantee(
+            guarantor_pk=guarantor_pk, guarantee_tx_id=guarantee_tx_id,
+            guarantee_amount=discounted, price=discounted,
         )
 
         tx = self._make_borrow_tx(
             sender_pk, sender_key, amount=payment_amount,
-            offer_refs=[(seller_pk, offer_tx_id)],
+            guarantee_refs=[(guarantor_pk, guarantee_tx_id)],
         )
         tx_hash = store_tx(self.node, tx)
 
@@ -388,13 +388,13 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
 
     def test_recipient_not_treasury_fails(self):
         sender_pk, sender_key = seed_sender_account(self.block, balance=10_000_000)
-        seller_pk = os.urandom(32)
-        offer_tx_id = os.urandom(32)
+        guarantor_pk = os.urandom(32)
+        guarantee_tx_id = os.urandom(32)
         tx = create_transaction(
             chain_id=1, counter=0, sender=sender_pk, recipient=os.urandom(32),
             amount=100, code=TransactionCode.TREASURY_BORROW,
             payment_interval_blocks=INTERVAL, payment_count=COUNT,
-            loan_type=LoanType.UNSECURED, offer_refs=[(seller_pk, offer_tx_id)],
+            loan_type=LoanType.UNSECURED, guarantee_refs=[(guarantor_pk, guarantee_tx_id)],
             secret_key=sender_key,
         )
         tx_hash = store_tx(self.node, tx)

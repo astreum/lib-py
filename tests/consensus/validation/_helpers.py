@@ -25,7 +25,7 @@ from astreum.consensus.transaction.model import Transaction
 from astreum.storage.radix import get_radix_node_expr
 from astreum.storage.radix.node import radix_node_hash
 from astreum.consensus.transaction.treasury.record import (
-    TreasuryCreditOffer,
+    TreasuryGuarantee,
     TreasuryLoanRecord,
     TreasuryUserRecord,
 )
@@ -340,39 +340,39 @@ def seed_user_with_loan(
     return user_record, loans_trie
 
 
-def seed_seller_with_offer(
+def seed_guarantor_with_guarantee(
     node: _FakeNode,
     treasury_account: Account,
     *,
-    seller: bytes,
-    offer_transaction_id: bytes,
-    offer: TreasuryCreditOffer,
+    guarantor: bytes,
+    guarantee_transaction_id: bytes,
+    guarantee: TreasuryGuarantee,
     total_interest_paid: int = 0,
-    sold_limit: int = 0,
+    guaranteed: int = 0,
 ) -> TreasuryUserRecord:
-    """Seed a limit seller's `TreasuryUserRecord` with one posted offer.
+    """Seed a guarantor's `TreasuryUserRecord` with one posted guarantee.
 
-    Bypasses `TREASURY_SELL` and writes the offer + record directly, since
-    unsecured-borrow tests only care about the offer already existing, not
-    about how it got posted (that's covered by `test_treasury_sell.py`).
+    Bypasses `TREASURY_GUARANTEE` and writes the guarantee + record directly, since
+    unsecured-borrow tests only care about the guarantee already existing, not
+    about how it got posted (that's covered by `test_treasury_guarantee.py`).
     """
-    offer_head = store_expr_tree(node, offer.expr())
-    offers_trie = RadixTree()
-    put_in_radix_tree(offers_trie, node, offer_transaction_id, offer_head)
-    for trie_node in offers_trie.nodes.values():
+    guarantee_head = store_expr_tree(node, guarantee.expr())
+    guarantees_trie = RadixTree()
+    put_in_radix_tree(guarantees_trie, node, guarantee_transaction_id, guarantee_head)
+    for trie_node in guarantees_trie.nodes.values():
         node.hot_storage[radix_node_hash(trie_node)] = get_radix_node_expr(trie_node)
 
-    seller_record = TreasuryUserRecord(
-        offers_root_hash=offers_trie.root_hash or ZERO32,
+    guarantor_record = TreasuryUserRecord(
+        guarantees_root_hash=guarantees_trie.root_hash or ZERO32,
         total_interest_paid=total_interest_paid,
-        sold_limit=sold_limit,
+        guaranteed=guaranteed,
     )
-    rec_head = store_expr_tree(node, seller_record.expr())
-    put_in_radix_tree(treasury_account.data, node, seller, rec_head)
+    rec_head = store_expr_tree(node, guarantor_record.expr())
+    put_in_radix_tree(treasury_account.data, node, guarantor, rec_head)
     for trie_node in treasury_account.data.nodes.values():
         node.hot_storage[radix_node_hash(trie_node)] = get_radix_node_expr(trie_node)
     treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
-    return seller_record
+    return guarantor_record
 
 
 __all__ = [
@@ -392,5 +392,5 @@ __all__ = [
     "seed_channel",
     "seed_treasury_account",
     "seed_user_with_loan",
-    "seed_seller_with_offer",
+    "seed_guarantor_with_guarantee",
 ]

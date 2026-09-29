@@ -12,7 +12,7 @@ from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.block.rate_window import windowed_rate_fraction
 from astreum.consensus.transaction.treasury.discount import calculate_discounted_amount
-from astreum.consensus.transaction.treasury.offers import claim_offer
+from astreum.consensus.transaction.treasury.guarantees import claim_guarantee
 from astreum.consensus.transaction.treasury.record import (
     LoanType,
     TreasuryLoanRecord,
@@ -46,22 +46,22 @@ def _current_height(block: object) -> int:
     )
 
 
-def _decode_offer_refs(node: Any, offer_refs_node: Expr) -> list[tuple[bytes, bytes]] | None:
-    """Decode a borrow transaction's offer-refs field.
+def _decode_guarantee_refs(node: Any, guarantee_refs_node: Expr) -> list[tuple[bytes, bytes]] | None:
+    """Decode a borrow transaction's guarantee-refs field.
 
     Args:
         node: Storage node used to resolve any hash-only sub-exprs.
-        offer_refs_node: The transaction data's 4th field, as encoded by
-            `transaction.create._offer_refs_to_expr` — `NIL` (empty) or a
-            `link`-list of `[seller_address, offer_transaction_id]` pairs.
+        guarantee_refs_node: The transaction data's 4th field, as encoded by
+            `transaction.create._guarantee_refs_to_expr` — `NIL` (empty) or a
+            `link`-list of `[guarantor_address, guarantee_transaction_id]` pairs.
 
     Returns:
-        The decoded `(seller_address, offer_transaction_id)` pairs in
+        The decoded `(guarantor_address, guarantee_transaction_id)` pairs in
         order, or `None` if the shape doesn't match.
     """
-    if offer_refs_node is NIL:
+    if guarantee_refs_node is NIL:
         return []
-    entry_nodes, missed = resolve_list_exprs(node, offer_refs_node)
+    entry_nodes, missed = resolve_list_exprs(node, guarantee_refs_node)
     if missed:
         return None
     result: list[tuple[bytes, bytes]] = []
@@ -69,12 +69,12 @@ def _decode_offer_refs(node: Any, offer_refs_node: Expr) -> list[tuple[bytes, by
         sub_nodes, sub_missed = resolve_list_exprs(node, entry_node)
         if sub_missed or len(sub_nodes) != 2:
             return None
-        seller_node, offer_node = sub_nodes
-        if get_expr_tag(seller_node, node) != "link" or seller_node._head_hash is None:
+        guarantor_node, guarantee_node = sub_nodes
+        if get_expr_tag(guarantor_node, node) != "link" or guarantor_node._head_hash is None:
             return None
-        if get_expr_tag(offer_node, node) != "link" or offer_node._head_hash is None:
+        if get_expr_tag(guarantee_node, node) != "link" or guarantee_node._head_hash is None:
             return None
-        result.append((seller_node._head_hash, offer_node._head_hash))
+        result.append((guarantor_node._head_hash, guarantee_node._head_hash))
     return result
 
 
@@ -195,11 +195,11 @@ def _handle_unsecured_borrow(
     sender_account: Any,
     treasury_account: Any,
     request: TreasuryBorrowRequest,
-    offer_refs: list[tuple[bytes, bytes]],
+    guarantee_refs: list[tuple[bytes, bytes]],
 ) -> int:
-    if not offer_refs:
+    if not guarantee_refs:
         return STATUS_FAILED
-    if len(set(offer_refs)) != len(offer_refs):
+    if len(set(guarantee_refs)) != len(guarantee_refs):
         return STATUS_FAILED
 
     duration = request.payment_interval_blocks * request.payment_count
@@ -225,58 +225,58 @@ def _handle_unsecured_borrow(
     if borrower_record is None:
         borrower_record = TreasuryUserRecord()
 
-    # Claim every referenced offer, grouping per-seller state so a borrow
-    # that claims several offers from the same seller only loads/writes
-    # that seller's record once.
-    seller_states: dict[bytes, dict] = {}
+    # Claim every referenced guarantee, grouping per-guarantor state so a borrow
+    # that claims several guarantees from the same guarantor only loads/writes
+    # that guarantor's record once.
+    guarantor_states: dict[bytes, dict] = {}
     claimed_entries: list[tuple[bytes, bytes, int]] = []
-    sum_limit = 0
+    sum_guarantee_amount = 0
 
-    for seller_address, offer_transaction_id in offer_refs:
-        if seller_address == TREASURY_ADDRESS:
+    for guarantor_address, guarantee_transaction_id in guarantee_refs:
+        if guarantor_address == TREASURY_ADDRESS:
             return STATUS_FAILED
 
-        state = seller_states.get(seller_address)
+        state = guarantor_states.get(guarantor_address)
         if state is None:
-            seller_record_head = get_from_radix_tree(treasury_account.data, node, seller_address)
-            seller_record = TreasuryUserRecord.from_storage(node, seller_record_head or ZERO32)
-            if seller_record is None:
+            guarantor_record_head = get_from_radix_tree(treasury_account.data, node, guarantor_address)
+            guarantor_record = TreasuryUserRecord.from_storage(node, guarantor_record_head or ZERO32)
+            if guarantor_record is None:
                 return STATUS_FAILED
-            offers_root_hash = seller_record.offers_root_hash or ZERO32
-            offers_trie = RadixTree(
-                root_hash=None if offers_root_hash == ZERO32 else offers_root_hash
+            guarantees_root_hash = guarantor_record.guarantees_root_hash or ZERO32
+            guarantees_trie = RadixTree(
+                root_hash=None if guarantees_root_hash == ZERO32 else guarantees_root_hash
             )
             state = {
-                "record": seller_record,
-                "trie": offers_trie,
+                "record": guarantor_record,
+                "trie": guarantees_trie,
                 "price_total": 0,
-                "added_limit": 0,
+                "added_guaranteed": 0,
             }
-            seller_states[seller_address] = state
+            guarantor_states[guarantor_address] = state
 
-        claimed_offer = claim_offer(
-            offers_trie=state["trie"],
+        claimed_guarantee = claim_guarantee(
+            guarantees_trie=state["trie"],
             node=node,
-            offer_transaction_id=offer_transaction_id,
+            guarantee_transaction_id=guarantee_transaction_id,
             claimant_id=transaction_hash,
             current_height=creation_block_number,
         )
-        if claimed_offer is None:
+        if claimed_guarantee is None:
             return STATUS_FAILED
-        if claimed_offer.duration != duration:
+        if claimed_guarantee.duration != duration:
             return STATUS_FAILED
 
-        state["price_total"] += claimed_offer.price
-        state["added_limit"] += claimed_offer.limit
-        sum_limit += claimed_offer.limit
-        claimed_entries.append((seller_address, offer_transaction_id, claimed_offer.limit))
+        state["price_total"] += claimed_guarantee.price
+        state["added_guaranteed"] += claimed_guarantee.amount
+        sum_guarantee_amount += claimed_guarantee.amount
+        claimed_entries.append((guarantor_address, guarantee_transaction_id, claimed_guarantee.amount))
 
-    if sum_limit < discounted_amount:
+    if sum_guarantee_amount < discounted_amount:
         return STATUS_FAILED
 
-    for state in seller_states.values():
+    for state in guarantor_states.values():
         record = state["record"]
-        if record.sold_limit + state["added_limit"] > record.total_interest_paid:
+        if record.guaranteed + state["added_guaranteed"] > record.total_interest_paid:
             return STATUS_FAILED
 
     gc = getattr(block, "global_loan_count", 0) or 0
@@ -291,7 +291,7 @@ def _handle_unsecured_borrow(
         numerator = discounted_amount * (borrower_record.defaulted * gc + gd)
         insurance_fee = numerator // denominator
 
-    total_price = sum(state["price_total"] for state in seller_states.values())
+    total_price = sum(state["price_total"] for state in guarantor_states.values())
     net_amount = discounted_amount - insurance_fee - total_price
     if net_amount <= 0:
         return STATUS_FAILED
@@ -307,7 +307,7 @@ def _handle_unsecured_borrow(
         payment_interval_blocks=request.payment_interval_blocks,
         next_payment_block_number=next_payment_block_number,
         payment_count=request.payment_count,
-        claimed_offers=claimed_entries,
+        claimed_guarantees=claimed_entries,
         insurance_fee=insurance_fee,
         missed_count=0,
         owner=TREASURY_ADDRESS,
@@ -325,24 +325,24 @@ def _handle_unsecured_borrow(
 
     pending_exprs: list[Expr] = list(loan_exprs) + _trie_exprs(loans_trie)
 
-    # Pay each seller its offer(s)' price and write back its updated
-    # offers_root_hash + sold_limit.
-    for seller_address, state in seller_states.items():
-        seller_account = block.accounts.get_account(seller_address, node)
-        if seller_account is None:
-            seller_account = create_account()
-        seller_account.balance += state["price_total"]
-        block.accounts.set_account(seller_address, seller_account)
+    # Pay each guarantor its guarantee(s)' price and write back its updated
+    # guarantees_root_hash + guaranteed.
+    for guarantor_address, state in guarantor_states.items():
+        guarantor_account = block.accounts.get_account(guarantor_address, node)
+        if guarantor_account is None:
+            guarantor_account = create_account()
+        guarantor_account.balance += state["price_total"]
+        block.accounts.set_account(guarantor_address, guarantor_account)
 
-        updated_seller_record = replace(
+        updated_guarantor_record = replace(
             state["record"],
-            offers_root_hash=state["trie"].root_hash or ZERO32,
-            sold_limit=state["record"].sold_limit + state["added_limit"],
+            guarantees_root_hash=state["trie"].root_hash or ZERO32,
+            guaranteed=state["record"].guaranteed + state["added_guaranteed"],
         )
-        updated_seller_record_head = updated_seller_record.expr().hash()
-        put_in_radix_tree(treasury_account.data, node, seller_address, updated_seller_record_head)
-        seller_record_exprs, _ = resolve_inner_exprs(node, updated_seller_record.expr())
-        pending_exprs.extend(seller_record_exprs + _trie_exprs(state["trie"]))
+        updated_guarantor_record_head = updated_guarantor_record.expr().hash()
+        put_in_radix_tree(treasury_account.data, node, guarantor_address, updated_guarantor_record_head)
+        guarantor_record_exprs, _ = resolve_inner_exprs(node, updated_guarantor_record.expr())
+        pending_exprs.extend(guarantor_record_exprs + _trie_exprs(state["trie"]))
 
     updated_borrower_record = replace(
         borrower_record,
@@ -385,7 +385,7 @@ def handle_treasury_borrow(
     nodes = _data_nodes(transaction.data)
     if len(nodes) != 4:
         return STATUS_FAILED
-    loan_type_node, interval_node, count_node, offer_refs_node = nodes
+    loan_type_node, interval_node, count_node, guarantee_refs_node = nodes
     if loan_type_node._tag != "int" or interval_node._tag != "int" or count_node._tag != "int":
         return STATUS_FAILED
     request = TreasuryBorrowRequest(
@@ -406,8 +406,8 @@ def handle_treasury_borrow(
         )
 
     if request.loan_type == LoanType.UNSECURED:
-        offer_refs = _decode_offer_refs(node, offer_refs_node)
-        if offer_refs is None:
+        guarantee_refs = _decode_guarantee_refs(node, guarantee_refs_node)
+        if guarantee_refs is None:
             return STATUS_FAILED
         return _handle_unsecured_borrow(
             node=node,
@@ -417,7 +417,7 @@ def handle_treasury_borrow(
             sender_account=sender_account,
             treasury_account=treasury_account,
             request=request,
-            offer_refs=offer_refs,
+            guarantee_refs=guarantee_refs,
         )
 
     return STATUS_FAILED
