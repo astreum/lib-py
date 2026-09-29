@@ -64,6 +64,96 @@ def _collect_record_exprs(node: "Node", root, storage_id: bytes) -> list | None:
     return exprs
 
 
+# Max records fetched inline (in the message-handling thread) per received
+# STORAGE_PUT; the rest drain through the long-term store loop.
+BATCH_INLINE_FETCH_LIMIT = 8
+
+
+def _handle_put(
+    node: "Node", peer: "Peer", storage_request: StorageRequest
+) -> tuple[bool, str | None]:
+    from astreum.storage.admission import get_latest_storage_account, is_expr_in_latest_block
+    from astreum.storage.exprs.network import destination_peer, send_put_entries
+    from astreum.storage.radix import RadixTree, get_from_radix_tree
+    from astreum.storage.records import fetch_and_store_record, parse_record_new_count
+
+    entries = storage_request.entries or []
+    survivors = [
+        (expr_id, payload_type)
+        for expr_id, payload_type in entries
+        if is_expr_in_latest_block(node, expr_id)
+    ]
+    rejected = len(entries) - len(survivors)
+    if rejected:
+        node.logger.debug(
+            "STORAGE_PUT from %s: rejected %d/%d uncommitted exprs",
+            peer.address,
+            rejected,
+            len(entries),
+        )
+    if not survivors:
+        return False, "STORAGE_PUT rejected: no exprs committed"
+
+    to_self: list[bytes] = []
+    by_destination: dict[bytes, tuple[object, list[tuple[bytes, int]]]] = {}
+    for expr_id, payload_type in survivors:
+        try:
+            target = destination_peer(node, expr_id)
+        except Exception as exc:
+            node.logger.debug(
+                "STORAGE_PUT destination lookup failed for %s: %s", expr_id.hex(), exc
+            )
+            target = None
+        if target is None:
+            to_self.append(expr_id)
+        else:
+            by_destination.setdefault(target.public_key_bytes, (target, []))[1].append(
+                (expr_id, payload_type)
+            )
+
+    if to_self:
+        storage_account = get_latest_storage_account(node)
+        provider_id = provider_id_for_payload(node, storage_request.data)
+        fetch_budget = BATCH_INLINE_FETCH_LIMIT if getattr(node, "long_term_storage", False) else 0
+        indexed = 0
+        for expr_id in to_self:
+            stored_value = None
+            if storage_account is not None:
+                stored_value = get_from_radix_tree(storage_account.data, node, expr_id)
+            new_count = parse_record_new_count(node, stored_value)
+            if new_count is None:
+                continue
+            node.storage_index[expr_id] = provider_id
+            indexed += 1
+            if fetch_budget <= 0 or get_record_from_cold_storage(node, expr_id) is not None:
+                continue
+            fetch_budget -= 1
+            tree = RadixTree(root_hash=storage_account.data.root_hash)
+            try:
+                fetch_and_store_record(node, expr_id, tree, new_count)
+            except Exception as exc:
+                node.logger.debug("Inline record fetch failed for %s: %s", expr_id.hex(), exc)
+        node.logger.debug(
+            "STORAGE_PUT from %s: indexed %d/%d self-closest exprs",
+            peer.address,
+            indexed,
+            len(to_self),
+        )
+
+    for target, destination_list in by_destination.values():
+        node.logger.debug(
+            "Forwarding STORAGE_PUT of %d exprs to nearer peer %s",
+            len(destination_list),
+            target.address,
+        )
+        for _chunk, ok, reason in send_put_entries(
+            node, target, storage_request.data, destination_list
+        ):
+            if not ok:
+                node.logger.debug("STORAGE_PUT forward failed: %s", reason)
+    return True, None
+
+
 def handle_storage_request(node: "Node", peer: "Peer", message: Message) -> tuple[bool, str | None]:
     if message.content is None:
         node.logger.debug("STORAGE_REQUEST from %s missing content", peer.address)
@@ -192,87 +282,12 @@ def handle_storage_request(node: "Node", peer: "Peer", message: Message) -> tupl
             return True, None
 
         case StorageRequestCode.STORAGE_PUT:
-            node.logger.debug("Handling STORAGE_PUT for %s from %s", storage_request.expr_id.hex(), peer.address)
-
-            from astreum.storage.admission import is_expr_in_latest_block
-            if not is_expr_in_latest_block(node, storage_request.expr_id):
-                node.logger.debug(
-                    "STORAGE_PUT rejected for %s from %s: not committed",
-                    storage_request.expr_id.hex(),
-                    peer.address,
-                )
-                return False, "STORAGE_PUT rejected: expr not committed"
-
-            nearest_peer = node.peer_route.closest_peer_for_hash(storage_request.expr_id)
-            is_self_closest = False
-            if nearest_peer is None or nearest_peer.address is None:
-                is_self_closest = True
-            else:
-                try:
-                    self_distance = xor_distance(storage_request.expr_id, node.storage_public_key_bytes)
-                    peer_distance = xor_distance(storage_request.expr_id, nearest_peer.public_key_bytes)
-                except Exception as exc:
-                    node.logger.debug(
-                        "Failed distance comparison for STORAGE_PUT %s: %s",
-                        storage_request.expr_id.hex(),
-                        exc,
-                    )
-                    is_self_closest = True
-                else:
-                    is_self_closest = self_distance <= peer_distance
-
-            if is_self_closest:
-                from astreum.storage.admission import get_latest_storage_account
-                from astreum.storage.radix import get_from_radix_tree
-                from astreum.storage.records import parse_record_new_count
-
-                stored_value = None
-                storage_account = get_latest_storage_account(node)
-                if storage_account is not None:
-                    stored_value = get_from_radix_tree(
-                        storage_account.data, node, storage_request.expr_id
-                    )
-                if parse_record_new_count(node, stored_value) is None:
-                    node.logger.debug(
-                        "STORAGE_PUT skipped for %s from %s: not a record header",
-                        storage_request.expr_id.hex(),
-                        peer.address,
-                    )
-                    return True, None
-
-                node.logger.debug("Storing provider info for %s locally", storage_request.expr_id.hex())
-                provider_id = provider_id_for_payload(node, storage_request.data)
-                node.storage_index[storage_request.expr_id] = provider_id
-                print(
-                    "STORAGE_PUT indexed provider expr_id=%s from=%s"
-                    % (storage_request.expr_id.hex(), peer.address)
-                )
-                return True, None
-            else:
-                node.logger.debug(
-                    "Forwarding STORAGE_PUT for %s to nearer peer %s",
-                    storage_request.expr_id.hex(),
-                    nearest_peer.address,
-                )
-                fwd_req = StorageRequest(
-                    code=StorageRequestCode.STORAGE_PUT,
-                    data=storage_request.data,
-                    expr_id=storage_request.expr_id,
-                    payload_type=storage_request.payload_type,
-                )
-                req_msg = Message(
-                    topic=MessageTopic.STORAGE_REQUEST,
-                    body=fwd_req.to_bytes(),
-                    sender_public_key_bytes=node.storage_public_key_bytes,
-                )
-                req_msg.encrypt(nearest_peer.shared_key_bytes)
-                enqueue_outgoing(
-                    node,
-                    nearest_peer.address,
-                    message=req_msg,
-                    difficulty=nearest_peer.difficulty,
-                )
-                return True, None
+            node.logger.debug(
+                "Handling STORAGE_PUT of %d exprs from %s",
+                len(storage_request.entries or []),
+                peer.address,
+            )
+            return _handle_put(node, peer, storage_request)
 
         case _:
             node.logger.debug("Unknown StorageRequestCode %s from %s", storage_request.code, peer.address)

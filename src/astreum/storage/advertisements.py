@@ -1,7 +1,7 @@
 import time
 from typing import TYPE_CHECKING
 
-from astreum.storage.exprs.network import put_expr_in_network
+from astreum.storage.exprs.network import put_exprs_in_network
 
 if TYPE_CHECKING:
     from astreum import Node
@@ -12,8 +12,9 @@ def advertise_exprs(
 ) -> tuple[list[bytes], str | None]:
     """Advertise the given expr entries to the network.
 
-    Filters out expired entries and, for each remaining one, calls
-    ``put_expr_in_network`` to announce the expr id to peers.
+    Filters out expired entries, then announces the remaining expr ids,
+    bucketed by destination peer and sent as ``STORAGE_PUT`` datagrams
+    (``put_exprs_in_network``).
 
     Args:
         node: A Node instance with ``config``, ``logger`` and the storage/put
@@ -59,8 +60,10 @@ def advertise_exprs(
         to_advertise.append(entry)
 
     advertised_ids: list[bytes] = []
-    for expr_id, payload_type, _expires_at in to_advertise:
-        queued, reason = put_expr_in_network(node, expr_id, payload_type=payload_type)
+    results = put_exprs_in_network(
+        node, [(expr_id, payload_type) for expr_id, payload_type, _ in to_advertise]
+    )
+    for expr_id, queued, reason in results:
         if queued:
             advertised_ids.append(expr_id)
         else:

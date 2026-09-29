@@ -17,7 +17,7 @@ from astreum.storage.exprs import (
     get_expr_list,
     get_expr_list_from_local_storage,
     put_expr_in_hot_storage,
-    put_expr_in_network,
+    put_exprs_in_network,
 )
 from astreum.storage.records import (
     collect_record_slots,
@@ -53,7 +53,7 @@ __all__ = [
     "parse_slot",
     "put_expr_in_cold_storage",
     "put_expr_in_hot_storage",
-    "put_expr_in_network",
+    "put_exprs_in_network",
     "put_record_in_cold_storage",
     "setup_storage",
 ]

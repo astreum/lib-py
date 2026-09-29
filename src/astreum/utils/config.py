@@ -27,6 +27,9 @@ DEFAULT_SEED = "bootstrap.astreum.org:52780"
 DEFAULT_VERIFICATION_MAX_STALE_SECONDS = 10
 DEFAULT_VERIFICATION_MAX_FUTURE_SKEW_SECONDS = 2
 DEFAULT_MESSAGE_TIMESTAMP_WINDOW_SECONDS = 60
+# 1280 (IPv6 minimum MTU) - 40 (IPv6 header) - 8 (UDP header): a datagram of
+# this size is never IP-fragmented on any IPv4/IPv6 path.
+DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES = 1232
 
 
 def config_setup(config: Dict = {}):
@@ -280,6 +283,32 @@ def config_setup(config: Dict = {}):
     if long_term_interval <= 0:
         raise ValueError("long_term_storage_interval must be a positive number")
     config["long_term_storage_interval"] = long_term_interval
+
+    batch_budget_raw = config.get(
+        "storage_put_batch_max_bytes", DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES
+    )
+    if isinstance(batch_budget_raw, bool):
+        raise ValueError(
+            f"storage_put_batch_max_bytes must be an integer: {batch_budget_raw!r}"
+        )
+    try:
+        batch_budget = int(batch_budget_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"storage_put_batch_max_bytes must be an integer: {batch_budget_raw!r}"
+        ) from exc
+    from astreum.communication.message_pow import MAX_UDP_DATAGRAM_BYTES
+    from astreum.communication.storage_request.model import max_batch_entries
+
+    if batch_budget > MAX_UDP_DATAGRAM_BYTES:
+        raise ValueError(
+            f"storage_put_batch_max_bytes must be at most {MAX_UDP_DATAGRAM_BYTES}"
+        )
+    if max_batch_entries(batch_budget) < 2:
+        raise ValueError(
+            "storage_put_batch_max_bytes too small to hold at least 2 entries"
+        )
+    config["storage_put_batch_max_bytes"] = batch_budget
 
     fair_use_limit_raw = config.get("fair_use_limit", DEFAULT_FAIR_USE_LIMIT_BYTES)
     try:

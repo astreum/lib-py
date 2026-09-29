@@ -14,7 +14,7 @@ from astreum.storage.exprs.list import (
 from astreum.storage.exprs.local import get_expr_from_local_storage
 from astreum.storage.exprs.network import (
     get_expr_from_network,
-    put_expr_in_network,
+    put_exprs_in_network,
 )
 
 
@@ -28,5 +28,5 @@ __all__ = [
     "get_expr_list",
     "get_expr_list_from_local_storage",
     "put_expr_in_hot_storage",
-    "put_expr_in_network",
+    "put_exprs_in_network",
 ]
