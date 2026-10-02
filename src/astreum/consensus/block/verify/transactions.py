@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from astreum.expression import Expr, link_list_to_expr
-from astreum.storage.exprs import get_expr_list
+from astreum.expression import Expr, RESOLUTION_FULL, link_list_to_expr
+from astreum.storage.exprs import get_expr_list, prefetch_exprs_from_network
 from astreum.consensus.block.rate_window import update_statistics
 from astreum.storage.radix import RadixTree, get_from_radix_tree, put_in_radix_tree
 from astreum.consensus.models.accounts import Accounts
@@ -207,6 +207,9 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
                 put_in_radix_tree(storage_account.data, node, h, slot.expr())
             storage_account.data_hash = storage_account.data.root_hash
 
+    # The tx hashes are all known now: fetch the missing tx trees in one batch
+    # instead of one request per transaction.
+    prefetch_exprs_from_network(node, tx_hashes, RESOLUTION_FULL)
     for tx_hash in tx_hashes:
         apply_transaction(node, work_block, tx_hash)
 

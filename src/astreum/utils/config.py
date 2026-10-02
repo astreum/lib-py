@@ -31,6 +31,9 @@ DEFAULT_MESSAGE_TIMESTAMP_WINDOW_SECONDS = 60
 # 1280 (IPv6 minimum MTU) - 40 (IPv6 header) - 8 (UDP header): a datagram of
 # this size is never IP-fragmented on any IPv4/IPv6 path.
 DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES = 1232
+DEFAULT_STORAGE_GET_BATCH_MAX_BYTES = 1232
+# How often buffered STORAGE_GETs are batched and sent.
+DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS = 0.25
 # Most pages one STORAGE_FOUND reply may span (about 4 MiB at ~65 KB a page).
 DEFAULT_STORAGE_FOUND_MAX_PAGES = 64
 
@@ -329,6 +332,49 @@ def config_setup(config: Dict = {}):
             "storage_put_batch_max_bytes too small to hold at least 2 entries"
         )
     config["storage_put_batch_max_bytes"] = batch_budget
+
+    get_budget_raw = config.get(
+        "storage_get_batch_max_bytes", DEFAULT_STORAGE_GET_BATCH_MAX_BYTES
+    )
+    if isinstance(get_budget_raw, bool):
+        raise ValueError(
+            f"storage_get_batch_max_bytes must be an integer: {get_budget_raw!r}"
+        )
+    try:
+        get_budget = int(get_budget_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"storage_get_batch_max_bytes must be an integer: {get_budget_raw!r}"
+        ) from exc
+    from astreum.communication.storage_request.model import max_get_entries
+
+    if get_budget > MAX_UDP_DATAGRAM_BYTES:
+        raise ValueError(
+            f"storage_get_batch_max_bytes must be at most {MAX_UDP_DATAGRAM_BYTES}"
+        )
+    if max_get_entries(get_budget) < 2:
+        raise ValueError(
+            "storage_get_batch_max_bytes too small to hold at least 2 entries"
+        )
+    config["storage_get_batch_max_bytes"] = get_budget
+
+    flush_interval_raw = config.get(
+        "storage_request_flush_interval",
+        DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS,
+    )
+    if isinstance(flush_interval_raw, bool):
+        raise ValueError(
+            f"storage_request_flush_interval must be a number: {flush_interval_raw!r}"
+        )
+    try:
+        flush_interval = float(flush_interval_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"storage_request_flush_interval must be a number: {flush_interval_raw!r}"
+        ) from exc
+    if flush_interval <= 0:
+        raise ValueError("storage_request_flush_interval must be a positive number")
+    config["storage_request_flush_interval"] = flush_interval
 
     found_pages_raw = config.get(
         "storage_found_max_pages", DEFAULT_STORAGE_FOUND_MAX_PAGES

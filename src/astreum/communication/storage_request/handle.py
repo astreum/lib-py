@@ -158,6 +158,156 @@ def _handle_put(
     return True, None
 
 
+def _serve_get(
+    node: "Node", peer: "Peer", expr_id: bytes, desired: int
+) -> tuple[bool, str | None]:
+    """Serve one STORAGE_GET entry: paged ``STORAGE_FOUND``, a provider
+    redirect, or a payment-required reply."""
+    local_atom = get_expr_from_local_storage(node, expr_id)
+    if local_atom is not None:
+        if desired == RESOLUTION_RECORD:
+            exprs = _collect_record_exprs(node, local_atom, expr_id)
+            if exprs is None:
+                node.logger.debug(
+                    "STORAGE_GET %s requested as record but no records-table entry",
+                    expr_id.hex(),
+                )
+                return False, "not a record"
+        else:
+            exprs = _collect_for_resolution(local_atom, desired)
+        shared_storage_size = sum(len(encode_expr_to_bytes(e)) for e in exprs)
+        if _requires_storage_channel(node, peer, shared_storage_size):
+            node.logger.info(
+                "Fair-use limit reached for %s while serving %s; channel/payment required",
+                peer.address,
+                expr_id.hex(),
+            )
+            _queue_storage_payment_required(
+                node,
+                peer,
+                expr_id,
+                shared_storage_size,
+            )
+            return True, None
+        node.logger.debug(
+            "Expr %s found locally (resolution=%d, exprs=%d); returning to %s",
+            expr_id.hex(),
+            desired,
+            len(exprs),
+            peer.address,
+        )
+        def _skip(expr, size: int) -> None:
+            node.logger.error(
+                "STORAGE_FOUND for %s: skipping oversized expr %s (%d bytes)",
+                expr_id.hex(),
+                expr.hash().hex(),
+                size,
+            )
+
+        try:
+            payloads = encode_found_pages(exprs, on_skip=_skip)
+        except ValueError as exc:
+            node.logger.error(
+                "STORAGE_FOUND for %s not sent: %s", expr_id.hex(), exc
+            )
+            return False, "root expr too large"
+        max_pages = (getattr(node, "config", None) or {}).get(
+            "storage_found_max_pages", DEFAULT_STORAGE_FOUND_MAX_PAGES
+        )
+        if len(payloads) > max_pages:
+            node.logger.error(
+                "STORAGE_FOUND for %s not sent: %d pages exceeds storage_found_max_pages=%d",
+                expr_id.hex(),
+                len(payloads),
+                max_pages,
+            )
+            return False, "response too large"
+        payload_sizes = [found_page_expr_bytes(p) for p in payloads]
+        node.logger.debug(
+            "STORAGE_FOUND for %s split into %d pages",
+            expr_id.hex(),
+            len(payloads),
+        )
+
+        for found_payload, payload_size in zip(payloads, payload_sizes):
+            resp = StorageResponse(
+                code=StorageResponseCode.STORAGE_FOUND,
+                data=found_payload,
+                expr_id=expr_id,
+            )
+            resp_msg = Message(
+                topic=MessageTopic.STORAGE_RESPONSE,
+                body=resp.to_bytes(),
+                sender_public_key_bytes=node.storage_public_key_bytes,
+            )
+            resp_msg.encrypt(peer.shared_key_bytes)
+            queued = enqueue_outgoing(
+                node,
+                peer.address,
+                message=resp_msg,
+                difficulty=peer.difficulty,
+            )
+            if queued:
+                increment_peer_metric(peer, "shared_storage_upload", payload_size)
+        return True, None
+
+    if expr_id in node.storage_index:
+        provider_id = node.storage_index[expr_id]
+        provider_bytes = provider_payload_for_id(node, provider_id)
+        if provider_bytes is not None:
+            node.logger.debug("Known provider for %s; informing %s", expr_id.hex(), peer.address)
+            resp = StorageResponse(
+                code=StorageResponseCode.STORAGE_PROVIDER,
+                data=provider_bytes,
+                expr_id=expr_id,
+            )
+            resp_msg = Message(
+                topic=MessageTopic.STORAGE_RESPONSE,
+                body=resp.to_bytes(),
+                sender_public_key_bytes=node.storage_public_key_bytes,
+            )
+            resp_msg.encrypt(peer.shared_key_bytes)
+            enqueue_outgoing(
+                node,
+                peer.address,
+                message=resp_msg,
+                difficulty=peer.difficulty,
+            )
+            return True, None
+        node.logger.debug(
+            "Unknown provider id %s for %s",
+            provider_id,
+            expr_id.hex(),
+        )
+
+    nearest_peer = node.peer_route.closest_peer_for_hash(expr_id)
+    if nearest_peer:
+        node.logger.debug("Forwarding requester %s to nearest peer for %s", peer.address, expr_id.hex())
+        peer_info = encode_peer_contact_bytes(nearest_peer)
+        resp = StorageResponse(
+            code=StorageResponseCode.STORAGE_PROVIDER,
+            data=peer_info,
+            expr_id=expr_id,
+        )
+        resp_msg = Message(
+            topic=MessageTopic.STORAGE_RESPONSE,
+            body=resp.to_bytes(),
+            sender_public_key_bytes=node.storage_public_key_bytes,
+        )
+        resp_msg.encrypt(peer.shared_key_bytes)
+        enqueue_outgoing(
+            node,
+            peer.address,
+            message=resp_msg,
+            difficulty=peer.difficulty,
+        )
+        return True, None
+
+    if expr_id in node.storage_index:
+        return False, f"unknown provider id {node.storage_index[expr_id]} for {expr_id.hex()}"
+    return True, None
+
+
 def handle_storage_request(node: "Node", peer: "Peer", message: Message) -> tuple[bool, str | None]:
     if message.content is None:
         node.logger.debug("STORAGE_REQUEST from %s missing content", peer.address)
@@ -171,152 +321,33 @@ def handle_storage_request(node: "Node", peer: "Peer", message: Message) -> tupl
 
     match storage_request.code:
         case StorageRequestCode.STORAGE_GET:
-            expr_id = storage_request.expr_id
-            node.logger.debug("Handling STORAGE_GET for %s from %s", expr_id.hex(), peer.address)
-            desired = storage_request.payload_type or RESOLUTION_SINGLE
-
-            local_atom = get_expr_from_local_storage(node, expr_id)
-            if local_atom is not None:
-                if desired == RESOLUTION_RECORD:
-                    exprs = _collect_record_exprs(node, local_atom, expr_id)
-                    if exprs is None:
-                        node.logger.debug(
-                            "STORAGE_GET %s requested as record but no records-table entry",
-                            expr_id.hex(),
-                        )
-                        return False, "not a record"
-                else:
-                    exprs = _collect_for_resolution(local_atom, desired)
-                shared_storage_size = sum(len(encode_expr_to_bytes(e)) for e in exprs)
-                if _requires_storage_channel(node, peer, shared_storage_size):
-                    node.logger.info(
-                        "Fair-use limit reached for %s while serving %s; channel/payment required",
-                        peer.address,
-                        expr_id.hex(),
-                    )
-                    _queue_storage_payment_required(
-                        node,
-                        peer,
-                        expr_id,
-                        shared_storage_size,
-                    )
-                    return True, None
-                node.logger.debug(
-                    "Expr %s found locally (resolution=%d, exprs=%d); returning to %s",
-                    expr_id.hex(),
-                    desired,
-                    len(exprs),
-                    peer.address,
-                )
-                def _skip(expr, size: int) -> None:
-                    node.logger.error(
-                        "STORAGE_FOUND for %s: skipping oversized expr %s (%d bytes)",
-                        expr_id.hex(),
-                        expr.hash().hex(),
-                        size,
-                    )
-
+            entries = storage_request.entries or []
+            node.logger.debug(
+                "Handling STORAGE_GET of %d exprs from %s", len(entries), peer.address
+            )
+            seen: set[bytes] = set()
+            served = 0
+            failures: list[str] = []
+            for expr_id, desired in entries:
+                if expr_id in seen:
+                    continue
+                seen.add(expr_id)
                 try:
-                    payloads = encode_found_pages(exprs, on_skip=_skip)
-                except ValueError as exc:
-                    node.logger.error(
-                        "STORAGE_FOUND for %s not sent: %s", expr_id.hex(), exc
-                    )
-                    return False, "root expr too large"
-                max_pages = (getattr(node, "config", None) or {}).get(
-                    "storage_found_max_pages", DEFAULT_STORAGE_FOUND_MAX_PAGES
-                )
-                if len(payloads) > max_pages:
-                    node.logger.error(
-                        "STORAGE_FOUND for %s not sent: %d pages exceeds storage_found_max_pages=%d",
+                    ok, reason = _serve_get(node, peer, expr_id, desired)
+                except Exception as exc:
+                    node.logger.debug(
+                        "STORAGE_GET entry %s from %s failed: %s",
                         expr_id.hex(),
-                        len(payloads),
-                        max_pages,
-                    )
-                    return False, "response too large"
-                payload_sizes = [found_page_expr_bytes(p) for p in payloads]
-                node.logger.debug(
-                    "STORAGE_FOUND for %s split into %d pages",
-                    expr_id.hex(),
-                    len(payloads),
-                )
-
-                for found_payload, payload_size in zip(payloads, payload_sizes):
-                    resp = StorageResponse(
-                        code=StorageResponseCode.STORAGE_FOUND,
-                        data=found_payload,
-                        expr_id=expr_id,
-                    )
-                    resp_msg = Message(
-                        topic=MessageTopic.STORAGE_RESPONSE,
-                        body=resp.to_bytes(),
-                        sender_public_key_bytes=node.storage_public_key_bytes,
-                    )
-                    resp_msg.encrypt(peer.shared_key_bytes)
-                    queued = enqueue_outgoing(
-                        node,
                         peer.address,
-                        message=resp_msg,
-                        difficulty=peer.difficulty,
+                        exc,
                     )
-                    if queued:
-                        increment_peer_metric(peer, "shared_storage_upload", payload_size)
-                return True, None
-
-            if expr_id in node.storage_index:
-                provider_id = node.storage_index[expr_id]
-                provider_bytes = provider_payload_for_id(node, provider_id)
-                if provider_bytes is not None:
-                    node.logger.debug("Known provider for %s; informing %s", expr_id.hex(), peer.address)
-                    resp = StorageResponse(
-                        code=StorageResponseCode.STORAGE_PROVIDER,
-                        data=provider_bytes,
-                        expr_id=expr_id,
-                    )
-                    resp_msg = Message(
-                        topic=MessageTopic.STORAGE_RESPONSE,
-                        body=resp.to_bytes(),
-                        sender_public_key_bytes=node.storage_public_key_bytes,
-                    )
-                    resp_msg.encrypt(peer.shared_key_bytes)
-                    enqueue_outgoing(
-                        node,
-                        peer.address,
-                        message=resp_msg,
-                        difficulty=peer.difficulty,
-                    )
-                    return True, None
-                node.logger.debug(
-                    "Unknown provider id %s for %s",
-                    provider_id,
-                    expr_id.hex(),
-                )
-
-            nearest_peer = node.peer_route.closest_peer_for_hash(expr_id)
-            if nearest_peer:
-                node.logger.debug("Forwarding requester %s to nearest peer for %s", peer.address, expr_id.hex())
-                peer_info = encode_peer_contact_bytes(nearest_peer)
-                resp = StorageResponse(
-                    code=StorageResponseCode.STORAGE_PROVIDER,
-                    data=peer_info,
-                    expr_id=expr_id,
-                )
-                resp_msg = Message(
-                    topic=MessageTopic.STORAGE_RESPONSE,
-                    body=resp.to_bytes(),
-                    sender_public_key_bytes=node.storage_public_key_bytes,
-                )
-                resp_msg.encrypt(peer.shared_key_bytes)
-                enqueue_outgoing(
-                    node,
-                    peer.address,
-                    message=resp_msg,
-                    difficulty=peer.difficulty,
-                )
-                return True, None
-
-            if expr_id in node.storage_index:
-                return False, f"unknown provider id {node.storage_index[expr_id]} for {expr_id.hex()}"
+                    ok, reason = False, f"entry failed: {exc}"
+                if ok:
+                    served += 1
+                else:
+                    failures.append(reason or "entry failed")
+            if served == 0 and failures:
+                return False, failures[0]
             return True, None
 
         case StorageRequestCode.STORAGE_PUT:

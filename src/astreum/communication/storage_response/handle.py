@@ -81,14 +81,6 @@ def handle_storage_response(node: "Node", peer: "Peer", message: Message) -> tup
             root_id = storage_response.expr_id
             exprs = [e for n in sorted(request.pages) for e in request.pages[n]]
 
-            from astreum.storage.admission import is_expr_in_latest_block
-            if not is_expr_in_latest_block(node, root_id):
-                node.logger.debug(
-                    "STORAGE_FOUND rejected for %s: uncommitted data",
-                    root_id.hex(),
-                )
-                return False, "uncommitted data rejected"
-
             root = next((e for e in exprs if e.hash() == root_id), None)
             if root is None:
                 node.logger.debug(

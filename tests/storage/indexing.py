@@ -242,8 +242,8 @@ class TestStorageIndexing(unittest.TestCase):
             self.assertTrue(put_expr_in_hot_storage(node_a, expr), "node_a failed to store expr")
 
         # Commit the expr and its sub-exprs into node_b's latest block before
-        # advertising: the admission gate rejects uncommitted exprs on both the
-        # incoming STORAGE_PUT and the fetched STORAGE_FOUND response.
+        # advertising: the admission gate rejects uncommitted exprs on the
+        # incoming STORAGE_PUT.
         self._commit_storage_keys(node_b, *(e.hash() for e in exprs))
 
         # Advertise it immediately

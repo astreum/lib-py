@@ -36,10 +36,11 @@ from astreum.communication.storage_response.storage_found import (
     encode_found_pages,
     decode_found_page,
 )
+import astreum.storage.exprs.network as net
 from astreum.storage.exprs.network import (
     _collect_missing_hashes,
-    _send_storage_request,
     get_expr_from_network,
+    get_exprs_from_network,
 )
 from astreum.storage.exprs import get_expr_from_local_storage
 
@@ -296,194 +297,154 @@ class TestCollectRecordExprs(unittest.TestCase):
 # TestGetExprFromNetwork
 # ===========================================================================
 
-class TestGetExprFromNetwork(unittest.TestCase):
-    """Tests for get_expr_from_network — mocked network, polling, retry logic."""
+QUEUE = "astreum.storage.workers.requests.queue_storage_get"
+LOCAL = "astreum.storage.exprs.network.get_expr_from_local_storage"
 
-    @patch("astreum.storage.exprs.network._send_storage_request", return_value=None)
-    def test_returns_none_when_disconnected(self, mock_send: MagicMock) -> None:
+
+class TestGetExprFromNetwork(unittest.TestCase):
+    """get_expr_from_network / get_exprs_from_network: mocked buffer and polling."""
+
+    def test_returns_none_when_disconnected(self) -> None:
         node = _fake_node(is_connected=False)
-        result = get_expr_from_network(node, b"\x00" * 32, RESOLUTION_SINGLE)
+        with patch(QUEUE) as queue:
+            result = get_expr_from_network(node, b"\x00" * 32, RESOLUTION_SINGLE)
         self.assertIsNone(result)
-        mock_send.assert_not_called()
+        queue.assert_not_called()
 
     @patch("astreum.storage.exprs.network.sleep")
-    @patch("astreum.storage.exprs.network._send_storage_request", return_value=None)
-    def test_single_poll_success(self, mock_send: MagicMock, mock_sleep: MagicMock) -> None:
+    def test_single_poll_success(self, mock_sleep: MagicMock) -> None:
         node = _fake_node()
         target = int_(99)
-        target_hash = target.hash()
-
-        # First call returns None, then the expr appears in hot storage
-        call_count = 0
+        calls = []
 
         def fake_get(n, h):
-            nonlocal call_count
-            call_count += 1
-            if call_count >= 2:
-                return target
-            return None
+            calls.append(h)
+            # miss on the pre-check and first poll, hit on the second poll
+            return target if len(calls) >= 3 else None
 
-        with patch("astreum.storage.exprs.network.get_expr_from_local_storage", side_effect=fake_get):
-            result = get_expr_from_network(node, target_hash, RESOLUTION_SINGLE)
+        with patch(QUEUE, return_value=True) as queue, patch(LOCAL, side_effect=fake_get):
+            result = get_expr_from_network(node, target.hash(), RESOLUTION_SINGLE)
 
-        self.assertIsNotNone(result)
-        self.assertEqual(result.hash(), target_hash)
+        self.assertEqual(result.hash(), target.hash())
+        queue.assert_called_once_with(node, target.hash(), RESOLUTION_SINGLE)
 
     @patch("astreum.storage.exprs.network.sleep")
-    @patch("astreum.storage.exprs.network._send_storage_request", return_value=None)
-    def test_single_poll_timeout(self, mock_send: MagicMock, mock_sleep: MagicMock) -> None:
+    def test_single_poll_timeout(self, mock_sleep: MagicMock) -> None:
         node = _fake_node(fetch_retries=3)
-
-        with patch("astreum.storage.exprs.network.get_expr_from_local_storage", return_value=None):
+        with patch(QUEUE, return_value=True), patch(LOCAL, return_value=None):
             result = get_expr_from_network(node, b"\xaa" * 32, RESOLUTION_SINGLE)
-
         self.assertIsNone(result)
 
     @patch("astreum.storage.exprs.network.sleep")
-    @patch("astreum.storage.exprs.network._send_storage_request", return_value=None)
-    def test_send_request_error_returns_none(self, mock_send: MagicMock, mock_sleep: MagicMock) -> None:
+    def test_nothing_to_send_to_returns_none_without_polling(self, mock_sleep: MagicMock) -> None:
         node = _fake_node()
-        mock_send.return_value = "no peer available"
-
-        result = get_expr_from_network(node, b"\xbb" * 32, RESOLUTION_SINGLE)
+        with patch(QUEUE, return_value=False), patch(LOCAL, return_value=None):
+            result = get_expr_from_network(node, b"\xbb" * 32, RESOLUTION_SINGLE)
         self.assertIsNone(result)
-        mock_send.assert_called_once()
+        mock_sleep.assert_not_called()
+
+    def test_single_already_local_is_not_requested(self) -> None:
+        node = _fake_node()
+        target = int_(5)
+        with patch(QUEUE, return_value=True) as queue, patch(LOCAL, return_value=target):
+            result = get_expr_from_network(node, target.hash(), RESOLUTION_SINGLE)
+        self.assertEqual(result.hash(), target.hash())
+        queue.assert_not_called()
 
     @patch("astreum.storage.exprs.network.sleep")
-    @patch("astreum.storage.exprs.network.get_expr_from_network")
-    @patch("astreum.storage.exprs.network._send_storage_request", return_value=None)
-    def test_list_poll_with_missing_tail(
-        self,
-        mock_send: MagicMock,
-        mock_network: MagicMock,
-        mock_sleep: MagicMock,
-    ) -> None:
-        """When list has unresolved tail hashes, recursive fetches are triggered."""
-        node = _fake_node(fetch_retries=1)
+    def test_batch_returns_dict_with_none_for_timeouts(self, mock_sleep: MagicMock) -> None:
+        node = _fake_node(fetch_retries=2)
+        a, b, c = int_(1), int_(2), int_(3)
+        stored = {a.hash(): a}
 
+        def fake_queue(n, h, r):
+            return h != c.hash()  # c has no destination
+
+        with patch(QUEUE, side_effect=fake_queue) as queue, \
+             patch(LOCAL, side_effect=lambda n, h: stored.get(h)):
+            result = get_exprs_from_network(
+                node,
+                [(a.hash(), RESOLUTION_SINGLE), (b.hash(), RESOLUTION_SINGLE), (c.hash(), RESOLUTION_SINGLE)],
+            )
+
+        self.assertEqual(set(result), {a.hash(), b.hash(), c.hash()})
+        self.assertEqual(result[a.hash()].hash(), a.hash())
+        self.assertIsNone(result[b.hash()])
+        self.assertIsNone(result[c.hash()])
+        # a was local, so only b and c were requested
+        self.assertEqual([c_.args[1] for c_ in queue.call_args_list], [b.hash(), c.hash()])
+
+    @patch("astreum.storage.exprs.network.sleep")
+    def test_batch_waits_overlap(self, mock_sleep: MagicMock) -> None:
+        """Hashes that never arrive share one poll window, not one each."""
+        node = _fake_node(fetch_retries=3)
+        hashes = [bytes([i]) * 32 for i in range(1, 6)]
+        with patch(QUEUE, return_value=True), patch(LOCAL, return_value=None):
+            get_exprs_from_network(node, [(h, RESOLUTION_SINGLE) for h in hashes])
+        self.assertEqual(mock_sleep.call_count, 3)
+
+    @patch("astreum.storage.exprs.network.sleep")
+    def test_duplicate_hash_requested_once(self, mock_sleep: MagicMock) -> None:
+        node = _fake_node(fetch_retries=1)
+        h = b"\x01" * 32
+        with patch(QUEUE, return_value=True) as queue, patch(LOCAL, return_value=None):
+            get_exprs_from_network(node, [(h, RESOLUTION_SINGLE), (h, RESOLUTION_SINGLE)])
+        queue.assert_called_once()
+
+    @patch("astreum.storage.exprs.network.sleep")
+    def test_list_holes_submitted_together(self, mock_sleep: MagicMock) -> None:
+        """A LIST root with an unresolved tail hash fetches it as one batch."""
+        node = _fake_node(fetch_retries=1)
         tail_hash = b"\xcc" * 32
         root = _make_hash_ref_link(ZERO32, tail_hash)
-
-        # get_expr_list_from_local_storage returns the partially-resolved root
-        with patch("astreum.storage.exprs.list.get_expr_list_from_local_storage", return_value=root):
-            result = get_expr_from_network(node, root.hash(), RESOLUTION_LIST)
-
-        # Recursive fetch should have been called for the missing tail
-        mock_network.assert_called_with(node, tail_hash, RESOLUTION_SINGLE)
+        with patch("astreum.storage.exprs.list.get_expr_list_from_local_storage", return_value=root), \
+             patch("astreum.storage.exprs.network.get_exprs_from_network", return_value={}) as holes:
+            net._resolve_structured(node, root.hash(), RESOLUTION_LIST)
+        holes.assert_called_once_with(node, [(tail_hash, RESOLUTION_SINGLE)])
 
     @patch("astreum.storage.exprs.network.sleep")
-    @patch("astreum.storage.exprs.network.get_expr_from_network")
-    @patch("astreum.storage.exprs.network._send_storage_request", return_value=None)
-    def test_full_poll_with_missing_inner(
-        self,
-        mock_send: MagicMock,
-        mock_network: MagicMock,
-        mock_sleep: MagicMock,
-    ) -> None:
-        """When full expr has unresolved inner hashes, recursive fetches are triggered."""
+    def test_full_holes_submitted_together(self, mock_sleep: MagicMock) -> None:
         node = _fake_node(fetch_retries=1)
-
         head_hash = b"\xdd" * 32
         tail_hash = b"\xee" * 32
         root = _make_hash_ref_link(head_hash, tail_hash)
-
-        with patch("astreum.storage.exprs.full.get_expr_full_from_local_storage", return_value=root):
-            result = get_expr_from_network(node, root.hash(), RESOLUTION_FULL)
-
-        # Both head and tail should be recursively fetched
-        calls = [c.args for c in mock_network.call_args_list]
-        self.assertIn((node, head_hash, RESOLUTION_SINGLE), calls)
-        self.assertIn((node, tail_hash, RESOLUTION_SINGLE), calls)
+        with patch("astreum.storage.exprs.full.get_expr_full_from_local_storage", return_value=root), \
+             patch("astreum.storage.exprs.network.get_exprs_from_network", return_value={}) as holes:
+            net._resolve_structured(node, root.hash(), RESOLUTION_FULL)
+        holes.assert_called_once()
+        entries = holes.call_args.args[1]
+        self.assertEqual(
+            sorted(entries),
+            sorted([(head_hash, RESOLUTION_SINGLE), (tail_hash, RESOLUTION_SINGLE)]),
+        )
 
     @patch("astreum.storage.exprs.network.sleep")
-    @patch("astreum.storage.exprs.network._send_storage_request", return_value=None)
-    def test_list_poll_no_missing(self, mock_send: MagicMock, mock_sleep: MagicMock) -> None:
-        """Fully-resolved list returns immediately without recursive fetch."""
+    def test_list_poll_no_missing(self, mock_sleep: MagicMock) -> None:
         node = _fake_node(fetch_retries=3)
         root = _make_link(int_(1), _make_link(int_(2), NIL))
-
-        with patch("astreum.storage.exprs.list.get_expr_list_from_local_storage", return_value=root):
+        with patch(QUEUE, return_value=True), \
+             patch("astreum.storage.exprs.list.get_expr_list_from_local_storage", return_value=root):
             result = get_expr_from_network(node, root.hash(), RESOLUTION_LIST)
-
-        self.assertIsNotNone(result)
         self.assertEqual(result.hash(), root.hash())
 
     @patch("astreum.storage.exprs.network.sleep")
-    @patch("astreum.storage.exprs.network._send_storage_request", return_value=None)
-    def test_full_poll_no_missing(self, mock_send: MagicMock, mock_sleep: MagicMock) -> None:
-        """Fully-resolved full expr returns immediately."""
+    def test_full_poll_no_missing(self, mock_sleep: MagicMock) -> None:
         node = _fake_node(fetch_retries=3)
         root = _make_link(_make_link(int_(1), int_(2)), _make_link(int_(3), int_(4)))
-
-        with patch("astreum.storage.exprs.full.get_expr_full_from_local_storage", return_value=root):
+        with patch(QUEUE, return_value=True), \
+             patch("astreum.storage.exprs.full.get_expr_full_from_local_storage", return_value=root):
             result = get_expr_from_network(node, root.hash(), RESOLUTION_FULL)
-
-        self.assertIsNotNone(result)
         self.assertEqual(result.hash(), root.hash())
 
-
-# ===========================================================================
-# TestSendStorageRequest
-# ===========================================================================
-
-class TestSendStorageRequest(unittest.TestCase):
-    """Tests for _send_storage_request — indexed provider vs DHT fallback."""
-
-    def test_indexed_provider_path(self) -> None:
-        """When storage_index has a hit, request goes to the indexed provider."""
-        node = _fake_node()
-
-        # Mock the provider payload decode + key exchange
-        fake_provider_payload = b"\x00" * 70  # storage_key(32) + relay_key(32) + ip(4) + port(2)
-        node.storage_providers.append(fake_provider_payload)
-        node.storage_index[b"\xaa" * 32] = 0  # provider_id = 0
-
-        with patch("astreum.storage.providers.provider_payload_for_id", return_value=fake_provider_payload), \
-             patch("astreum.communication.storage_response.storage_provider.decode_storage_provider") as mock_decode, \
-             patch("astreum.communication.outgoing_queue.enqueue_outgoing", return_value=True) as mock_enqueue, \
-             patch("cryptography.hazmat.primitives.asymmetric.x25519.X25519PublicKey") as mock_x25519:
-
-            mock_decode.return_value = (b"\x00" * 32, b"\x00" * 32, "127.0.0.1", 5000)
-            mock_x25519.from_public_bytes.return_value = MagicMock()
-            node.relay_secret_key.exchange.return_value = b"\x01" * 32
-
-            result = _send_storage_request(node, b"\xaa" * 32, RESOLUTION_SINGLE)
-
-        self.assertIsNone(result)
-        self.assertIn(b"\xaa" * 32, node.expr_requests)
-
-    def test_dht_fallback_path(self) -> None:
-        """When no index hit, request goes to closest peer."""
-        node = _fake_node()
-
-        mock_peer = MagicMock()
-        mock_peer.address = ("127.0.0.1", 5001)
-        mock_peer.shared_key_bytes = b"\x02" * 32
-        mock_peer.difficulty = 1
-        node.peer_route.closest_peer_for_hash.return_value = mock_peer
-
-        with patch("astreum.communication.outgoing_queue.enqueue_outgoing", return_value=True) as mock_enqueue:
-            result = _send_storage_request(node, b"\xbb" * 32, RESOLUTION_LIST)
-
-        self.assertIsNone(result)
-        self.assertIn(b"\xbb" * 32, node.expr_requests)
-        mock_enqueue.assert_called_once()
-
-    def test_no_peer_available(self) -> None:
-        """When closest peer is None, returns error."""
-        node = _fake_node()
-        node.peer_route.closest_peer_for_hash.return_value = None
-
-        result = _send_storage_request(node, b"\xcc" * 32, RESOLUTION_SINGLE)
-        self.assertEqual(result, "no peer available")
-
-    def test_unknown_provider_id(self) -> None:
-        """When index has unknown provider id, returns error."""
-        node = _fake_node()
-        node.storage_index[b"\xdd" * 32] = 999  # non-existent provider
-
-        result = _send_storage_request(node, b"\xdd" * 32, RESOLUTION_SINGLE)
-        self.assertIn("unknown provider id", result)
+    @patch("astreum.storage.exprs.network.sleep")
+    def test_list_root_is_requested_even_if_local(self, mock_sleep: MagicMock) -> None:
+        """Only SINGLE short-circuits on a local hit; LIST/FULL may be partial."""
+        node = _fake_node(fetch_retries=1)
+        root = _make_link(int_(1), NIL)
+        with patch(QUEUE, return_value=True) as queue, patch(LOCAL, return_value=root), \
+             patch("astreum.storage.exprs.list.get_expr_list_from_local_storage", return_value=root):
+            get_expr_from_network(node, root.hash(), RESOLUTION_LIST)
+        queue.assert_called_once()
 
 
 if __name__ == "__main__":

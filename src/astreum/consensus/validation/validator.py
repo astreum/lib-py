@@ -16,7 +16,8 @@ from astreum.consensus.transaction.treasury.record import (
 )
 from astreum.consensus.models.accounts import Accounts
 from astreum.consensus.block.encoding.decode import get_block_from_storage
-from astreum.expression import ZERO32
+from astreum.expression import RESOLUTION_FULL, ZERO32
+from astreum.storage.exprs import prefetch_exprs_from_network
 
 
 SLOT_DURATION_SECONDS = 2
@@ -50,7 +51,18 @@ def current_validator(
 
     stakes: Dict[bytes, int] = {}
     treasury_user_records: Dict[bytes, TreasuryUserRecord] = {}
-    for account_key, record_head in get_all_from_radix_tree(stake_trie, node).items():
+    stake_entries = get_all_from_radix_tree(stake_trie, node)
+    # Fetch the missing stake records in one batch, not one request per account.
+    prefetch_exprs_from_network(
+        node,
+        [
+            record_head.hash()
+            for account_key, record_head in stake_entries.items()
+            if account_key and record_head and record_head != ZERO32
+        ],
+        RESOLUTION_FULL,
+    )
+    for account_key, record_head in stake_entries.items():
         if not account_key:
             continue
         if not record_head or record_head == ZERO32:

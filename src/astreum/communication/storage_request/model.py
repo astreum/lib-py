@@ -11,6 +11,18 @@ BATCH_HEADER_BYTES = PROVIDER_PAYLOAD_BYTES + 2
 BATCH_ENTRY_BYTES = 32 + 1
 
 
+# STORAGE_GET layout (after the 1-byte request code):
+#   count u16 + count * (expr_id 32B + resolution 1B)
+GET_HEADER_BYTES = 2
+GET_ENTRY_BYTES = 32 + 1
+
+
+def max_get_entries(budget_bytes: int) -> int:
+    """Return how many entries fit in one STORAGE_GET datagram of at most
+    *budget_bytes* on the wire (message framing and request code included)."""
+    return (budget_bytes - MESSAGE_FRAMING_BYTES - 1 - GET_HEADER_BYTES) // GET_ENTRY_BYTES
+
+
 def max_batch_entries(budget_bytes: int) -> int:
     """Return how many entries fit in one STORAGE_PUT datagram of at most
     *budget_bytes* on the wire (message framing and request code included)."""
@@ -41,11 +53,29 @@ class StorageRequest:
     def to_bytes(self):
         if self.code == StorageRequestCode.STORAGE_PUT:
             return self._put_to_bytes()
-        if self.payload_type is not None:
-            payload = bytes([self.payload_type]) + self.data
-        else:
-            payload = self.data
-        return bytes([self.code.value]) + self.expr_id + payload
+        if self.code == StorageRequestCode.STORAGE_GET:
+            return self._get_to_bytes()
+        raise ValueError(f"Cannot encode StorageRequestCode {self.code!r}")
+
+    def _get_to_bytes(self) -> bytes:
+        if not self.entries:
+            raise ValueError("STORAGE_GET requires at least one entry")
+        if len(self.entries) > 0xFFFF:
+            raise ValueError("STORAGE_GET entry count exceeds u16")
+        parts = [
+            bytes([self.code.value]),
+            len(self.entries).to_bytes(2, "big"),
+        ]
+        for expr_id, resolution in self.entries:
+            if len(expr_id) != 32:
+                raise ValueError("STORAGE_GET expr_id must be 32 bytes")
+            parts.append(expr_id + bytes([resolution]))
+        body = b"".join(parts)
+        if len(body) > MAX_INLINE_MESSAGE_BYTES:
+            raise ValueError(
+                f"STORAGE_GET too large ({len(body)} > {MAX_INLINE_MESSAGE_BYTES})"
+            )
+        return body
 
     def _put_to_bytes(self) -> bytes:
         if len(self.data) != PROVIDER_PAYLOAD_BYTES:
@@ -74,9 +104,8 @@ class StorageRequest:
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "StorageRequest":
-        # need at least 1 byte for type + 32 bytes for hash
-        if len(data) < 1 + 32:
-            raise ValueError(f"Too short for StorageRequest ({len(data)} bytes)")
+        if len(data) < 1:
+            raise ValueError("Too short for StorageRequest (0 bytes)")
 
         type_val = data[0]
         try:
@@ -87,16 +116,31 @@ class StorageRequest:
         if req_type == StorageRequestCode.STORAGE_PUT:
             return cls._put_from_bytes(data)
 
-        expr_id_bytes = data[1:33]
-        payload = data[33:]
         if req_type == StorageRequestCode.STORAGE_GET:
-            if payload:
-                payload_type = payload[0]
-                payload = payload[1:]
-            else:
-                payload_type = None
-            return cls(req_type, payload, expr_id_bytes, payload_type=payload_type)
-        return cls(req_type, payload, expr_id_bytes)
+            return cls._get_from_bytes(data)
+        raise ValueError(f"Unsupported StorageRequestCode: {req_type!r}")
+
+    @classmethod
+    def _get_from_bytes(cls, data: bytes) -> "StorageRequest":
+        if len(data) > MAX_INLINE_MESSAGE_BYTES:
+            raise ValueError(
+                f"STORAGE_GET too large ({len(data)} > {MAX_INLINE_MESSAGE_BYTES})"
+            )
+        if len(data) < 1 + GET_HEADER_BYTES:
+            raise ValueError(f"STORAGE_GET too short ({len(data)} bytes)")
+        count = int.from_bytes(data[1 : 1 + GET_HEADER_BYTES], "big")
+        if count < 1:
+            raise ValueError("STORAGE_GET count must be at least 1")
+        body = data[1 + GET_HEADER_BYTES :]
+        if len(body) != count * GET_ENTRY_BYTES:
+            raise ValueError(
+                f"STORAGE_GET length mismatch (count={count}, body={len(body)} bytes)"
+            )
+        entries = [
+            (bytes(body[i : i + 32]), body[i + 32])
+            for i in range(0, len(body), GET_ENTRY_BYTES)
+        ]
+        return cls(StorageRequestCode.STORAGE_GET, entries=entries)
 
     @classmethod
     def _put_from_bytes(cls, data: bytes) -> "StorageRequest":

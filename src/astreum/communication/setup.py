@@ -23,6 +23,7 @@ from astreum.communication.outgoing_queue import enqueue_outgoing
 from astreum.communication.util import address_str_to_host_and_port
 from astreum.storage.workers.advertisements import advertise_storage
 from astreum.storage.workers.claim import claim_storage
+from astreum.storage.workers.requests import init_request_buffer, request_storage
 from astreum.utils.bytes import hex_to_bytes
 from astreum.utils.config import DEFAULT_SEED
 
@@ -120,6 +121,7 @@ def communication_setup(node: "Node", config: dict):
     node.is_connected = False
     node.expr_requests = {}
     node.expr_requests_lock = threading.RLock()
+    init_request_buffer(node)
 
     # sockets + queues + threads
     with node.peers_lock:
@@ -235,6 +237,13 @@ def communication_setup(node: "Node", config: dict):
         daemon=True,
     )
     node.advertise_storage_thread.start()
+
+    node.request_storage_thread = threading.Thread(
+        target=request_storage,
+        args=(node,),
+        daemon=True,
+    )
+    node.request_storage_thread.start()
 
     node.claim_storage_thread = threading.Thread(
         target=claim_storage,

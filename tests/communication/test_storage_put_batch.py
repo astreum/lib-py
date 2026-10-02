@@ -149,11 +149,12 @@ class TestCodec(unittest.TestCase):
                 StorageRequestCode.STORAGE_PUT, b"short", entries=[(b"\x00" * 32, 1)]
             ).to_bytes()
 
-    def test_get_unchanged(self):
-        req = StorageRequest(StorageRequestCode.STORAGE_GET, b"", b"\x07" * 32, payload_type=2)
+    def test_get_roundtrip(self):
+        entries = [(b"\x07" * 32, 2), (b"\x08" * 32, 0)]
+        req = StorageRequest(StorageRequestCode.STORAGE_GET, entries=entries)
         decoded = StorageRequest.from_bytes(req.to_bytes())
-        self.assertEqual(decoded.expr_id, b"\x07" * 32)
-        self.assertEqual(decoded.payload_type, 2)
+        self.assertEqual(decoded.code, StorageRequestCode.STORAGE_GET)
+        self.assertEqual(decoded.entries, entries)
 
 
 class TestBudgetConfig(unittest.TestCase):

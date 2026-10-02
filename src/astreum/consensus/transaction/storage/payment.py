@@ -169,6 +169,40 @@ def _verify_single_claim(
     return True
 
 
+def _prefetch_claim_records(node: Any, storage_account: Any, parsed_claims) -> None:
+    """Fetch, as one batch, the records whose challenged slot data this node lacks.
+
+    Runs the verify loop's cheap checks first (record exists, slot belongs to
+    the record and is the challenged one), so a claim the loop would skip never
+    causes a network request. Optimisation only: failures are ignored and the
+    loop fetches whatever is still missing.
+    """
+    from astreum.expression import RESOLUTION_RECORD
+    from astreum.storage.exprs import get_expr_from_local_storage, get_exprs_from_network
+    from astreum.storage.records import parse_slot
+
+    try:
+        wanted: list[tuple[bytes, int]] = []
+        for storage_id, slot_id, _nonce in parsed_claims:
+            contract_head = get_from_radix_tree(storage_account.data, node, storage_id)
+            if not contract_head or contract_head == ZERO32:
+                continue
+            record = StorageRecord.from_storage(node, contract_head.hash())
+            if record is None or len(record.last_payment_block_hash) != 32:
+                continue
+            seed = blake3(record.last_payment_block_hash + storage_id).digest()
+            challenge_index = int.from_bytes(seed[:8], "little", signed=False) % record.new_count
+            parsed = parse_slot(node, get_from_radix_tree(storage_account.data, node, slot_id))
+            if parsed != (storage_id, challenge_index):
+                continue
+            if get_expr_from_local_storage(node, slot_id) is None:
+                wanted.append((storage_id, RESOLUTION_RECORD))
+        if wanted:
+            get_exprs_from_network(node, wanted)
+    except Exception:
+        pass
+
+
 def handle_storage_payment_contract(
     *,
     node: Any,
@@ -207,6 +241,8 @@ def handle_storage_payment_contract(
 
         if not parsed_claims:
             return (False, 0)
+
+        _prefetch_claim_records(node, storage_account, parsed_claims)
 
         # Verify each claim; collect the last valid record update data
         last_valid_record: StorageRecord | None = None

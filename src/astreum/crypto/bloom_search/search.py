@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Optional
 
-from astreum.expression import Expr, ZERO32
-from astreum.storage.exprs import get_expr_list
+from astreum.expression import Expr, RESOLUTION_FULL, ZERO32
+from astreum.storage.exprs import get_expr_list, prefetch_exprs_from_network
 from astreum.crypto.bloom_tree.tree import bloom_search_storage
 
 if TYPE_CHECKING:
@@ -95,6 +95,9 @@ def _load_block_txs(node: Any, block) -> list["Transaction"]:
             break
         tx_hashes.append(current._head_hash)
         current = current._tail
+
+    # Fetch the missing tx trees in one batch, not one request per transaction.
+    prefetch_exprs_from_network(node, tx_hashes, RESOLUTION_FULL)
 
     txs: list["Transaction"] = []
     for tx_hash in tx_hashes:

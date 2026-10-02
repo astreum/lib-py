@@ -345,19 +345,13 @@ class TestReceiver(unittest.TestCase):
     def _peer(self, key=PEER_A):
         return SimpleNamespace(address=("127.0.0.1", 1), public_key_bytes=key, metrics={})
 
-    def _deliver(self, node, root_id, payload, stored, peer=None, admit=True, admit_calls=None, put=None):
+    def _deliver(self, node, root_id, payload, stored, peer=None, put=None):
         resp = StorageResponse(StorageResponseCode.STORAGE_FOUND, payload, root_id)
         msg = SimpleNamespace(content=resp.to_bytes())
 
-        def _admit(n, h):
-            if admit_calls is not None:
-                admit_calls.append(h)
-            return admit
-
         if put is None:
             put = lambda n, e: stored.append(e.hash()) or True
-        with patch("astreum.storage.admission.is_expr_in_latest_block", side_effect=_admit), \
-             patch.object(resp_handle, "put_expr_in_hot_storage", side_effect=put), \
+        with patch.object(resp_handle, "put_expr_in_hot_storage", side_effect=put), \
              patch.object(resp_handle, "get_expr_from_local_storage", return_value=None), \
              patch.object(resp_handle, "increment_peer_metric") as metric:
             self.metric = metric
@@ -470,21 +464,16 @@ class TestReceiver(unittest.TestCase):
         self.assertNotIn(junk.hash(), stored)
         self.assertIn(t.hs.hash(), stored)
 
-    def test_uncommitted_root_stores_nothing_and_pops_once(self):
+    def test_uncommitted_root_is_stored_and_pops_once(self):
         root, exprs = self._paged_full()
         pages = encode_found_pages(exprs)
         node = _node()
         claim_expr_req(node, root.hash(), RESOLUTION_FULL)
-        stored, calls = [], []
-        results = [
-            self._deliver(node, root.hash(), p, stored, admit=False, admit_calls=calls)
-            for p in pages
-        ]
-        self.assertEqual(results[:-1], [(True, None)] * (len(pages) - 1))
-        self.assertEqual(results[-1], (False, "uncommitted data rejected"))
-        self.assertEqual(stored, [])
+        stored = []
+        results = [self._deliver(node, root.hash(), p, stored) for p in pages]
+        self.assertEqual(results, [(True, None)] * len(pages))
+        self.assertIn(root.hash(), stored)
         self.assertFalse(has_expr_req(node, root.hash()))
-        self.assertEqual(len(calls), 1)  # once per reply, not per page
 
     def test_no_expr_hashing_to_expr_id_stores_nothing(self):
         node = _node()

@@ -123,8 +123,8 @@ class TestServer(unittest.TestCase):
             metrics={},
         )
         req = StorageRequest(
-            code=StorageRequestCode.STORAGE_GET, data=b"",
-            expr_id=exprs[0].hash(), payload_type=RESOLUTION_FULL,
+            code=StorageRequestCode.STORAGE_GET,
+            entries=[(exprs[0].hash(), RESOLUTION_FULL)],
         )
         message = SimpleNamespace(content=req.to_bytes())
         sent = []

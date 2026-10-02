@@ -23,7 +23,6 @@ from astreum.storage.requests import (
     pop_expr_req,
     prune_expired_expr_reqs,
 )
-from astreum.storage.exprs.network import _send_storage_request
 from astreum.utils.config import config_setup
 
 H1 = b"\x01" * 32
@@ -139,40 +138,6 @@ class TestRegistry(unittest.TestCase):
         for t in threads:
             t.join()
         self.assertEqual(results.count(True), 1)
-
-
-class TestSendPathDedupe(unittest.TestCase):
-    def _make(self):
-        node = _node()
-        node.storage_index = {}
-        node.storage_public_key_bytes = b"\x00" * 32
-        node.logger = MagicMock()
-        peer = SimpleNamespace(
-            address=("127.0.0.1", 1), shared_key_bytes=b"\x01" * 32, difficulty=1
-        )
-        node.peer_route = MagicMock()
-        node.peer_route.closest_peer_for_hash.return_value = peer
-        return node
-
-    def test_second_send_skipped(self):
-        node = self._make()
-        with patch("astreum.communication.outgoing_queue.enqueue_outgoing", return_value=True) as enq:
-            self.assertIsNone(_send_storage_request(node, H1, RESOLUTION_SINGLE))
-            self.assertIsNone(_send_storage_request(node, H1, RESOLUTION_SINGLE))
-            self.assertEqual(enq.call_count, 1)
-
-    def test_failed_enqueue_releases_entry(self):
-        node = self._make()
-        with patch("astreum.communication.outgoing_queue.enqueue_outgoing", return_value=False):
-            _send_storage_request(node, H1, RESOLUTION_SINGLE)
-        self.assertFalse(has_expr_req(node, H1))
-
-    def test_raising_enqueue_releases_entry(self):
-        node = self._make()
-        with patch("astreum.communication.outgoing_queue.enqueue_outgoing", side_effect=RuntimeError("x")):
-            err = _send_storage_request(node, H1, RESOLUTION_SINGLE)
-        self.assertIsNotNone(err)
-        self.assertFalse(has_expr_req(node, H1))
 
 
 class TestTtlConfig(unittest.TestCase):
