@@ -256,6 +256,13 @@ class Expr:
         return _terminal_hash(HASH_BYTE_BYTES, encoder(self._value))
 
     def hash(self):
+        # nil is referenced as ZERO32 everywhere else (a nil child hashes to
+        # ZERO32, get_expr(ZERO32) returns NIL), so nil's own hash is ZERO32.
+        # Identity, not structure: link(NIL, NIL) is a real node and keeps its
+        # own hash.
+        if self is NIL:
+            return ZERO32
+
         if self._hash is not None:
             return self._hash
 
