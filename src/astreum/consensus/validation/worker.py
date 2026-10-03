@@ -25,8 +25,6 @@ from astreum.storage.radix.node import radix_node_hash
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.validation.validator import current_validator
 from astreum.expression import ZERO32
-from astreum.expression import RESOLUTION_RECORD
-from astreum.storage.advertisements import advertise_exprs
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.ping import Ping
 from astreum.communication.difficulty import message_difficulty
@@ -35,9 +33,6 @@ from astreum.storage.cold import put_expr_in_cold_storage
 from astreum.crypto.bloom_tree import BloomTree
 from astreum.consensus.models.accounts import extract_accounts_exprs
 from astreum.crypto.bloom_search import make_search_variants, ERA_SIZE
-
-validator_advertisment_limit_seconds = 15 * 60
-
 
 def _process_trie_nodes(
     node: Any,
@@ -405,21 +400,13 @@ def make_validation_worker(
 
             put_expr_in_cold_storage(node, get_block_expr(new_block))
 
-            expires_at = time.time() + validator_advertisment_limit_seconds
-            advertisement_ids = list(dict.fromkeys([new_block_hash, *storage_ids]))
-            if advertisement_ids:
-                entries = [
-                    (expr_id, RESOLUTION_RECORD, expires_at)
-                    for expr_id in advertisement_ids
-                ]
-                advertised_ids, advertise_warning = advertise_exprs(node, entries=entries)
-                if advertise_warning:
-                    node.logger.warning(
-                        "Block advertisement batch had failures for block #%s: advertised=%s reason=%s",
-                        new_block.height,
-                        len(advertised_ids),
-                        advertise_warning,
-                    )
+            # Peers request this block's new exprs from us (RESOLUTION_RECORD
+            # GET on the block hash) until the next block commits them. Set
+            # before the Ping below so a Ping-triggered request finds it.
+            node.uncommitted_block = (
+                new_block_hash,
+                [get_block_expr(new_block), *pending_exprs],
+            )
             node.logger.info(
                 "Created block #%s with hash %s",
                 new_block.height,
