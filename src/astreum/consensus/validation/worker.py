@@ -7,21 +7,18 @@ from typing import Any, Callable
 
 from astreum.consensus.account import create_account
 from astreum.consensus.block.rate_window import update_statistics
-from astreum.expression import Expr, link_list_to_expr, resolve_inner_exprs, resolve_list_exprs
+from astreum.expression import link_list_to_expr, resolve_inner_exprs, resolve_list_exprs
 from astreum.storage.exprs import put_expr_in_hot_storage
 from astreum.storage.cold import put_expr_in_cold_storage
-from astreum.storage.records import put_record_in_cold_storage
 from astreum.consensus.models.block import Block
 from astreum.consensus.block.create import create_block
 from astreum.consensus.block.difficulty import calculate_block_difficulty
 from astreum.consensus.block.nonce import generate_block_nonce
 from astreum.consensus.block.encoding.decode import get_block_from_storage
 from astreum.consensus.transaction import Transaction, apply_transaction_obj
-from astreum.consensus.transaction.storage.initial import generate_initial_storage_record
 from astreum.consensus.transaction.storage.pending import add_pending_storage_contract, finalize_pending_storage_contract
 from astreum.consensus.transaction.storage.model import StorageRecord
 from astreum.storage.radix import get_radix_node_expr, put_in_radix_tree
-from astreum.storage.radix.node import radix_node_hash
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.validation.validator import current_validator
 from astreum.expression import ZERO32
@@ -33,40 +30,6 @@ from astreum.storage.cold import put_expr_in_cold_storage
 from astreum.crypto.bloom_tree import BloomTree
 from astreum.consensus.models.accounts import extract_accounts_exprs
 from astreum.crypto.bloom_search import make_search_variants, ERA_SIZE
-
-def _process_trie_nodes(
-    node: Any,
-    block: Block,
-    nodes: Any,
-    items: Any,
-) -> list[bytes]:
-    """Generate storage records for a trie's nodes and return their storage ids.
-
-    The returned ids are the trie keys written for each freshly generated
-    record; already-registered nodes (``generate_initial_storage_record``
-    returns ``None``) contribute nothing.
-    """
-    generated: list[bytes] = []
-    temp_exprs: dict[bytes, Expr] = {h: get_radix_node_expr(n) for h, n in items}
-    for n in nodes:
-        result = generate_initial_storage_record(node, block, get_radix_node_expr(n), temp_exprs, mint=True)
-        if result is None:
-            continue
-        record, slot_map, _, _ = result
-        storage_id = radix_node_hash(n)
-        storage_account = block.accounts.get_account(STORAGE_ADDRESS, node)
-        if storage_account is not None:
-            put_in_radix_tree(storage_account.data, node, storage_id, record.expr())
-            for h, slot in slot_map.items():
-                put_in_radix_tree(storage_account.data, node, h, slot.expr())
-            storage_account.data_hash = storage_account.data.root_hash
-        put_record_in_cold_storage(node, storage_id, list(slot_map.keys()))
-        block.pending_exprs.append(record.expr())
-        for slot in slot_map.values():
-            block.pending_exprs.append(slot.expr())
-        block.pending_exprs.append(get_radix_node_expr(n))
-        generated.append(storage_id)
-    return generated
 
 
 def make_validation_worker(
@@ -305,16 +268,6 @@ def make_validation_worker(
                 for trie_node in new_block.accounts._trie.nodes.values():
                     new_block.pending_exprs.append(get_radix_node_expr(trie_node))
                     pending_exprs.append(get_radix_node_expr(trie_node))
-
-                for address, acct in new_block.accounts._cache.items():
-                    if address == STORAGE_ADDRESS:
-                        continue
-                    storage_ids.extend(
-                        _process_trie_nodes(node, new_block, acct.data.nodes.values(), acct.data.nodes.items())
-                    )
-                    storage_ids.extend(
-                        _process_trie_nodes(node, new_block, acct.channels.nodes.values(), acct.channels.nodes.items())
-                    )
 
                 seen = {e.hash() for e in pending_exprs}
                 for expr_item in extract_accounts_exprs(new_block.accounts):
