@@ -17,10 +17,12 @@ from astreum.consensus.block.nonce import generate_block_nonce
 from astreum.consensus.block.encoding.decode import get_block_from_storage
 from astreum.consensus.transaction import Transaction, apply_transaction_obj
 from astreum.consensus.transaction.storage.pending import add_pending_storage_contract, finalize_pending_storage_contract
+from astreum.consensus.transaction.storage.initial import UnresolvedRecordExpr
 from astreum.consensus.transaction.storage.model import StorageRecord
 from astreum.storage.radix import get_radix_node_expr, put_in_radix_tree
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.validation.validator import current_validator
+from astreum.consensus.validation.ads import flush_ads, queue_ads
 from astreum.consensus.validation.peers import validator_peers
 from astreum.consensus.block.holders import block_holder
 from astreum.consensus.block.message import encode_block_message
@@ -134,6 +136,11 @@ def make_validation_worker(
             accounts.set_account(validator_key, validator_account)
 
         while not stop.is_set():
+            try:
+                flush_ads(node)
+            except Exception:
+                node.logger.exception("Unable to advertise committed records")
+
             validation_public_key = node.config.get("validation_public_key_bytes")
             
             if not validation_public_key:
@@ -224,7 +231,29 @@ def make_validation_worker(
             storage_account = new_block.accounts.get_account(STORAGE_ADDRESS, node)
             if storage_account is not None:
                 from astreum.consensus.block.encoding.expr import get_block_expr
-                add_pending_storage_contract(node, new_block, None, None, get_block_expr(previous_block), mint=True)
+
+                # The previous block's record covers everything new in it,
+                # including the tries its header names by root hash. Those
+                # were fetched from its holder, so they are stored here too.
+                previous_block_exprs: dict[bytes, Any] = {}
+                try:
+                    add_pending_storage_contract(
+                        node,
+                        new_block,
+                        None,
+                        None,
+                        get_block_expr(previous_block),
+                        mint=True,
+                        follow_refs=True,
+                        collected=previous_block_exprs,
+                    )
+                except UnresolvedRecordExpr as exc:
+                    node.logger.warning(
+                        "Cannot build block #%s: %s; retrying", new_block.height, exc
+                    )
+                    time.sleep(0.5)
+                    continue
+                new_block.pending_exprs.extend(previous_block_exprs.values())
 
             offset = new_block.height % ERA_SIZE
             if offset == 0 and new_block.height > 0:
@@ -455,6 +484,7 @@ def make_validation_worker(
                 put_expr_in_cold_storage(node, pending_expr)
 
             _announce_block(node, new_block)
+            queue_ads(node, new_block.height, new_block_hash, storage_ids)
 
             if node.outgoing_queue and node.peers:
                 try:

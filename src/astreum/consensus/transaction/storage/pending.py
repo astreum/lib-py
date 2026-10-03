@@ -28,15 +28,20 @@ def add_pending_storage_contract(
     key: bytes | None,
     value: Expr,
     mint: bool = False,
+    follow_refs: bool = False,
+    collected: dict[bytes, Expr] | None = None,
 ) -> int | None:
     """
     Generate a storage contract for *value* and register it in
     *block.pending_storage_contracts*.
 
     Returns the storage fee of the contract on success, or ``None`` if
-    ``generate_initial_storage_record`` failed.
+    ``generate_initial_storage_record`` failed. ``follow_refs`` and ``collected``
+    are passed through to it.
     """
-    result = generate_initial_storage_record(node, block, value, mint=mint)
+    result = generate_initial_storage_record(
+        node, block, value, mint=mint, follow_refs=follow_refs, collected=collected
+    )
     if result is None:
         return None
 

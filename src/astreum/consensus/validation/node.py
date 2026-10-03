@@ -56,6 +56,9 @@ def validate_blockchain(self, validation_secret_key: Ed25519PrivateKey):
         self.latest_block_hash,
     )
 
+    from astreum.consensus.validation.ads import init_pending_ads
+
+    init_pending_ads(self)
     self._validation_transaction_queue = Queue()
     self._validation_stop_event = threading.Event()
 

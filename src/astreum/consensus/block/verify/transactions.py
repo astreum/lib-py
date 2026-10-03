@@ -12,7 +12,10 @@ ZERO32 = b"\x00" * 32
 from astreum.consensus.models.receipt import Receipt
 from astreum.consensus.block.encoding.expr import get_block_expr
 from astreum.consensus.transaction import apply_transaction
-from astreum.consensus.transaction.storage.initial import generate_initial_storage_record
+from astreum.consensus.transaction.storage.initial import (
+    UnresolvedRecordExpr,
+    generate_initial_storage_record,
+)
 from astreum.consensus.account import create_account
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.validation.validator import current_validator
@@ -218,9 +221,21 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
     # Pre-commit previous block expr to storage data (replicating block builder)
     storage_account = work_block.accounts.get_account(STORAGE_ADDRESS, node)
     if storage_account is not None:
-        result = generate_initial_storage_record(
-            node, work_block, get_block_expr(prev_block), mint=True
-        )
+        try:
+            result = generate_initial_storage_record(
+                node,
+                work_block,
+                get_block_expr(prev_block),
+                mint=True,
+                follow_refs=True,
+            )
+        except UnresolvedRecordExpr as exc:
+            node.logger.debug(
+                "Block verify cannot build parent record block=%s error=%s",
+                _hex(block.expr_id),
+                exc,
+            )
+            return False, "failed building parent block record"
         if result is not None:
             record, slot_map, _, _ = result
             put_in_radix_tree(storage_account.data, node, prev_block.expr_id, record.expr())
