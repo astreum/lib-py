@@ -248,6 +248,7 @@ def _apply_tx_effects(
                     treasury_user_record = TreasuryUserRecord.from_storage(
                         node,
                         existing_record_head,
+                        contact=block.contact,
                     )
                     if treasury_user_record is None:
                         receipt_status = STATUS_FAILED
@@ -590,7 +591,7 @@ def _apply_tx_effects(
 def apply_transaction(node: Any, block: object, transaction_hash: bytes) -> None:
     """Apply a transaction, collecting results on *block* (top-level entry
     point used by block verification / production)."""
-    transaction = get_transaction_from_storage(node, transaction_hash)
+    transaction = get_transaction_from_storage(node, transaction_hash, contact=block.contact)
     _apply_tx_effects(node, block, transaction, transaction_hash)
 
 

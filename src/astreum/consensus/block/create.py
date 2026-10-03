@@ -41,6 +41,7 @@ def create_block(
     global_loaned: int = 0,
     global_defaulted: int = 0,
     global_loan_count: int = 0,
+    contact: Optional[tuple] = None,
 ) -> Block:
     previous_block_hash = previous_block_hash or ZERO32
     accounts_hash = accounts_hash or ZERO32
@@ -55,7 +56,7 @@ def create_block(
     nonce = nonce or 0
 
     if accounts is None and accounts_hash and accounts_hash != ZERO32:
-        accounts = Accounts(root_hash=accounts_hash)
+        accounts = Accounts(root_hash=accounts_hash, contact=contact)
     return Block(
         chain_id=chain_id,
         previous_block_hash=previous_block_hash,
@@ -86,4 +87,5 @@ def create_block(
         global_loaned=global_loaned,
         global_defaulted=global_defaulted,
         global_loan_count=global_loan_count,
+        contact=contact,
     )

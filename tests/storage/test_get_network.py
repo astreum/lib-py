@@ -326,7 +326,7 @@ class TestGetExprFromNetwork(unittest.TestCase):
             result = get_expr_from_network(node, target.hash(), RESOLUTION_SINGLE)
 
         self.assertEqual(result.hash(), target.hash())
-        queue.assert_called_once_with(node, target.hash(), RESOLUTION_SINGLE)
+        queue.assert_called_once_with(node, target.hash(), RESOLUTION_SINGLE, contact=None)
 
     @patch("astreum.storage.exprs.network.sleep")
     def test_single_poll_timeout(self, mock_sleep: MagicMock) -> None:
@@ -357,7 +357,7 @@ class TestGetExprFromNetwork(unittest.TestCase):
         a, b, c = int_(1), int_(2), int_(3)
         stored = {a.hash(): a}
 
-        def fake_queue(n, h, r):
+        def fake_queue(n, h, r, contact=None):
             return h != c.hash()  # c has no destination
 
         with patch(QUEUE, side_effect=fake_queue) as queue, \
@@ -400,7 +400,7 @@ class TestGetExprFromNetwork(unittest.TestCase):
         with patch("astreum.storage.exprs.list.get_expr_list_from_local_storage", return_value=root), \
              patch("astreum.storage.exprs.network.get_exprs_from_network", return_value={}) as holes:
             net._resolve_structured(node, root.hash(), RESOLUTION_LIST)
-        holes.assert_called_once_with(node, [(tail_hash, RESOLUTION_SINGLE)])
+        holes.assert_called_once_with(node, [(tail_hash, RESOLUTION_SINGLE)], contact=None)
 
     @patch("astreum.storage.exprs.network.sleep")
     def test_full_holes_submitted_together(self, mock_sleep: MagicMock) -> None:

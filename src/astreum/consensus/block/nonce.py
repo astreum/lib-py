@@ -1,3 +1,5 @@
+from typing import Callable, Optional
+
 from astreum.consensus.models.block import Block
 from astreum.consensus.block.encoding.expr import get_block_expr
 from astreum.consensus.block.utils.bits import count_leading_zero_bits
@@ -7,6 +9,7 @@ def generate_block_nonce(
     *,
     block: Block,
     difficulty: int,
+    sign: Optional[Callable[[bytes], bytes]] = None,
 ) -> int:
     """Search for a nonce that satisfies the proof-of-work difficulty target.
 
@@ -18,6 +21,10 @@ def generate_block_nonce(
         block: The block to mine a nonce for.
         difficulty: Minimum number of leading zero bits required in the
             block hash.
+        sign: Optional ``body_hash -> signature`` function. The block hash
+            covers the signature, and the signature covers the body hash
+            (which changes with the nonce), so it is recomputed for every
+            nonce tried. Without it the block keeps its current signature.
 
     Returns:
         The nonce that satisfies the target.
@@ -28,6 +35,10 @@ def generate_block_nonce(
     while True:
         block.nonce = nonce
         block._expr = None
+        if sign is not None:
+            get_block_expr(block)  # computes block.body_hash for this nonce
+            block.signature = sign(block.body_hash)
+            block._expr = None
         block_hash = get_block_expr(block).hash()
         leading_zeros = count_leading_zero_bits(block_hash)
         if leading_zeros >= target:

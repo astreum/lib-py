@@ -15,9 +15,9 @@ def fetch_node_from_radix_tree(tree: RadixTree, astreum_node: "Node", h: bytes) 
     if cached is not None:
         return cached
 
-    if get_expr(astreum_node, h) is None:
+    if get_expr(astreum_node, h, contact=tree.contact) is None:
         return None
 
-    pat_node = get_radix_node_from_storage(astreum_node, h)
+    pat_node = get_radix_node_from_storage(astreum_node, h, contact=tree.contact)
     tree.nodes[h] = pat_node
     return pat_node

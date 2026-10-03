@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from astreum.communication.handlers.handshake import handle_handshake
 from astreum.communication.storage_request.handle import handle_storage_request
 from astreum.communication.storage_response.handle import handle_storage_response
+from astreum.communication.handlers.block import handle_block
 from astreum.communication.handlers.ping import handle_ping
 from astreum.communication.handlers.route_request import handle_route_request
 from astreum.communication.handlers.route_response import handle_route_response
@@ -199,6 +200,9 @@ def process_incoming_messages(node: "Node") -> None:
                         )
                         continue
                     node._validation_transaction_queue.put(transaction)
+
+                case MessageTopic.BLOCK:
+                    handle_block(node, peer, message.content)
 
                 case _:
                     continue

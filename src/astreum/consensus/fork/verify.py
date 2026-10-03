@@ -7,6 +7,7 @@ from typing import Any
 from astreum.consensus.block.verify import verify_block_head, verify_block_transactions
 from astreum.expression import ZERO32
 from astreum.consensus.block.encoding.decode import get_block_from_storage
+from astreum.consensus.block.holders import block_holder
 from astreum.consensus.fork.node import update_fork
 
 
@@ -17,11 +18,18 @@ def verify_fork(node: Any, head_id: bytes) -> bool:
         root = fork.root
     current_hash = head_id
     while True:
-        block = get_block_from_storage(astreum_node=node, block_hash=current_hash)
+        block_contact = block_holder(node, current_hash)
+        block = get_block_from_storage(
+            astreum_node=node, block_hash=current_hash, contact=block_contact
+        )
 
         previous_block = None
         if block.previous_block_hash != ZERO32:
-            previous_block = get_block_from_storage(astreum_node=node, block_hash=block.previous_block_hash)
+            previous_block = get_block_from_storage(
+                astreum_node=node,
+                block_hash=block.previous_block_hash,
+                contact=block_holder(node, block.previous_block_hash) or block_contact,
+            )
         block.previous_block = previous_block
 
         if not verify_block_head(node, block):
@@ -48,10 +56,17 @@ def verify_fork(node: Any, head_id: bytes) -> bool:
 
     current_hash = head_id
     while True:
-        block = get_block_from_storage(astreum_node=node, block_hash=current_hash)
+        block_contact = block_holder(node, current_hash)
+        block = get_block_from_storage(
+            astreum_node=node, block_hash=current_hash, contact=block_contact
+        )
         previous_block = None
         if block.previous_block_hash != ZERO32:
-            previous_block = get_block_from_storage(astreum_node=node, block_hash=block.previous_block_hash)
+            previous_block = get_block_from_storage(
+                astreum_node=node,
+                block_hash=block.previous_block_hash,
+                contact=block_holder(node, block.previous_block_hash) or block_contact,
+            )
         block.previous_block = previous_block
         validator_bytes = node.config.get("validation_public_key_bytes")
         if validator_bytes and block.validator_public_key_bytes == validator_bytes:

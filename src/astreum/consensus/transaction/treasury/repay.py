@@ -62,13 +62,13 @@ def handle_treasury_repay(
         return STATUS_FAILED
 
     user_record_head = get_from_radix_tree(treasury_account.data, node, transaction.sender)
-    user_record = TreasuryUserRecord.from_storage(node, user_record_head or ZERO32)
+    user_record = TreasuryUserRecord.from_storage(node, user_record_head or ZERO32, contact=block.contact)
     if user_record is None or user_record.loans_root_hash == ZERO32:
         return STATUS_FAILED
 
-    loans_trie = RadixTree(root_hash=user_record.loans_root_hash)
+    loans_trie = RadixTree(root_hash=user_record.loans_root_hash, contact=block.contact)
     loan_record_head = get_from_radix_tree(loans_trie, node, loan_transaction_id)
-    loan = TreasuryLoanRecord.from_storage(node, loan_record_head or ZERO32)
+    loan = TreasuryLoanRecord.from_storage(node, loan_record_head or ZERO32, contact=block.contact)
     if loan is None or loan.next_payment_block_number == 0:
         return STATUS_FAILED
     if loan.payment_amount <= 0 or transaction.amount % loan.payment_amount != 0:
@@ -165,7 +165,7 @@ def handle_treasury_repay(
     )
     updated_loan_head = updated_loan.expr().hash()
     put_in_radix_tree(loans_trie, node, loan_transaction_id, updated_loan_head)
-    loan_exprs, _ = resolve_inner_exprs(node, updated_loan.expr())
+    loan_exprs, _ = resolve_inner_exprs(node, updated_loan.expr(), contact=block.contact)
 
     write_off_amount = missed_delta * loan.payment_amount
     updated_user_record = replace(
@@ -186,7 +186,7 @@ def handle_treasury_repay(
                 return STATUS_FAILED
             owner_account.balance += transaction.amount
             block.accounts.set_account(loan.owner, owner_account)
-    user_record_exprs, _ = resolve_inner_exprs(node, updated_user_record.expr())
+    user_record_exprs, _ = resolve_inner_exprs(node, updated_user_record.expr(), contact=block.contact)
 
     pending_exprs = loan_exprs + _trie_exprs(loans_trie) + user_record_exprs
 

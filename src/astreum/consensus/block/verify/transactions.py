@@ -53,7 +53,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
     def _load_hash_list(head: bytes) -> Optional[List[bytes]]:
         if head == ZERO32:
             return []
-        expr = get_expr_list(node, head)
+        expr = get_expr_list(node, head, contact=block.contact)
         if expr is None:
             node.logger.debug(
                 "Block verify missing list expr head=%s block=%s",
@@ -182,7 +182,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
     # after the scheduled validator's stake has been halved. The creator calls
     # current_validator without a target_time (one slot), so this does too.
     try:
-        scheduled_validator, accounts_snapshot = current_validator(node, prev_hash)
+        scheduled_validator, accounts_snapshot = current_validator(node, prev_hash, contact=block.contact)
     except Exception as exc:
         node.logger.debug(
             "Block verify failed deriving scheduled validator block=%s error=%s",
@@ -201,6 +201,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
 
     work_block = type("_WorkBlock", (), {})()
     work_block.chain_id = block.chain_id
+    work_block.contact = block.contact
     work_block.previous_block_hash = block.previous_block_hash
     work_block.previous_block = prev_block
     work_block.height = block.height
@@ -230,7 +231,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
 
     # The tx hashes are all known now: fetch the missing tx trees in one batch
     # instead of one request per transaction.
-    prefetch_exprs_from_network(node, tx_hashes, RESOLUTION_FULL)
+    prefetch_exprs_from_network(node, tx_hashes, RESOLUTION_FULL, contact=block.contact)
     for tx_hash in tx_hashes:
         apply_transaction(node, work_block, tx_hash)
 
@@ -363,7 +364,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         )
         return False, "receipts head mismatch"
 
-    stored_receipts_trie = RadixTree(root_hash=block.receipts_hash)
+    stored_receipts_trie = RadixTree(root_hash=block.receipts_hash, contact=block.contact)
     for expected in expected_receipts:
         stored_expr = get_from_radix_tree(stored_receipts_trie, node, expected.transaction_hash)
         if stored_expr is None:
@@ -374,7 +375,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
             )
             return False, f"receipt not found in trie tx={_hex(expected.transaction_hash)}"
         try:
-            stored = Receipt.from_storage(node, stored_expr.hash())
+            stored = Receipt.from_storage(node, stored_expr.hash(), contact=block.contact)
         except Exception as exc:
             node.logger.debug(
                 "Block verify failed loading receipt block=%s tx=%s error=%s",

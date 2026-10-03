@@ -166,13 +166,7 @@ def _serve_get(
     local_atom = get_expr_from_local_storage(node, expr_id)
     if local_atom is not None:
         if desired == RESOLUTION_RECORD:
-            uncommitted = getattr(node, "uncommitted_block", None)
-            if uncommitted is not None and uncommitted[0] == expr_id:
-                # Our newest block is not committed yet, so it has no
-                # records-table entry: serve the block followed by its new exprs.
-                exprs = uncommitted[1]
-            else:
-                exprs = _collect_record_exprs(node, local_atom, expr_id)
+            exprs = _collect_record_exprs(node, local_atom, expr_id)
             if exprs is None:
                 node.logger.debug(
                     "STORAGE_GET %s requested as record but no records-table entry",

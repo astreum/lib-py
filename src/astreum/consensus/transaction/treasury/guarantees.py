@@ -143,7 +143,7 @@ def handle_treasury_guarantee(
         return STATUS_FAILED
 
     user_record_head = get_from_radix_tree(treasury_account.data, node, transaction.sender)
-    user_record = TreasuryUserRecord.from_storage(node, user_record_head or ZERO32)
+    user_record = TreasuryUserRecord.from_storage(node, user_record_head or ZERO32, contact=block.contact)
     if user_record is None:
         user_record = TreasuryUserRecord()
 
@@ -158,13 +158,14 @@ def handle_treasury_guarantee(
 
     guarantees_root_hash = user_record.guarantees_root_hash or ZERO32
     guarantees_trie = RadixTree(
-        root_hash=None if guarantees_root_hash == ZERO32 else guarantees_root_hash
+        root_hash=None if guarantees_root_hash == ZERO32 else guarantees_root_hash,
+        contact=block.contact,
     )
     if get_from_radix_tree(guarantees_trie, node, transaction_hash) is not None:
         return STATUS_FAILED
 
     put_in_radix_tree(guarantees_trie, node, transaction_hash, guarantee_record_head)
-    guarantee_exprs, _ = resolve_inner_exprs(node, guarantee_record.expr())
+    guarantee_exprs, _ = resolve_inner_exprs(node, guarantee_record.expr(), contact=block.contact)
 
     updated_user_record = replace(
         user_record,
@@ -178,7 +179,7 @@ def handle_treasury_guarantee(
         updated_user_record_head,
     )
     treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
-    user_record_exprs, _ = resolve_inner_exprs(node, updated_user_record.expr())
+    user_record_exprs, _ = resolve_inner_exprs(node, updated_user_record.expr(), contact=block.contact)
     _extend_pending_exprs(
         block,
         guarantee_exprs + _trie_exprs(guarantees_trie) + user_record_exprs,
@@ -226,7 +227,9 @@ def claim_guarantee(
         (``current_height >= guarantee.expiry``).
     """
     guarantee_head = get_from_radix_tree(guarantees_trie, node, guarantee_transaction_id)
-    guarantee = TreasuryGuarantee.from_storage(node, guarantee_head or ZERO32)
+    guarantee = TreasuryGuarantee.from_storage(
+        node, guarantee_head or ZERO32, contact=guarantees_trie.contact
+    )
     if guarantee is None:
         return None
     if guarantee.claimed_by != ZERO32:

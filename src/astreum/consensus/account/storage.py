@@ -2,20 +2,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from astreum.expression import Expr, resolve_list_exprs
+from astreum.expression import Expr, get_referenced_hash, resolve_list_exprs
 from astreum.storage.exprs import get_expr_list
 from astreum.consensus.account.create import create_account
 from astreum.consensus.account.model import Account
 
 
-def get_account_from_storage(node: Any, expr_id: bytes) -> Account:
-    header = get_expr_list(node, expr_id)
+def get_account_from_storage(node: Any, expr_id: bytes, contact=None) -> Account:
+    header = get_expr_list(node, expr_id, contact=contact)
     if header is None:
         raise ValueError("unable to load account from storage")
     if not header._tag == "link":
         raise ValueError("account header must be a Link")
 
-    header_nodes, missed = resolve_list_exprs(node, header)
+    header_nodes, missed = resolve_list_exprs(node, header, contact=contact)
     if missed:
         raise ValueError(
             f"unable to resolve account (missed={[h.hex()[:8] for h in missed]})"
@@ -40,10 +40,11 @@ def get_account_from_storage(node: Any, expr_id: bytes) -> Account:
 
     account = create_account(
         balance=balance_node.value,
-        data_hash=data_node._head_hash if data_node._head_hash is not None else data_node.hash(),
-        channels_hash=channels_node._head_hash if channels_node._head_hash is not None else channels_node.hash(),
+        data_hash=get_referenced_hash(data_node),
+        channels_hash=get_referenced_hash(channels_node),
         counter=counter_node.value,
-        code_hash=code_node._head_hash if code_node._head_hash is not None else code_node.hash(),
+        code_hash=get_referenced_hash(code_node),
+        contact=contact,
     )
     account._expr = header
     return account

@@ -30,13 +30,13 @@ class Channel:
         return self._expr
 
     @classmethod
-    def from_storage(cls, node, head_hash: bytes) -> Optional["Channel"]:
+    def from_storage(cls, node, head_hash: bytes, contact=None) -> Optional["Channel"]:
         if not head_hash or head_hash == ZERO32:
             return None
-        header = get_expr_list(node, head_hash)
+        header = get_expr_list(node, head_hash, contact=contact)
         if header is None or not header._tag == "link":
             return None
-        nodes, missed = resolve_list_exprs(node, header)
+        nodes, missed = resolve_list_exprs(node, header, contact=contact)
         if missed:
             return None
         if len(nodes) != 3:

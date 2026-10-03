@@ -88,7 +88,7 @@ def get_from_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes) -> Op
             if val is None:
                 return None
             if isinstance(val, bytes):
-                return get_expr(astreum_node, val)
+                return get_expr(astreum_node, val, contact=tree.contact)
             return val
 
         try:

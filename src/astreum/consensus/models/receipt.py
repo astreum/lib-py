@@ -57,8 +57,8 @@ class Receipt:
         return self._expr
 
     @classmethod
-    def from_storage(cls, node: Any, receipt_id: bytes) -> "Receipt":
-        header = get_expr_list(node, receipt_id)
+    def from_storage(cls, node: Any, receipt_id: bytes, contact=None) -> "Receipt":
+        header = get_expr_list(node, receipt_id, contact=contact)
         if header is None:
             raise ValueError("unable to load receipt from storage")
         if not header._tag == "link":
@@ -72,7 +72,7 @@ class Receipt:
         if inner is None or inner._tag != "link":
             raise ValueError("receipt inner header must be a Link")
 
-        inner_nodes, missed = resolve_list_exprs(node, inner)
+        inner_nodes, missed = resolve_list_exprs(node, inner, contact=contact)
         if missed:
             raise ValueError(
                 f"unable to resolve receipt header (missed={[h.hex()[:8] for h in missed]})"
@@ -86,7 +86,7 @@ class Receipt:
         if not body._tag == "link":
             raise ValueError("receipt body must be a Link chain")
 
-        body_nodes, missed = resolve_list_exprs(node, body)
+        body_nodes, missed = resolve_list_exprs(node, body, contact=contact)
         if missed:
             raise ValueError(
                 f"unable to resolve receipt body (missed={[h.hex()[:8] for h in missed]})"

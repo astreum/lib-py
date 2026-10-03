@@ -13,10 +13,11 @@ if TYPE_CHECKING:
 def get_transaction_from_storage(
     node: Any,
     transaction_id: bytes,
+    contact=None,
 ) -> "Transaction":
     from astreum.consensus.transaction.model import Transaction as TxModel
 
-    header = get_expr_list(node, transaction_id)
+    header = get_expr_list(node, transaction_id, contact=contact)
     if header is None:
         raise ValueError("unable to load transaction from storage")
     if not header._tag == "link":
@@ -30,7 +31,7 @@ def get_transaction_from_storage(
     if inner is None or inner._tag != "link":
         raise ValueError("transaction inner header must be a Link")
 
-    inner_nodes, missed = resolve_list_exprs(node, inner)
+    inner_nodes, missed = resolve_list_exprs(node, inner, contact=contact)
     if missed:
         raise ValueError(
             f"unable to resolve transaction header (missed={[h.hex()[:8] for h in missed]})"
@@ -47,7 +48,7 @@ def get_transaction_from_storage(
     if not body._tag == "link":
         raise ValueError("transaction body must be a Link chain")
 
-    body_nodes, missed = resolve_list_exprs(node, body)
+    body_nodes, missed = resolve_list_exprs(node, body, contact=contact)
     if missed:
         raise ValueError(
             f"unable to resolve transaction body (missed={[h.hex()[:8] for h in missed]})"

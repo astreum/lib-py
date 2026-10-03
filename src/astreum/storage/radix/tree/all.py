@@ -41,7 +41,7 @@ def get_all_from_radix_tree(tree: RadixTree, astreum_node: "Node") -> Dict[bytes
         if node_hash in tree.nodes:
             pat_node = tree.nodes[node_hash]
         else:
-            pat_node = get_radix_node_from_storage(astreum_node, node_hash)
+            pat_node = get_radix_node_from_storage(astreum_node, node_hash, contact=tree.contact)
             tree.nodes[node_hash] = pat_node
 
         node_bits = _bits_from_payload(pat_node.key, pat_node.key_len)
@@ -51,7 +51,7 @@ def get_all_from_radix_tree(tree: RadixTree, astreum_node: "Node") -> Dict[bytes
             key_bytes = _bits_to_bytes(combined_bits)
             val = pat_node.value
             if isinstance(val, bytes):
-                results[key_bytes] = get_expr(astreum_node, val)
+                results[key_bytes] = get_expr(astreum_node, val, contact=tree.contact)
             else:
                 results[key_bytes] = val
 

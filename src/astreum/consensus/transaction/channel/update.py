@@ -8,8 +8,10 @@ from astreum.storage.radix import get_from_radix_tree, put_in_radix_tree
 from astreum.consensus.transaction.channel.model import Channel
 
 
-def get_channel_from_storage(node: Any, channel_head: Optional[bytes]) -> Optional[tuple[int, int, int]]:
-    channel = Channel.from_storage(node, channel_head)
+def get_channel_from_storage(
+    node: Any, channel_head: Optional[bytes], contact=None
+) -> Optional[tuple[int, int, int]]:
+    channel = Channel.from_storage(node, channel_head, contact=contact)
     if channel is None:
         return None
     return channel.balance, channel.counter, channel.withdrawal_window
@@ -28,7 +30,7 @@ def handle_channel_update(
         return False
 
     current_channel_head = get_from_radix_tree(sender_account.channels, node, counterparty)
-    decoded_record = get_channel_from_storage(node, current_channel_head)
+    decoded_record = get_channel_from_storage(node, current_channel_head, block.contact)
     if decoded_record is None:
         return False
     current_balance, current_counter, current_withdrawal_window = decoded_record
@@ -58,6 +60,6 @@ def handle_channel_update(
 
     put_in_radix_tree(sender_account.channels, node, counterparty, channel_head)
     sender_account.channels_hash = sender_account.channels.root_hash or ZERO32
-    inner_exprs, _ = resolve_inner_exprs(node, channel_expr)
+    inner_exprs, _ = resolve_inner_exprs(node, channel_expr, contact=block.contact)
     block.pending_exprs.extend(inner_exprs)
     return True

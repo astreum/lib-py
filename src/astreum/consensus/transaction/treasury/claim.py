@@ -57,7 +57,7 @@ def handle_treasury_claim(
     if len(loan_transaction_id) != LOAN_TRANSACTION_ID_SIZE:
         return STATUS_FAILED
 
-    borrower_tx = get_transaction_from_storage(node, loan_transaction_id)
+    borrower_tx = get_transaction_from_storage(node, loan_transaction_id, contact=block.contact)
     if borrower_tx is None:
         return STATUS_FAILED
     borrower = borrower_tx.sender
@@ -67,13 +67,13 @@ def handle_treasury_claim(
         return STATUS_FAILED
 
     borrower_record_head = get_from_radix_tree(treasury_account.data, node, borrower)
-    borrower_record = TreasuryUserRecord.from_storage(node, borrower_record_head or ZERO32)
+    borrower_record = TreasuryUserRecord.from_storage(node, borrower_record_head or ZERO32, contact=block.contact)
     if borrower_record is None or borrower_record.loans_root_hash == ZERO32:
         return STATUS_FAILED
 
-    loans_trie = RadixTree(root_hash=borrower_record.loans_root_hash)
+    loans_trie = RadixTree(root_hash=borrower_record.loans_root_hash, contact=block.contact)
     loan_record_head = get_from_radix_tree(loans_trie, node, loan_transaction_id)
-    loan = TreasuryLoanRecord.from_storage(node, loan_record_head or ZERO32)
+    loan = TreasuryLoanRecord.from_storage(node, loan_record_head or ZERO32, contact=block.contact)
     if loan is None or loan.next_payment_block_number == 0:
         return STATUS_FAILED
 
@@ -137,7 +137,7 @@ def handle_treasury_claim(
     )
     updated_loan_head = updated_loan.expr().hash()
     put_in_radix_tree(loans_trie, node, loan_transaction_id, updated_loan_head)
-    loan_exprs, _ = resolve_inner_exprs(node, updated_loan.expr())
+    loan_exprs, _ = resolve_inner_exprs(node, updated_loan.expr(), contact=block.contact)
 
     updated_borrower_record = replace(
         borrower_record,
@@ -154,7 +154,7 @@ def handle_treasury_claim(
     updated_borrower_record_head = updated_borrower_record.expr().hash()
     put_in_radix_tree(treasury_account.data, node, borrower, updated_borrower_record_head)
     treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
-    borrower_record_exprs, _ = resolve_inner_exprs(node, updated_borrower_record.expr())
+    borrower_record_exprs, _ = resolve_inner_exprs(node, updated_borrower_record.expr(), contact=block.contact)
 
     pending_exprs = loan_exprs + _trie_exprs(loans_trie) + borrower_record_exprs
     block.pending_exprs.extend(pending_exprs)

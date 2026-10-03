@@ -10,7 +10,9 @@ if TYPE_CHECKING:
     from astreum._node import Node
 
 
-def get_radix_node_from_storage(astreum_node: "Node", head_hash: bytes) -> RadixNode:
+def get_radix_node_from_storage(
+    astreum_node: "Node", head_hash: bytes, contact=None
+) -> RadixNode:
     """Deserialize a RadixNode from its S-expression stored at the given hash.
 
     Fetches and resolves the 5-element expression chain
@@ -20,6 +22,7 @@ def get_radix_node_from_storage(astreum_node: "Node", head_hash: bytes) -> Radix
     Args:
         astreum_node: A Node instance for fetching expressions from storage.
         head_hash: The content hash of the serialized node.
+        contact: Optional ``(relay_key, address, port)`` for network fetches.
 
     Returns:
         The deserialized RadixNode.
@@ -32,11 +35,11 @@ def get_radix_node_from_storage(astreum_node: "Node", head_hash: bytes) -> Radix
     if head_hash == ZERO32:
         raise ValueError("empty expr chain for Radix node")
 
-    expr = get_expr_list(astreum_node, head_hash)
+    expr = get_expr_list(astreum_node, head_hash, contact=contact)
     if expr is None:
         raise ValueError("could not retrieve Radix node expr from storage")
 
-    elements, missed = resolve_list_exprs(astreum_node, expr)
+    elements, missed = resolve_list_exprs(astreum_node, expr, contact=contact)
     if missed:
         raise ValueError(
             f"unresolved hashes in Radix node expr (missed={[h.hex()[:8] for h in missed]})"
@@ -50,11 +53,11 @@ def get_radix_node_from_storage(astreum_node: "Node", head_hash: bytes) -> Radix
 
     if get_expr_tag(key_len_expr) != "int":
         raise ValueError("Radix node key_len must be Int")
-    key_len = get_expr_value(key_len_expr, astreum_node)
+    key_len = get_expr_value(key_len_expr, astreum_node, contact=contact)
 
     if get_expr_tag(key_expr) != "bytes":
         raise ValueError("Radix node key must be Bytes")
-    key = get_expr_value(key_expr, astreum_node)
+    key = get_expr_value(key_expr, astreum_node, contact=contact)
 
     child_0: Optional[bytes] = None
     if child_0_expr is not NIL:

@@ -35,7 +35,7 @@ class TestPrefetchHelper(unittest.TestCase):
         with patch.object(net, "get_expr_from_local_storage", side_effect=lambda n, h: local.get(h)), \
              patch.object(net, "get_exprs_from_network") as fetch:
             net.prefetch_exprs_from_network(node, H[:3], RESOLUTION_SINGLE)
-        fetch.assert_called_once_with(node, [(H[1], RESOLUTION_SINGLE), (H[2], RESOLUTION_SINGLE)])
+        fetch.assert_called_once_with(node, [(H[1], RESOLUTION_SINGLE), (H[2], RESOLUTION_SINGLE)], contact=None)
 
     def test_nothing_missing_sends_nothing(self):
         node = _node()
@@ -49,7 +49,7 @@ class TestPrefetchHelper(unittest.TestCase):
         with patch.object(net, "get_expr_from_local_storage", return_value=None), \
              patch.object(net, "get_exprs_from_network") as fetch:
             net.prefetch_exprs_from_network(node, [H[0], H[0], ZERO32, H[1]], RESOLUTION_SINGLE)
-        fetch.assert_called_once_with(node, [(H[0], RESOLUTION_SINGLE), (H[1], RESOLUTION_SINGLE)])
+        fetch.assert_called_once_with(node, [(H[0], RESOLUTION_SINGLE), (H[1], RESOLUTION_SINGLE)], contact=None)
 
     def test_disconnected_node_does_nothing(self):
         with patch.object(net, "get_exprs_from_network") as fetch:
@@ -65,7 +65,7 @@ class TestPrefetchHelper(unittest.TestCase):
                    side_effect=lambda n, h: trees.get(h)), \
              patch.object(net, "get_exprs_from_network") as fetch:
             net.prefetch_exprs_from_network(node, [H[0], H[1], H[2]], RESOLUTION_FULL)
-        fetch.assert_called_once_with(node, [(H[1], RESOLUTION_FULL), (H[2], RESOLUTION_FULL)])
+        fetch.assert_called_once_with(node, [(H[1], RESOLUTION_FULL), (H[2], RESOLUTION_FULL)], contact=None)
 
     def test_never_raises(self):
         node = _node()
@@ -100,7 +100,7 @@ class TestValidatorPrefetch(unittest.TestCase):
         from astreum.consensus.validation import validator
 
         records = {b"A" * 32: int_(1), b"B" * 32: int_(2)}
-        treasury = SimpleNamespace(data=object())
+        treasury = SimpleNamespace(data=SimpleNamespace(contact=None))
         accounts = SimpleNamespace(get_account=lambda address, node: treasury)
         block = SimpleNamespace(timestamp=10, accounts_hash=b"\x01" * 32)
 
@@ -138,7 +138,7 @@ class TestPaymentPrefetch(unittest.TestCase):
              patch("astreum.storage.records.parse_slot", return_value=slot), \
              patch("astreum.storage.exprs.get_expr_from_local_storage", return_value=local), \
              patch("astreum.storage.exprs.get_exprs_from_network") as fetch:
-            payment._prefetch_claim_records(_node(), SimpleNamespace(data=object()), claims)
+            payment._prefetch_claim_records(_node(), SimpleNamespace(data=SimpleNamespace(contact=None)), claims)
         return fetch
 
     def test_fetches_record_when_slot_data_is_missing(self):
@@ -170,7 +170,7 @@ class TestPaymentPrefetch(unittest.TestCase):
              patch.object(payment.StorageRecord, "from_storage", return_value=record), \
              patch("astreum.storage.exprs.get_exprs_from_network") as fetch:
             payment._prefetch_claim_records(
-                _node(), SimpleNamespace(data=object()), [(b"\x01" * 32, b"\x02" * 32, 0)]
+                _node(), SimpleNamespace(data=SimpleNamespace(contact=None)), [(b"\x01" * 32, b"\x02" * 32, 0)]
             )
         fetch.assert_not_called()
 
@@ -185,7 +185,7 @@ class TestPaymentPrefetch(unittest.TestCase):
                    side_effect=[(claims[0][0], 0), (claims[1][0], 0), (claims[2][0], 0)]), \
              patch("astreum.storage.exprs.get_expr_from_local_storage", return_value=None), \
              patch("astreum.storage.exprs.get_exprs_from_network") as fetch:
-            payment._prefetch_claim_records(_node(), SimpleNamespace(data=object()), claims)
+            payment._prefetch_claim_records(_node(), SimpleNamespace(data=SimpleNamespace(contact=None)), claims)
         fetch.assert_called_once()
         self.assertEqual([e[0] for e in fetch.call_args.args[1]], [c[0] for c in claims])
 

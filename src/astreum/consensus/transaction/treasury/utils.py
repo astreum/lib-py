@@ -112,7 +112,7 @@ def _release_guarantees(
         if returned <= 0:
             continue
         guarantor_record_head = get_from_radix_tree(treasury_account.data, node, guarantor_address)
-        guarantor_record = TreasuryUserRecord.from_storage(node, guarantor_record_head or ZERO32)
+        guarantor_record = TreasuryUserRecord.from_storage(node, guarantor_record_head or ZERO32, contact=treasury_account.data.contact)
         if guarantor_record is None:
             continue
         updated_guarantor_record = replace(
@@ -121,7 +121,7 @@ def _release_guarantees(
         )
         updated_head = updated_guarantor_record.expr().hash()
         put_in_radix_tree(treasury_account.data, node, guarantor_address, updated_head)
-        guarantor_exprs, _ = resolve_inner_exprs(node, updated_guarantor_record.expr())
+        guarantor_exprs, _ = resolve_inner_exprs(node, updated_guarantor_record.expr(), contact=treasury_account.data.contact)
         pending_exprs.extend(guarantor_exprs)
 
     if pending_exprs:

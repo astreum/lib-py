@@ -21,6 +21,9 @@ from astreum.consensus.transaction.storage.model import StorageRecord
 from astreum.storage.radix import get_radix_node_expr, put_in_radix_tree
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.validation.validator import current_validator
+from astreum.consensus.validation.peers import validator_peers
+from astreum.consensus.block.holders import block_holder
+from astreum.consensus.block.message import encode_block_message
 from astreum.expression import ZERO32
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.ping import Ping
@@ -30,6 +33,73 @@ from astreum.storage.cold import put_expr_in_cold_storage
 from astreum.crypto.bloom_tree import BloomTree
 from astreum.consensus.models.accounts import extract_accounts_exprs
 from astreum.crypto.bloom_search import make_search_variants, ERA_SIZE
+
+
+def included_transaction_exprs(node: Any, transactions: list) -> list:
+    """Every expr of the given transactions' trees, each once.
+
+    The trees are fully linked in memory, so nothing is fetched. Transactions
+    that cannot be collected are logged and skipped.
+    """
+    collected: list = []
+    seen: set[bytes] = set()
+    for tx in transactions:
+        try:
+            tx_exprs, missed = resolve_inner_exprs(node, tx.expr())
+        except Exception:
+            node.logger.exception("Unable to collect exprs for transaction %s", tx.hash)
+            continue
+        if missed:
+            node.logger.warning(
+                "Transaction %s has unresolved exprs; peers may not be able to fetch it",
+                tx.hash,
+            )
+        for expr in tx_exprs:
+            h = expr.hash()
+            if h in seen:
+                continue
+            seen.add(h)
+            collected.append(expr)
+    return collected
+
+
+def _announce_block(node: Any, block: Block) -> None:
+    """Send the new block's header to every validator (``BLOCK``).
+
+    The block's other exprs exist only on this node until a later block
+    commits them; the announcement carries this node's contact so the
+    receivers fetch them from here. The validators relay it to each other,
+    because the next validator is picked at random by stake and may not be
+    connected to us.
+    """
+    try:
+        from astreum.consensus.block.encoding.expr import get_block_expr
+        from astreum.storage.exprs.network import build_provider_payload
+
+        payload = encode_block_message(build_provider_payload(node), get_block_expr(block))
+    except Exception as exc:
+        node.logger.error("Unable to build BLOCK announcement for block #%s: %s", block.height, exc)
+        return
+
+    sent = 0
+    for validator in validator_peers(node).values():
+        try:
+            message = Message(
+                topic=MessageTopic.BLOCK,
+                content=payload,
+                sender_public_key_bytes=node.storage_public_key_bytes,
+            )
+            message.encrypt(validator.shared_key_bytes)
+            if enqueue_outgoing(
+                node,
+                validator.address,
+                message=message,
+                difficulty=validator.difficulty,
+            ):
+                sent += 1
+        except Exception as exc:
+            node.logger.debug("BLOCK announcement to %s failed: %s", validator.address, exc)
+    node.logger.debug("Announced block #%s to %d validators", block.height, sent)
 
 
 def make_validation_worker(
@@ -83,7 +153,12 @@ def make_validation_worker(
             )
 
             try:
-                scheduled_validator, accounts_snapshot = current_validator(node, latest_block_hash)
+                # The newest block is uncommitted; its state is on the validator
+                # that announced it (None when we built it or it is committed).
+                head_holder = block_holder(node, latest_block_hash)
+                scheduled_validator, accounts_snapshot = current_validator(
+                    node, latest_block_hash, contact=head_holder
+                )
             except Exception as exc:
                 node.logger.exception("Unable to determine current validator: %s", exc)
                 time.sleep(0.5)
@@ -95,7 +170,9 @@ def make_validation_worker(
                 continue
 
             try:
-                previous_block = get_block_from_storage(astreum_node=node, block_hash=latest_block_hash)
+                previous_block = get_block_from_storage(
+                    astreum_node=node, block_hash=latest_block_hash, contact=head_holder
+                )
             except Exception:
                 node.logger.exception("Unable to load previous block for validation")
                 time.sleep(0.5)
@@ -133,6 +210,7 @@ def make_validation_worker(
                 global_loaned=getattr(previous_block, "global_loaned", 0) or 0,
                 global_defaulted=getattr(previous_block, "global_defaulted", 0) or 0,
                 global_loan_count=getattr(previous_block, "global_loan_count", 0) or 0,
+                contact=head_holder,
             )
             node.logger.debug(
                 "Creating block #%s extending %s",
@@ -175,6 +253,14 @@ def make_validation_worker(
                     current_tx = node._validation_transaction_queue.get_nowait()
                 except Empty:
                     current_tx = None
+
+            # Peers fetch an included transaction's body from this validator
+            # (nothing else holds it yet, and the queue only keeps it in
+            # memory), so the body goes into pending_exprs with the rest of the
+            # block's new exprs and is written to hot and cold storage below.
+            new_block.pending_exprs.extend(
+                included_transaction_exprs(node, new_block.transactions or [])
+            )
 
             storage_ids: list[bytes] = []
 
@@ -300,7 +386,11 @@ def make_validation_worker(
             
             try:
                 nonce_started = time.perf_counter()
-                generate_block_nonce(block=new_block, difficulty=previous_block.difficulty)
+                generate_block_nonce(
+                    block=new_block,
+                    difficulty=previous_block.difficulty,
+                    sign=node.config["validation_secret_key"].sign,
+                )
                 elapsed_ms = int((time.perf_counter() - nonce_started) * 1000)
                 setattr(node, "nonce_time_ms", elapsed_ms)
                 node.logger.debug(
@@ -353,13 +443,6 @@ def make_validation_worker(
 
             put_expr_in_cold_storage(node, get_block_expr(new_block))
 
-            # Peers request this block's new exprs from us (RESOLUTION_RECORD
-            # GET on the block hash) until the next block commits them. Set
-            # before the Ping below so a Ping-triggered request finds it.
-            node.uncommitted_block = (
-                new_block_hash,
-                [get_block_expr(new_block), *pending_exprs],
-            )
             node.logger.info(
                 "Created block #%s with hash %s",
                 new_block.height,
@@ -370,6 +453,8 @@ def make_validation_worker(
 
             for pending_expr in pending_exprs:
                 put_expr_in_cold_storage(node, pending_expr)
+
+            _announce_block(node, new_block)
 
             if node.outgoing_queue and node.peers:
                 try:

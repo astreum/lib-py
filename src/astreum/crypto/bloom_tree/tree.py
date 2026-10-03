@@ -11,12 +11,14 @@ from astreum.storage.exprs import get_expr
 class BloomTree:
     """Binary bloom tree for a 1024-block chunk."""
 
-    def __init__(self, root_hash=None, astreum_node=None):
+    def __init__(self, root_hash=None, astreum_node=None, contact=None):
         self.root: BloomNode | None = None
         self._nodes: dict[bytes, BloomNode] = {}  # expr_id -> node
+        # (relay_key, address, port) of the peer holding uncommitted nodes.
+        self.contact = contact
         if root_hash and root_hash != ZERO32 and astreum_node:
             from astreum.crypto.bloom_tree.expr import bloom_node_from_expr
-            expr = get_expr(astreum_node, root_hash)
+            expr = get_expr(astreum_node, root_hash, contact=contact)
             if expr is not None:
                 self.root = bloom_node_from_expr(expr)
 
@@ -53,7 +55,7 @@ class BloomTree:
         level = parent.level + 1
         child_hash = parent._left_hash if is_left else parent._right_hash
         if child_hash and astreum_node:
-            expr = get_expr(astreum_node, child_hash)
+            expr = get_expr(astreum_node, child_hash, contact=self.contact)
             if expr is not None:
                 from astreum.crypto.bloom_tree.expr import bloom_node_from_expr
                 return bloom_node_from_expr(expr)

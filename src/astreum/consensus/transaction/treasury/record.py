@@ -92,7 +92,9 @@ class TreasuryUserRecord:
         return self._expr
 
     @classmethod
-    def from_storage(cls, node: Any, head_hash: bytes) -> TreasuryUserRecord | None:
+    def from_storage(
+        cls, node: Any, head_hash: bytes, contact=None
+    ) -> TreasuryUserRecord | None:
         """Decode a `TreasuryUserRecord` from its stored `Expr` encoding.
 
         Args:
@@ -108,19 +110,19 @@ class TreasuryUserRecord:
         """
         if not head_hash or head_hash == ZERO32:
             return None
-        header = get_expr_list(node, head_hash)
+        header = get_expr_list(node, head_hash, contact=contact)
         if header is None or not header._tag == "link":
             return None
-        nodes, missed = resolve_list_exprs(node, header)
+        nodes, missed = resolve_list_exprs(node, header, contact=contact)
         if missed:
             return None
         if len(nodes) not in (4, 7):
             return None
         fields = []
         for n in nodes:
-            tag = get_expr_tag(n, node)
+            tag = get_expr_tag(n, node, contact)
             if tag == "int":
-                fields.append(get_expr_value(n, node))
+                fields.append(get_expr_value(n, node, contact))
             elif tag == "link" and (n._head_hash is not None or n.head is NIL):
                 fields.append(n._head_hash if n._head_hash is not None else ZERO32)
             else:
@@ -175,7 +177,7 @@ def _claimed_guarantees_to_expr(claimed_guarantees: list[tuple[bytes, bytes, int
 
 
 def _claimed_guarantees_from_expr(
-    node: Any, claimed_guarantees_node: Expr
+    node: Any, claimed_guarantees_node: Expr, contact=None
 ) -> list[tuple[bytes, bytes, int]] | None:
     """Decode a claimed-guarantees `Expr` (as produced by `_claimed_guarantees_to_expr`).
 
@@ -190,26 +192,26 @@ def _claimed_guarantees_from_expr(
     """
     if claimed_guarantees_node is NIL:
         return []
-    entry_nodes, missed = resolve_list_exprs(node, claimed_guarantees_node)
+    entry_nodes, missed = resolve_list_exprs(node, claimed_guarantees_node, contact=contact)
     if missed:
         return None
     result: list[tuple[bytes, bytes, int]] = []
     for entry_node in entry_nodes:
-        sub_nodes, sub_missed = resolve_list_exprs(node, entry_node)
+        sub_nodes, sub_missed = resolve_list_exprs(node, entry_node, contact=contact)
         if sub_missed or len(sub_nodes) != 3:
             return None
         guarantor_node, guarantee_node, guarantee_amount_node = sub_nodes
-        if get_expr_tag(guarantor_node, node) != "link" or guarantor_node._head_hash is None:
+        if get_expr_tag(guarantor_node, node, contact) != "link" or guarantor_node._head_hash is None:
             return None
-        if get_expr_tag(guarantee_node, node) != "link" or guarantee_node._head_hash is None:
+        if get_expr_tag(guarantee_node, node, contact) != "link" or guarantee_node._head_hash is None:
             return None
-        if get_expr_tag(guarantee_amount_node, node) != "int":
+        if get_expr_tag(guarantee_amount_node, node, contact) != "int":
             return None
         result.append(
             (
                 guarantor_node._head_hash,
                 guarantee_node._head_hash,
-                get_expr_value(guarantee_amount_node, node),
+                get_expr_value(guarantee_amount_node, node, contact),
             )
         )
     return result
@@ -269,13 +271,15 @@ class TreasuryLoanRecord:
         return self._expr
 
     @classmethod
-    def from_storage(cls, node: Any, head_hash: bytes) -> TreasuryLoanRecord | None:
+    def from_storage(
+        cls, node: Any, head_hash: bytes, contact=None
+    ) -> TreasuryLoanRecord | None:
         if not head_hash or head_hash == ZERO32:
             return None
-        header = get_expr_list(node, head_hash)
+        header = get_expr_list(node, head_hash, contact=contact)
         if header is None or not header._tag == "link":
             return None
-        nodes, missed = resolve_list_exprs(node, header)
+        nodes, missed = resolve_list_exprs(node, header, contact=contact)
         if missed:
             return None
         if len(nodes) != 11:
@@ -287,18 +291,18 @@ class TreasuryLoanRecord:
         owner = TREASURY_ADDRESS
         for i, n in enumerate(nodes):
             if i == 7:
-                decoded = _claimed_guarantees_from_expr(node, n)
+                decoded = _claimed_guarantees_from_expr(node, n, contact)
                 if decoded is None:
                     return None
                 claimed_guarantees = decoded
                 continue
             if i == 10:
-                if get_expr_tag(n, node) != "link" or n._head_hash is None:
+                if get_expr_tag(n, node, contact) != "link" or n._head_hash is None:
                     return None
                 owner = n._head_hash
                 continue
-            if get_expr_tag(n, node) == "int":
-                int_fields.append(get_expr_value(n, node))
+            if get_expr_tag(n, node, contact) == "int":
+                int_fields.append(get_expr_value(n, node, contact))
             else:
                 return None
         if len(int_fields) != 9:
@@ -381,7 +385,9 @@ class TreasuryGuarantee:
         return self._expr
 
     @classmethod
-    def from_storage(cls, node: Any, head_hash: bytes) -> TreasuryGuarantee | None:
+    def from_storage(
+        cls, node: Any, head_hash: bytes, contact=None
+    ) -> TreasuryGuarantee | None:
         """Decode a `TreasuryGuarantee` from its stored `Expr` encoding.
 
         Args:
@@ -396,19 +402,19 @@ class TreasuryGuarantee:
         """
         if not head_hash or head_hash == ZERO32:
             return None
-        header = get_expr_list(node, head_hash)
+        header = get_expr_list(node, head_hash, contact=contact)
         if header is None or not header._tag == "link":
             return None
-        nodes, missed = resolve_list_exprs(node, header)
+        nodes, missed = resolve_list_exprs(node, header, contact=contact)
         if missed:
             return None
         if len(nodes) != 5:
             return None
         fields = []
         for n in nodes:
-            tag = get_expr_tag(n, node)
+            tag = get_expr_tag(n, node, contact)
             if tag == "int":
-                fields.append(get_expr_value(n, node))
+                fields.append(get_expr_value(n, node, contact))
             elif tag == "link" and (n._head_hash is not None or n.head is NIL):
                 fields.append(n._head_hash if n._head_hash is not None else ZERO32)
             else:

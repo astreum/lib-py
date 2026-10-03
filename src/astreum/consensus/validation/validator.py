@@ -27,8 +27,15 @@ def current_validator(
     node: Any,
     block_hash: bytes,
     target_time: Optional[int] = None,
+    contact=None,
 ) -> Tuple[bytes, Accounts]:
-    block = get_block_from_storage(astreum_node=node, block_hash=block_hash)
+    """Return the scheduled validator for the block after *block_hash* and the
+    accounts to build it on (that validator's stake halved).
+
+    *contact* is the ``(relay_key, address, port)`` of the peer holding
+    *block_hash*'s uncommitted state; every fetch made here goes to it.
+    """
+    block = get_block_from_storage(astreum_node=node, block_hash=block_hash, contact=contact)
 
     if block.timestamp is None:
         raise ValueError("block timestamp missing")
@@ -41,7 +48,7 @@ def current_validator(
     accounts_hash = getattr(block, "accounts_hash", None)
     if not accounts_hash:
         raise ValueError("block missing accounts hash")
-    accounts = Accounts(root_hash=accounts_hash)
+    accounts = Accounts(root_hash=accounts_hash, contact=contact)
 
     treasury_account = accounts.get_account(TREASURY_ADDRESS, node)
     if treasury_account is None:
@@ -61,13 +68,14 @@ def current_validator(
             if account_key and record_head and record_head != ZERO32
         ],
         RESOLUTION_FULL,
+        contact=contact,
     )
     for account_key, record_head in stake_entries.items():
         if not account_key:
             continue
         if not record_head or record_head == ZERO32:
             continue
-        record = TreasuryUserRecord.from_storage(node, record_head.hash())
+        record = TreasuryUserRecord.from_storage(node, record_head.hash(), contact=contact)
         if record is None:
             continue
         stakes[account_key] = record.balance
@@ -108,7 +116,7 @@ def current_validator(
             updated_record = replace(record, balance=new_amount)
             updated_record_head = updated_record.expr().hash()
             put_in_radix_tree(stake_trie, node, validator_key, updated_record_head)
-            record_exprs, _ = resolve_inner_exprs(node, updated_record.expr())
+            record_exprs, _ = resolve_inner_exprs(node, updated_record.expr(), contact=contact)
             accounts.pending_exprs.extend(record_exprs)
             treasury_account.data_hash = stake_trie.root_hash or ZERO32
             treasury_account.balance -= returned_amount
@@ -133,6 +141,7 @@ def current_validator(
             updated_record = TreasuryUserRecord.from_storage(
                 node,
                 updated_record_head or ZERO32,
+                contact=contact,
             )
             if updated_record is None:
                 raise ValueError("validator treasury record missing after loan payment")

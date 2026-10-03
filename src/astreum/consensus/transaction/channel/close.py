@@ -22,7 +22,7 @@ def handle_channel_close(
         return False
 
     channel_head = get_from_radix_tree(sender_account.channels, node, counterparty)
-    channel_state = get_channel_from_storage(node, channel_head)
+    channel_state = get_channel_from_storage(node, channel_head, block.contact)
     if channel_state is None:
         return False
     channel_balance, channel_counter, withdrawal_window = channel_state
@@ -44,6 +44,6 @@ def handle_channel_close(
 
     put_in_radix_tree(sender_account.channels, node, counterparty, updated_channel_head)
     sender_account.channels_hash = sender_account.channels.root_hash or ZERO32
-    inner_exprs, _ = resolve_inner_exprs(node, channel_expr)
+    inner_exprs, _ = resolve_inner_exprs(node, channel_expr, contact=block.contact)
     block.pending_exprs.extend(inner_exprs)
     return True

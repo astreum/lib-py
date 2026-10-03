@@ -7,7 +7,7 @@ from astreum.storage.exprs.cascade import get_expr
 from astreum.storage.exprs.local import get_expr_from_local_storage
 
 
-def get_expr_full(node, expr_id: bytes) -> Optional[Expr]:
+def get_expr_full(node, expr_id: bytes, contact=None) -> Optional[Expr]:
     """Resolve an Expr and all transitive link hashes using full resolution.
 
     Fetches the root expression, then recursively resolves every
@@ -18,26 +18,28 @@ def get_expr_full(node, expr_id: bytes) -> Optional[Expr]:
     Args:
         node: A Node instance providing config and storage access.
         expr_id: The content hash of the root expression.
+        contact: Optional ``(relay_key, address, port)`` passed to every
+            network fetch in the tree.
 
     Returns:
         The fully resolved Expr with all links expanded inline, or None
         if any part of the tree cannot be found.
     """
-    expr = get_expr(node, expr_id)
+    expr = get_expr(node, expr_id, contact=contact)
     if expr is None:
         return None
     if not expr._tag == "link":
         return expr
 
     if expr._head is None and expr._head_hash is not None:
-        head = get_expr_full(node, expr._head_hash)
+        head = get_expr_full(node, expr._head_hash, contact=contact)
         if head is None:
             return None
         expr._head = head
         expr._head_hash = None
 
     if expr._tail is None and expr._tail_hash is not None:
-        tail = get_expr_full(node, expr._tail_hash)
+        tail = get_expr_full(node, expr._tail_hash, contact=contact)
         if tail is None:
             return None
         expr._tail = tail

@@ -121,7 +121,7 @@ def handle_storage_initial_contract(
             return None
 
         if transaction is not None:
-            tx_exprs, missed = resolve_inner_exprs(node, transaction.expr())
+            tx_exprs, missed = resolve_inner_exprs(node, transaction.expr(), contact=block.contact)
             if missed:
                 return None
             data_head = transaction.data._head
@@ -130,14 +130,14 @@ def handle_storage_initial_contract(
             list_expr = data_head._head
             if list_expr is None or list_expr._tag != "link":
                 return None
-            list_items, missed = resolve_list_exprs(node, list_expr)
+            list_items, missed = resolve_list_exprs(node, list_expr, contact=block.contact)
             if missed:
                 return None
         else:
-            list_expr = get_expr_list(node, expr_list_id)
+            list_expr = get_expr_list(node, expr_list_id, contact=block.contact)
             if list_expr is None:
                 return None
-            list_items, _ = resolve_list_exprs(node, list_expr)
+            list_items, _ = resolve_list_exprs(node, list_expr, contact=block.contact)
         total_bytes = sum(item.size() for item in list_items)
         number_of_exprs = len(list_items)
 

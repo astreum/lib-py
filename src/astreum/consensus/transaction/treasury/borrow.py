@@ -46,7 +46,9 @@ def _current_height(block: object) -> int:
     )
 
 
-def _decode_guarantee_refs(node: Any, guarantee_refs_node: Expr) -> list[tuple[bytes, bytes]] | None:
+def _decode_guarantee_refs(
+    node: Any, guarantee_refs_node: Expr, contact=None
+) -> list[tuple[bytes, bytes]] | None:
     """Decode a borrow transaction's guarantee-refs field.
 
     Args:
@@ -61,18 +63,18 @@ def _decode_guarantee_refs(node: Any, guarantee_refs_node: Expr) -> list[tuple[b
     """
     if guarantee_refs_node is NIL:
         return []
-    entry_nodes, missed = resolve_list_exprs(node, guarantee_refs_node)
+    entry_nodes, missed = resolve_list_exprs(node, guarantee_refs_node, contact=contact)
     if missed:
         return None
     result: list[tuple[bytes, bytes]] = []
     for entry_node in entry_nodes:
-        sub_nodes, sub_missed = resolve_list_exprs(node, entry_node)
+        sub_nodes, sub_missed = resolve_list_exprs(node, entry_node, contact=contact)
         if sub_missed or len(sub_nodes) != 2:
             return None
         guarantor_node, guarantee_node = sub_nodes
-        if get_expr_tag(guarantor_node, node) != "link" or guarantor_node._head_hash is None:
+        if get_expr_tag(guarantor_node, node, contact) != "link" or guarantor_node._head_hash is None:
             return None
-        if get_expr_tag(guarantee_node, node) != "link" or guarantee_node._head_hash is None:
+        if get_expr_tag(guarantee_node, node, contact) != "link" or guarantee_node._head_hash is None:
             return None
         result.append((guarantor_node._head_hash, guarantee_node._head_hash))
     return result
@@ -82,14 +84,15 @@ def secured_loan_remaining_total(
     *,
     node: Any,
     loans_root_hash: bytes,
+    contact=None,
 ) -> int | None:
     if not loans_root_hash or loans_root_hash == ZERO32:
         return 0
 
-    loans_trie = RadixTree(root_hash=loans_root_hash)
+    loans_trie = RadixTree(root_hash=loans_root_hash, contact=contact)
     remaining_total = 0
     for loan_record_head in get_all_from_radix_tree(loans_trie, node).values():
-        loan = TreasuryLoanRecord.from_storage(node, loan_record_head)
+        loan = TreasuryLoanRecord.from_storage(node, loan_record_head, contact=contact)
         if loan is None:
             return None
         if loan.loan_type != LoanType.SECURED or loan.next_payment_block_number == 0:
@@ -126,13 +129,14 @@ def _handle_secured_borrow(
     )
     scheduled_total = transaction.amount * request.payment_count
     user_record_head = get_from_radix_tree(treasury_account.data, node, transaction.sender)
-    user_record = TreasuryUserRecord.from_storage(node, user_record_head or ZERO32)
+    user_record = TreasuryUserRecord.from_storage(node, user_record_head or ZERO32, contact=block.contact)
     existing_secured_total = (
         None
         if user_record is None
         else secured_loan_remaining_total(
             node=node,
             loans_root_hash=user_record.loans_root_hash or ZERO32,
+            contact=block.contact,
         )
     )
     if (
@@ -160,13 +164,14 @@ def _handle_secured_borrow(
     loan_record_head = loan_record.expr().hash()
     loans_root_hash = user_record.loans_root_hash or ZERO32
     loans_trie = RadixTree(
-        root_hash=None if loans_root_hash == ZERO32 else loans_root_hash
+        root_hash=None if loans_root_hash == ZERO32 else loans_root_hash,
+        contact=block.contact,
     )
     if get_from_radix_tree(loans_trie, node, transaction_hash) is not None:
         return STATUS_FAILED
 
     put_in_radix_tree(loans_trie, node, transaction_hash, loan_record_head)
-    loan_exprs, _ = resolve_inner_exprs(node, loan_record.expr())
+    loan_exprs, _ = resolve_inner_exprs(node, loan_record.expr(), contact=block.contact)
     user_record = replace(user_record, loans_root_hash=loans_trie.root_hash or ZERO32)
     updated_user_record_head = user_record.expr().hash()
     put_in_radix_tree(
@@ -178,7 +183,7 @@ def _handle_secured_borrow(
     treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
     treasury_account.balance -= discounted_amount
     sender_account.balance += discounted_amount
-    user_record_exprs, _ = resolve_inner_exprs(node, user_record.expr())
+    user_record_exprs, _ = resolve_inner_exprs(node, user_record.expr(), contact=block.contact)
     _extend_pending_exprs(
         block,
         loan_exprs + _trie_exprs(loans_trie) + user_record_exprs,
@@ -221,7 +226,7 @@ def _handle_unsecured_borrow(
     creation_block_number = _current_height(block)
 
     borrower_record_head = get_from_radix_tree(treasury_account.data, node, transaction.sender)
-    borrower_record = TreasuryUserRecord.from_storage(node, borrower_record_head or ZERO32)
+    borrower_record = TreasuryUserRecord.from_storage(node, borrower_record_head or ZERO32, contact=block.contact)
     if borrower_record is None:
         borrower_record = TreasuryUserRecord()
 
@@ -239,12 +244,13 @@ def _handle_unsecured_borrow(
         state = guarantor_states.get(guarantor_address)
         if state is None:
             guarantor_record_head = get_from_radix_tree(treasury_account.data, node, guarantor_address)
-            guarantor_record = TreasuryUserRecord.from_storage(node, guarantor_record_head or ZERO32)
+            guarantor_record = TreasuryUserRecord.from_storage(node, guarantor_record_head or ZERO32, contact=block.contact)
             if guarantor_record is None:
                 return STATUS_FAILED
             guarantees_root_hash = guarantor_record.guarantees_root_hash or ZERO32
             guarantees_trie = RadixTree(
-                root_hash=None if guarantees_root_hash == ZERO32 else guarantees_root_hash
+                root_hash=None if guarantees_root_hash == ZERO32 else guarantees_root_hash,
+                contact=block.contact,
             )
             state = {
                 "record": guarantor_record,
@@ -316,12 +322,13 @@ def _handle_unsecured_borrow(
 
     loans_root_hash = borrower_record.loans_root_hash or ZERO32
     loans_trie = RadixTree(
-        root_hash=None if loans_root_hash == ZERO32 else loans_root_hash
+        root_hash=None if loans_root_hash == ZERO32 else loans_root_hash,
+        contact=block.contact,
     )
     if get_from_radix_tree(loans_trie, node, transaction_hash) is not None:
         return STATUS_FAILED
     put_in_radix_tree(loans_trie, node, transaction_hash, loan_record_head)
-    loan_exprs, _ = resolve_inner_exprs(node, loan_record.expr())
+    loan_exprs, _ = resolve_inner_exprs(node, loan_record.expr(), contact=block.contact)
 
     pending_exprs: list[Expr] = list(loan_exprs) + _trie_exprs(loans_trie)
 
@@ -341,7 +348,7 @@ def _handle_unsecured_borrow(
         )
         updated_guarantor_record_head = updated_guarantor_record.expr().hash()
         put_in_radix_tree(treasury_account.data, node, guarantor_address, updated_guarantor_record_head)
-        guarantor_record_exprs, _ = resolve_inner_exprs(node, updated_guarantor_record.expr())
+        guarantor_record_exprs, _ = resolve_inner_exprs(node, updated_guarantor_record.expr(), contact=block.contact)
         pending_exprs.extend(guarantor_record_exprs + _trie_exprs(state["trie"]))
 
     updated_borrower_record = replace(
@@ -352,7 +359,7 @@ def _handle_unsecured_borrow(
     updated_borrower_record_head = updated_borrower_record.expr().hash()
     put_in_radix_tree(treasury_account.data, node, transaction.sender, updated_borrower_record_head)
     treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
-    borrower_record_exprs, _ = resolve_inner_exprs(node, updated_borrower_record.expr())
+    borrower_record_exprs, _ = resolve_inner_exprs(node, updated_borrower_record.expr(), contact=block.contact)
     pending_exprs.extend(borrower_record_exprs)
 
     treasury_account.balance -= discounted_amount - insurance_fee
@@ -406,7 +413,7 @@ def handle_treasury_borrow(
         )
 
     if request.loan_type == LoanType.UNSECURED:
-        guarantee_refs = _decode_guarantee_refs(node, guarantee_refs_node)
+        guarantee_refs = _decode_guarantee_refs(node, guarantee_refs_node, block.contact)
         if guarantee_refs is None:
             return STATUS_FAILED
         return _handle_unsecured_borrow(

@@ -87,7 +87,9 @@ def _verify_single_claim(
     contract_head = get_from_radix_tree(storage_account.data, node, storage_id)
     if not contract_head or contract_head == ZERO32:
         return False
-    record = StorageRecord.from_storage(node, contract_head.hash())
+    record = StorageRecord.from_storage(
+        node, contract_head.hash(), contact=block.contact
+    )
     if record is None:
         return False
 
@@ -104,7 +106,11 @@ def _verify_single_claim(
     # 3. Fetch StorageSlot from storage trie, verify it belongs to this record
     from astreum.storage.records import parse_slot
 
-    parsed = parse_slot(node, get_from_radix_tree(storage_account.data, node, slot_id))
+    parsed = parse_slot(
+        node,
+        get_from_radix_tree(storage_account.data, node, slot_id),
+        contact=block.contact,
+    )
     if parsed is None:
         return False
     parsed_storage_id, parsed_sequence = parsed
@@ -187,12 +193,18 @@ def _prefetch_claim_records(node: Any, storage_account: Any, parsed_claims) -> N
             contract_head = get_from_radix_tree(storage_account.data, node, storage_id)
             if not contract_head or contract_head == ZERO32:
                 continue
-            record = StorageRecord.from_storage(node, contract_head.hash())
+            record = StorageRecord.from_storage(
+                node, contract_head.hash(), contact=storage_account.data.contact
+            )
             if record is None or len(record.last_payment_block_hash) != 32:
                 continue
             seed = blake3(record.last_payment_block_hash + storage_id).digest()
             challenge_index = int.from_bytes(seed[:8], "little", signed=False) % record.new_count
-            parsed = parse_slot(node, get_from_radix_tree(storage_account.data, node, slot_id))
+            parsed = parse_slot(
+                node,
+                get_from_radix_tree(storage_account.data, node, slot_id),
+                contact=storage_account.data.contact,
+            )
             if parsed != (storage_id, challenge_index):
                 continue
             if get_expr_from_local_storage(node, slot_id) is None:
@@ -228,7 +240,7 @@ def handle_storage_payment_contract(
     """
     try:
         # Resolve the link list of claims
-        claims_nodes, missed = resolve_list_exprs(node, payload)
+        claims_nodes, missed = resolve_list_exprs(node, payload, contact=block.contact)
         if missed:
             return (False, 0)
 
@@ -255,7 +267,9 @@ def handle_storage_payment_contract(
             contract_head = get_from_radix_tree(storage_account.data, node, storage_id)
             if not contract_head or contract_head == ZERO32:
                 continue
-            record = StorageRecord.from_storage(node, contract_head.hash())
+            record = StorageRecord.from_storage(
+                node, contract_head.hash(), contact=block.contact
+            )
             if record is None:
                 continue
 
@@ -272,7 +286,11 @@ def handle_storage_payment_contract(
             # Fetch StorageSlot, verify it belongs to this record
             from astreum.storage.records import parse_slot
 
-            parsed = parse_slot(node, get_from_radix_tree(storage_account.data, node, slot_id))
+            parsed = parse_slot(
+                node,
+                get_from_radix_tree(storage_account.data, node, slot_id),
+                contact=block.contact,
+            )
             if parsed is None:
                 continue
             parsed_storage_id, parsed_sequence = parsed

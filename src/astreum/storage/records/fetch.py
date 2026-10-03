@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from astreum.node import Node
 
 
-def parse_slot(node: "Node", value: Any) -> tuple[bytes, int] | None:
+def parse_slot(node: "Node", value: Any, contact=None) -> tuple[bytes, int] | None:
     """Classify a storage-trie value as a ``StorageSlot``.
 
     A slot is ``Link(head_hash=storage_id, tail=Int(sequence))``.  Anything
@@ -21,6 +21,8 @@ def parse_slot(node: "Node", value: Any) -> tuple[bytes, int] | None:
     Args:
         node: A Node instance providing config and storage access.
         value: The storage-trie value to classify.
+        contact: Optional ``(relay_key, address, port)`` for the fetch that
+            resolves the slot's head hash.
 
     Returns:
         A ``(storage_id, sequence)`` tuple, or ``None`` if the value
@@ -36,9 +38,9 @@ def parse_slot(node: "Node", value: Any) -> tuple[bytes, int] | None:
     if tail is None:
         return None
     try:
-        if get_expr_tag(tail, node) != "int":
+        if get_expr_tag(tail, node, contact) != "int":
             return None
-        return value._head_hash, get_expr_value(tail, node)
+        return value._head_hash, get_expr_value(tail, node, contact)
     except (AttributeError, TypeError, ValueError):
         return None
 

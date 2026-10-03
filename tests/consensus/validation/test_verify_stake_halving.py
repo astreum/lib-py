@@ -7,6 +7,10 @@ validator.
 
 The blocks under test are produced by the real validation worker on a genesis
 whose stake is high enough to halve several times.
+
+The same chain is then verified by a second node that starts with empty
+storage and may only ask one peer (V) for data. Every GET it sends is recorded;
+a read that forgot to carry V's contact would show up as a GET without it.
 """
 
 import copy
@@ -33,6 +37,7 @@ from astreum.consensus.account.model import generate_new_account_storage_contrac
 from astreum.consensus.block.create import create_block  # noqa: E402
 from astreum.consensus.block.encoding.decode import get_block_from_storage  # noqa: E402
 from astreum.consensus.block.verify import transactions as verify_transactions  # noqa: E402
+from astreum.consensus.block.verify.head import verify_block_head  # noqa: E402
 from astreum.consensus.block.verify.transactions import verify_block_transactions  # noqa: E402
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS  # noqa: E402
 from astreum.consensus.models.accounts import Accounts  # noqa: E402
@@ -40,6 +45,8 @@ from astreum.consensus.transaction.treasury.record import TreasuryUserRecord  # 
 from astreum.consensus.validation import node as validation_node  # noqa: E402
 from astreum.consensus.validation.node import validate_blockchain  # noqa: E402
 from astreum.expression import ZERO32, resolve_inner_exprs  # noqa: E402
+from astreum.expression.encoding import decode_expr_from_bytes, encode_expr_to_bytes  # noqa: E402
+from astreum.storage.exprs import get_expr_from_local_storage, put_expr_in_hot_storage  # noqa: E402
 from astreum.node import Node  # noqa: E402
 from astreum.storage.radix import RadixTree, put_in_radix_tree  # noqa: E402
 
@@ -174,6 +181,61 @@ class TestVerifyStakeHalving(unittest.TestCase):
             ok, reason = verify_block_transactions(self.node, block)
             self.assertTrue(ok, f"height {block.height}: {reason}")
 
+    def test_worker_built_blocks_pass_the_header_check(self) -> None:
+        # Signature, proof-of-work and difficulty, as a peer checks a BLOCK.
+        for block in self.chain:
+            self.assertTrue(verify_block_head(self.node, block), f"height {block.height}")
+
+    def test_fresh_node_verifies_using_only_the_validators_contact(self) -> None:
+        contact = (b"\x07" * 32, "10.0.0.7", 7000)
+        verifier_dir = tempfile.TemporaryDirectory(prefix="astreum_cold_")
+        self.addCleanup(verifier_dir.cleanup)
+        verifier = Node(
+            config={
+                "port": _free_port(),
+                "default_seed": None,
+                "additional_seeds": [],
+                "cold_storage_path": verifier_dir.name,
+                "cold_storage_scale": "KB",
+                "logging_enabled": False,
+                "verbose": False,
+                "storage_fetch_interval": 0,
+                "storage_fetch_retries": 1,
+            }
+        )
+        verifier.is_connected = True
+        self.assertEqual(verifier.hot_storage, {})
+
+        gets: list[tuple[bytes, object]] = []
+
+        def validator_answers(node, expr_id, resolution, *, contact=None, preclaimed=False):
+            gets.append((expr_id, contact))
+            expr = get_expr_from_local_storage(self.node, expr_id)
+            if expr is None:
+                return False
+            # As on the wire: flat, with hash references.
+            put_expr_in_hot_storage(
+                verifier, decode_expr_from_bytes(encode_expr_to_bytes(expr))
+            )
+            return True
+
+        with mock.patch(
+            "astreum.storage.workers.requests.queue_storage_get",
+            side_effect=validator_answers,
+        ):
+            for block in self.chain:
+                block_hash = block.expr_id
+                loaded = get_block_from_storage(verifier, block_hash, contact=contact)
+                loaded.previous_block = get_block_from_storage(
+                    verifier, block.previous_block_hash, contact=contact
+                )
+                ok, reason = verify_block_transactions(verifier, loaded)
+                self.assertTrue(ok, f"height {block.height}: {reason}")
+
+        self.assertTrue(gets, "the verifier should have had to fetch from V")
+        stray = [(h.hex()[:12], c) for h, c in gets if c != contact]
+        self.assertEqual(stray, [], "GETs that did not go to V")
+
     def test_first_block_halved_the_stake(self) -> None:
         # Guards the test itself: the blocks above only exercise the fix if the
         # creator really halved the stake.
@@ -198,7 +260,7 @@ class TestVerifyStakeHalving(unittest.TestCase):
         # must fail, proving the halving is what makes verification pass.
         first = self.chain[0]
 
-        def plain(node, prev_hash):
+        def plain(node, prev_hash, contact=None):
             return (
                 first.validator_public_key_bytes,
                 Accounts(root_hash=first.previous_block.accounts_hash),

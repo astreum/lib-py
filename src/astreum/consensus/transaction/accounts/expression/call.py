@@ -35,7 +35,7 @@ def handle_expression_account_call(
     if expression_account is None or expression_account.code_hash == ZERO32:
         return STATUS_FAILED, machine.meter.eval, machine.meter.storage, []
 
-    program_expr = get_expr(node, expression_account.code_hash)
+    program_expr = get_expr(node, expression_account.code_hash, contact=block.contact)
     if program_expr is None:
         return STATUS_FAILED, machine.meter.eval, machine.meter.storage, []
 

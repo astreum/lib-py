@@ -46,6 +46,7 @@ class Block:
     global_loaned: int
     global_defaulted: int
     global_loan_count: int
+    contact: Optional[tuple]
     _expr: Optional["Expr"]
     
     def __init__(
@@ -80,7 +81,13 @@ class Block:
         global_loaned: int = 0,
         global_defaulted: int = 0,
         global_loan_count: int = 0,
+        contact: Optional[tuple] = None,
     ) -> None:
+        # ``(relay_key, address, port)`` of the peer to fetch from while
+        # processing this block, or None for normal routing. A block that is
+        # verified or built on top of an uncommitted block N reads N's state
+        # (tries, transactions, bloom tree) from the validator holding it.
+        self.contact = contact
         self.expr_id = expr_id
         self.chain_id = chain_id
         self.previous_block_hash = previous_block_hash
@@ -101,7 +108,7 @@ class Block:
         self.signature = signature
         self.total_mint = total_mint
         if accounts is None and accounts_hash and accounts_hash != ZERO32:
-            self.accounts = Accounts(root_hash=accounts_hash)
+            self.accounts = Accounts(root_hash=accounts_hash, contact=contact)
         else:
             self.accounts = accounts
         self.transactions = transactions

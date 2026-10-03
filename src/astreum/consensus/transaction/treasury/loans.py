@@ -99,7 +99,7 @@ def _apply_treasury_loan_payment(
     updated_loan = replace(loan, next_payment_block_number=next_payment_block_number)
     updated_loan_head = updated_loan.expr().hash()
     put_in_radix_tree(loans_trie, node, loan_transaction_id, updated_loan_head)
-    loan_exprs, _ = resolve_inner_exprs(node, updated_loan.expr())
+    loan_exprs, _ = resolve_inner_exprs(node, updated_loan.expr(), contact=accounts.contact)
 
     updated_user_record = replace(
         user_record,
@@ -110,7 +110,7 @@ def _apply_treasury_loan_payment(
 
     put_in_radix_tree(treasury_account.data, node, borrower, updated_user_record_head)
     treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
-    user_record_exprs, _ = resolve_inner_exprs(node, updated_user_record.expr())
+    user_record_exprs, _ = resolve_inner_exprs(node, updated_user_record.expr(), contact=accounts.contact)
     pending_exprs.extend(
         loan_exprs + _trie_exprs(loans_trie) + user_record_exprs
     )
@@ -133,16 +133,16 @@ def apply_treasury_loan_payments_from_stake_return(
         return False
 
     user_record_head = get_from_radix_tree(treasury_account.data, node, borrower)
-    user_record = TreasuryUserRecord.from_storage(node, user_record_head or ZERO32)
+    user_record = TreasuryUserRecord.from_storage(node, user_record_head or ZERO32, contact=accounts.contact)
     if user_record is None or user_record.balance < amount:
         return False
     if user_record.loans_root_hash == ZERO32:
         return True
 
-    loans_trie = RadixTree(root_hash=user_record.loans_root_hash)
+    loans_trie = RadixTree(root_hash=user_record.loans_root_hash, contact=accounts.contact)
     active_loans: list[tuple[int, bytes, TreasuryLoanRecord]] = []
     for loan_transaction_id, loan_record_head in get_all_from_radix_tree(loans_trie, node).items():
-        loan = TreasuryLoanRecord.from_storage(node, loan_record_head)
+        loan = TreasuryLoanRecord.from_storage(node, loan_record_head, contact=accounts.contact)
         if (
             loan is None
             or loan.loan_type != LoanType.SECURED

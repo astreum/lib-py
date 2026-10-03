@@ -11,8 +11,12 @@ class Accounts:
     def __init__(
         self,
         root_hash: Optional[bytes] = None,
+        contact=None,
     ) -> None:
-        self._trie = RadixTree(root_hash=root_hash)
+        # ``contact`` is the peer holding this state when it is uncommitted;
+        # the trie and every account loaded from it fetch from there.
+        self.contact = contact
+        self._trie = RadixTree(root_hash=root_hash, contact=contact)
         self._cache: Dict[bytes, Account] = {}
         self.pending_exprs: List[Expr] = []
 
@@ -32,32 +36,38 @@ class Accounts:
         if account_expr is None:
             return None
 
-        from astreum.expression import resolve_list_exprs, get_expr_tag, get_expr_value
+        from astreum.expression import (
+            get_expr_tag,
+            get_expr_value,
+            get_referenced_hash,
+            resolve_list_exprs,
+        )
         from astreum.consensus.account.create import create_account
 
-        nodes, missed = resolve_list_exprs(node, account_expr)
+        nodes, missed = resolve_list_exprs(node, account_expr, contact=self.contact)
         if missed or len(nodes) != 5:
             return None
 
         data_node, counter_node, code_node, channels_node, balance_node = nodes
 
-        if not get_expr_tag(data_node, node) == "link":
+        if not get_expr_tag(data_node, node, self.contact) == "link":
             return None
-        if not get_expr_tag(counter_node, node) == "int":
+        if not get_expr_tag(counter_node, node, self.contact) == "int":
             return None
-        if not get_expr_tag(code_node, node) == "link":
+        if not get_expr_tag(code_node, node, self.contact) == "link":
             return None
-        if not get_expr_tag(channels_node, node) == "link":
+        if not get_expr_tag(channels_node, node, self.contact) == "link":
             return None
-        if not get_expr_tag(balance_node, node) == "int":
+        if not get_expr_tag(balance_node, node, self.contact) == "int":
             return None
 
         account = create_account(
-            balance=get_expr_value(balance_node, node),
-            data_hash=data_node._head_hash if data_node._head_hash is not None else data_node.hash(),
-            channels_hash=channels_node._head_hash if channels_node._head_hash is not None else channels_node.hash(),
-            counter=get_expr_value(counter_node, node),
-            code_hash=code_node._head_hash if code_node._head_hash is not None else code_node.hash(),
+            balance=get_expr_value(balance_node, node, self.contact),
+            data_hash=get_referenced_hash(data_node),
+            channels_hash=get_referenced_hash(channels_node),
+            counter=get_expr_value(counter_node, node, self.contact),
+            code_hash=get_referenced_hash(code_node),
+            contact=self.contact,
         )
         self._cache[address] = account
         return account

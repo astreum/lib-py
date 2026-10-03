@@ -54,7 +54,7 @@ def generate_transaction_storage_contract(
     transaction: Transaction,
     storage_account: Any,
 ) -> int:
-    tx_exprs, _ = resolve_inner_exprs(node, transaction.expr())
+    tx_exprs, _ = resolve_inner_exprs(node, transaction.expr(), contact=block.contact)
     if not tx_exprs:
         return 0
 
@@ -83,7 +83,7 @@ def generate_receipt_storage_contract(
     sender_public_key: bytes,
 ) -> int:
     receipt_id = receipt.expr().hash()
-    receipt_exprs, _ = resolve_inner_exprs(node, receipt.expr())
+    receipt_exprs, _ = resolve_inner_exprs(node, receipt.expr(), contact=block.contact)
     receipt.expr_id = receipt_id
 
     total_bytes = sum(expr.size() for expr in receipt_exprs)

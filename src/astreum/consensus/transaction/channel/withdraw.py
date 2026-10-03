@@ -87,7 +87,7 @@ def handle_channel_withdraw(
         return False
 
     channel_head = get_from_radix_tree(payer_account.channels, node, recipient)
-    channel_state = get_channel_from_storage(node, channel_head)
+    channel_state = get_channel_from_storage(node, channel_head, block.contact)
     if channel_state is None:
         return False
     channel_balance, stored_counter, withdrawal_window = channel_state
@@ -117,7 +117,7 @@ def handle_channel_withdraw(
     payer_account.channels_hash = payer_account.channels.root_hash or ZERO32
     sender_account.balance += requested_amount
 
-    inner_exprs, _ = resolve_inner_exprs(node, channel_expr)
+    inner_exprs, _ = resolve_inner_exprs(node, channel_expr, contact=block.contact)
     block.pending_exprs.extend(inner_exprs)
     block.accounts.set_account(payer, payer_account)
     return True

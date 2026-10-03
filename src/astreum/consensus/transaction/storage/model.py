@@ -51,11 +51,13 @@ class StorageRecord:
         return ZERO32
 
     @classmethod
-    def from_storage(cls, node: Any, expr_id: bytes) -> StorageRecord | None:
-        header = get_expr(node, expr_id)
+    def from_storage(
+        cls, node: Any, expr_id: bytes, contact=None
+    ) -> StorageRecord | None:
+        header = get_expr(node, expr_id, contact=contact)
         if header is None or not header._tag == "link":
             return None
-        nodes, missed = resolve_list_exprs(node, header)
+        nodes, missed = resolve_list_exprs(node, header, contact=contact)
         if missed:
             return None
         if len(nodes) not in (6, 7):
@@ -69,20 +71,20 @@ class StorageRecord:
         creation_node_idx = 4 if len(nodes) == 7 else 3
         count_node_idx = 5 if len(nodes) == 7 else 4
         size_node_idx = 6 if len(nodes) == 7 else 5
-        if not get_expr_tag(nodes[mint_node_idx], node) == "int":
+        if not get_expr_tag(nodes[mint_node_idx], node, contact) == "int":
             return None
-        if not all(get_expr_tag(n, node) == "link" for n in [nodes[0], nodes[winner_node_idx], nodes[creation_node_idx]]):
+        if not all(get_expr_tag(n, node, contact) == "link" for n in [nodes[0], nodes[winner_node_idx], nodes[creation_node_idx]]):
             return None
-        if not all(get_expr_tag(n, node) == "int" for n in [nodes[1], nodes[count_node_idx], nodes[size_node_idx]]):
+        if not all(get_expr_tag(n, node, contact) == "int" for n in [nodes[1], nodes[count_node_idx], nodes[size_node_idx]]):
             return None
         obj = cls(
             last_payment_block_hash=cls._extract_hash(nodes[0]),
-            last_payment_height=get_expr_value(nodes[1], node),
-            mint=bool(get_expr_value(nodes[mint_node_idx], node)),
+            last_payment_height=get_expr_value(nodes[1], node, contact),
+            mint=bool(get_expr_value(nodes[mint_node_idx], node, contact)),
             last_payment_winner=cls._extract_hash(nodes[winner_node_idx]),
             creation_block_hash=cls._extract_hash(nodes[creation_node_idx]),
-            new_count=get_expr_value(nodes[count_node_idx], node),
-            new_size=get_expr_value(nodes[size_node_idx], node),
+            new_count=get_expr_value(nodes[count_node_idx], node, contact),
+            new_size=get_expr_value(nodes[size_node_idx], node, contact),
         )
         obj._expr = header
         return obj
@@ -109,18 +111,20 @@ class StorageSlot:
         return self._expr
 
     @classmethod
-    def from_storage(cls, node: Any, expr_id: bytes) -> StorageSlot | None:
-        expr = get_expr(node, expr_id)
+    def from_storage(
+        cls, node: Any, expr_id: bytes, contact=None
+    ) -> StorageSlot | None:
+        expr = get_expr(node, expr_id, contact=contact)
         if not expr._tag == "link":
             return None
         if expr._head_hash is None:
             return None
         tail = expr._tail
-        if not get_expr_tag(tail, node) == "int":
+        if not get_expr_tag(tail, node, contact) == "int":
             return None
         obj = cls(
             storage_id=expr._head_hash,
-            sequence=get_expr_value(tail, node),
+            sequence=get_expr_value(tail, node, contact),
         )
         obj._expr = expr
         return obj

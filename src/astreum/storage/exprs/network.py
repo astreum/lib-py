@@ -66,8 +66,14 @@ def _poll_local(node, expr_ids: list[bytes]) -> dict[bytes, Optional[Expr]]:
     return found
 
 
-def _resolve_structured(node, expr_id: bytes, resolution: int) -> Optional[Expr]:
-    """Poll for a LIST/FULL expr, fetching its missing inner hashes as one batch."""
+def _resolve_structured(
+    node, expr_id: bytes, resolution: int, contact=None
+) -> Optional[Expr]:
+    """Poll for a LIST/FULL expr, fetching its missing inner hashes as one batch.
+
+    *contact* keeps the follow-up fetch of the missing inner hashes on the same
+    peer as the root fetch.
+    """
     interval = node.config["storage_fetch_interval"]
     retries = node.config["storage_fetch_retries"]
 
@@ -82,14 +88,16 @@ def _resolve_structured(node, expr_id: bytes, resolution: int) -> Optional[Expr]
             missing = _collect_missing_hashes(raw, resolution)
             if not missing:
                 return raw
-            get_exprs_from_network(node, [(h, RESOLUTION_SINGLE) for h in missing])
+            get_exprs_from_network(
+                node, [(h, RESOLUTION_SINGLE) for h in missing], contact=contact
+            )
         else:
             sleep(interval)
     return read_local(node, expr_id)
 
 
 def get_exprs_from_network(
-    node, entries: list[tuple[bytes, int]]
+    node, entries: list[tuple[bytes, int]], contact=None
 ) -> dict[bytes, Optional[Expr]]:
     """Fetch many Exprs from the P2P network, batching the requests.
 
@@ -106,6 +114,10 @@ def get_exprs_from_network(
         node: A Node instance providing config and storage access.
         entries: ``(expr_id, resolution)`` pairs. A repeated ``expr_id`` is
             fetched once, at its first resolution.
+        contact: ``(relay_key, address, port)`` of the one peer to ask, instead
+            of routing each hash by the index or xor distance. Used for data
+            only its creator holds (an uncommitted block's exprs). Local
+            storage is still checked first.
 
     Returns:
         ``{expr_id: Expr | None}`` for every requested hash. ``None`` means the
@@ -133,7 +145,7 @@ def get_exprs_from_network(
                 results[expr_id] = local
                 continue
         node.logger.debug("Attempting network fetch for %s (resolution=%s)", expr_id.hex(), resolution)
-        if not queue_storage_get(node, expr_id, resolution):
+        if not queue_storage_get(node, expr_id, resolution, contact=contact):
             node.logger.debug("Network request failed for %s: nothing to send to", expr_id.hex())
             continue
         if resolution in (RESOLUTION_LIST, RESOLUTION_FULL):
@@ -144,11 +156,13 @@ def get_exprs_from_network(
     if waiting_flat:
         results.update(_poll_local(node, waiting_flat))
     for expr_id, resolution in waiting_structured:
-        results[expr_id] = _resolve_structured(node, expr_id, resolution)
+        results[expr_id] = _resolve_structured(node, expr_id, resolution, contact)
     return results
 
 
-def get_expr_from_network(node, expr_id: bytes, resolution: int = RESOLUTION_SINGLE) -> Optional[Expr]:
+def get_expr_from_network(
+    node, expr_id: bytes, resolution: int = RESOLUTION_SINGLE, contact=None
+) -> Optional[Expr]:
     """Fetch one Expr from the P2P network; a batch of one.
 
     See :func:`get_exprs_from_network`.
@@ -156,6 +170,7 @@ def get_expr_from_network(node, expr_id: bytes, resolution: int = RESOLUTION_SIN
     Args:
         node: A Node instance providing config and storage access.
         expr_id: The content hash of the expression to fetch.
+        contact: Optional ``(relay_key, address, port)`` to ask directly.
         resolution: The resolution strategy — ``RESOLUTION_SINGLE``
             (default), ``RESOLUTION_LIST``, ``RESOLUTION_FULL`` or
             ``RESOLUTION_RECORD``.
@@ -164,7 +179,7 @@ def get_expr_from_network(node, expr_id: bytes, resolution: int = RESOLUTION_SIN
         The fetched Expr, or None if all retries are exhausted, nothing could
         be sent, or the node is disconnected.
     """
-    return get_exprs_from_network(node, [(expr_id, resolution)]).get(expr_id)
+    return get_exprs_from_network(node, [(expr_id, resolution)], contact=contact).get(expr_id)
 
 
 def _is_resolved_locally(node, expr_id: bytes, resolution: int) -> bool:
@@ -182,7 +197,7 @@ def _is_resolved_locally(node, expr_id: bytes, resolution: int) -> bool:
 
 
 def prefetch_exprs_from_network(
-    node, expr_ids, resolution: int = RESOLUTION_SINGLE
+    node, expr_ids, resolution: int = RESOLUTION_SINGLE, contact=None
 ) -> None:
     """Fetch, as one batch, the *expr_ids* that are not already fully local.
 
@@ -201,7 +216,7 @@ def prefetch_exprs_from_network(
             if h and h != ZERO32 and not _is_resolved_locally(node, h, resolution)
         ]
         if wanted:
-            get_exprs_from_network(node, wanted)
+            get_exprs_from_network(node, wanted, contact=contact)
     except Exception as exc:
         node.logger.debug("Prefetch of %d exprs failed: %s", len(list(expr_ids)), exc)
 

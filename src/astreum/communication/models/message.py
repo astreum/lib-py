@@ -14,6 +14,7 @@ class MessageTopic(IntEnum):
     ROUTE_REQUEST = 3
     ROUTE_RESPONSE = 4
     TRANSACTION = 5
+    BLOCK = 6
 
 
 class Message:

@@ -43,7 +43,10 @@ def setup_storage(node: Any, config: dict) -> None:
     node.hot_storage_timestamps = {}
     node.storage_index = {}
     node.storage_providers = []
-    node.uncommitted_block = None
+    # Which peer holds a recent block's uncommitted exprs (BLOCK message).
+    from astreum.consensus.block.holders import init_block_holders
+
+    init_block_holders(node)
     node.claim_spacing_eras = {}
     node.cold_storage_lock = threading.RLock()
     node.hot_storage_lock = threading.RLock()
