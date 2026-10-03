@@ -229,10 +229,15 @@ def _hashes(exprs):
     return [e.hash() for e in exprs]
 
 
+# A nil that went over the wire decodes to a plain ``link(None, None)`` node,
+# which is not the NIL singleton and so hashes as a node, not as ZERO32.
+_DECODED_NIL_HASH = link(None, None).hash()
+
+
 def _stored_set(exprs):
-    # NIL is referenced as ZERO32 on the wire, so it is never reachable by hash
-    # and is not stored.
-    return {e.hash() for e in exprs} - {NIL.hash()}
+    # nil is referenced as ZERO32 on the wire, so neither NIL (which hashes to
+    # ZERO32) nor a decoded nil node is reachable by hash or stored.
+    return {e.hash() for e in exprs} - {NIL.hash(), _DECODED_NIL_HASH}
 
 
 class TestCull(unittest.TestCase):
