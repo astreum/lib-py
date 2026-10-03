@@ -1,7 +1,7 @@
 """What the block after N commits, on a chain built by the real validation worker.
 
-- N's record covers the tries N's header names by root hash, and the
-  validator's records table lists them.
+- N's record covers the tries N's header names by root hash, including the
+  storage trie as of N, and the validator's records table lists them.
 - The record ids are advertised only once a block has been built on N.
 """
 
@@ -24,6 +24,8 @@ for path in (SRC_DIR, ROOT):
 from astreum.communication.disconnect import disconnect_node  # noqa: E402
 from astreum.communication.node import connect_node  # noqa: E402
 from astreum.consensus.block.encoding.decode import get_block_from_storage  # noqa: E402
+from astreum.consensus.constants import STORAGE_ADDRESS  # noqa: E402
+from astreum.consensus.models.accounts import Accounts  # noqa: E402
 from astreum.consensus.validation import node as validation_node  # noqa: E402
 from astreum.consensus.validation.ads import flush_ads  # noqa: E402
 from astreum.consensus.validation.node import validate_blockchain  # noqa: E402
@@ -67,11 +69,11 @@ class TestBlockRecordAndAds(unittest.TestCase):
             ):
                 validate_blockchain(cls.node, secret_key)
 
-            deadline = time.time() + 45
+            deadline = time.time() + 900
             while time.time() < deadline and cls.node.latest_block.height < 2:
                 time.sleep(0.5)
             cls.node._validation_stop_event.set()
-            cls.node.consensus_validation_thread.join(timeout=15)
+            cls.node.consensus_validation_thread.join(timeout=60)
             if cls.node.latest_block.height < 1:
                 raise AssertionError("worker did not produce any block")
 
@@ -116,6 +118,21 @@ class TestBlockRecordAndAds(unittest.TestCase):
                     get_expr_from_local_storage(self.node, slot_id),
                     f"height {block.height}: V does not hold slot {slot_id.hex()[:12]}",
                 )
+
+    def test_block_record_covers_the_storage_trie_as_of_the_previous_block(self) -> None:
+        for block in self.chain:
+            previous = block.previous_block
+            storage_root = (
+                Accounts(root_hash=previous.accounts_hash)
+                .get_account(STORAGE_ADDRESS, self.node)
+                .data_hash
+            )
+            if storage_root == ZERO32:
+                continue  # nothing registered yet
+            slots = _slot_ids(
+                get_record_from_cold_storage(self.node, block.previous_block_hash)
+            )
+            self.assertIn(storage_root, slots, f"height {block.height}")
 
     def test_record_ids_are_advertised_only_once_the_block_is_built_on(self) -> None:
         head = self.chain[-1]

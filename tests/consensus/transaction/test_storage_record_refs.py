@@ -124,17 +124,25 @@ class TestFollowRefs(unittest.TestCase):
         )
         self.assertNotIn(ZERO32, slot_map)
 
-    def test_the_storage_trie_root_is_not_followed(self):
+    def test_the_storage_trie_is_followed_like_any_other(self):
         self._register(b"\x33" * 32)
         storage_root = self.storage_account.data.root_hash
         self.assertIsNotNone(storage_root)
-        # Not stored anywhere: following it would raise.
-        root = link(Expr("link", head_hash=storage_root, tail=NIL), NIL)
-        _, slot_map, found, _ = generate_initial_storage_record(
+        root = points_to(Expr("link", head_hash=storage_root, tail=NIL))
+        store_flat(self.node, Expr("link", head_hash=storage_root, tail=NIL))
+        _, slot_map, _, _ = generate_initial_storage_record(
             self.node, self.block, root, follow_refs=True
         )
-        self.assertNotIn(storage_root, slot_map)
-        self.assertNotIn(storage_root, found)
+        self.assertIn(storage_root, slot_map)
+
+    def test_the_storage_trie_is_unavailable_raises(self):
+        self._register(b"\x33" * 32)
+        storage_root = self.storage_account.data.root_hash
+        # Not stored anywhere: it is followed, so it has to be fetched.
+        root = Expr("link", head_hash=storage_root, tail=NIL)
+        self.node.hot_storage.pop(storage_root, None)
+        with self.assertRaises(UnresolvedRecordExpr):
+            generate_initial_storage_record(self.node, self.block, root, follow_refs=True)
 
     def test_held_whole_or_fetched_by_cell_gives_the_same_record(self):
         inner = link(int_(255), link(bytes_(b"\x01\x02"), link(int_(7), link(int_(255), NIL))))

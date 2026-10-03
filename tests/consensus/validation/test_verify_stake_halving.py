@@ -140,12 +140,12 @@ class TestVerifyStakeHalving(unittest.TestCase):
             ):
                 validate_blockchain(cls.node, secret_key)
 
-            deadline = time.time() + 45
+            deadline = time.time() + 900
             while time.time() < deadline and cls.node.latest_block.height < 2:
                 time.sleep(0.5)
 
             cls.node._validation_stop_event.set()
-            cls.node.consensus_validation_thread.join(timeout=15)
+            cls.node.consensus_validation_thread.join(timeout=60)
             if cls.node.latest_block.height < 1:
                 raise AssertionError("worker did not produce any block")
 

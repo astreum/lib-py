@@ -109,7 +109,10 @@ def generate_initial_storage_record(
     header only names by root hash. A reference that cannot be fetched raises
     ``UnresolvedRecordExpr``. Sizes then count each cell on its own
     (``_flat_size``), so every node derives the same record. The storage trie
-    itself (its root as of the block's start) is not followed.
+    is followed like any other: a block's record covers the storage trie as of
+    the block's start, which registers the previous records. The entries that
+    register this record are created in the next block and covered by its
+    record.
 
     ``collected``, if given, receives every slotted expr by hash, as a single
     cell (children replaced by their hashes), so the caller can store them.
@@ -127,14 +130,7 @@ def generate_initial_storage_record(
     # copy so the nodes that only get read do not pile up in the block's
     # storage trie, whose cached nodes are written out with the block.
     lookup = storage_data
-    not_followed: set[bytes] = set()
     if follow_refs:
-        # The storage trie is the registry of what is stored. Slotting its
-        # nodes would register each of them in the trie, and those entries
-        # would be new nodes to slot in the next record, a dozen times larger
-        # every block. A record does not cover the trie it is registered in.
-        if storage_data.root_hash:
-            not_followed.add(storage_data.root_hash)
         lookup = RadixTree(root_hash=storage_data.root_hash, contact=storage_data.contact)
         lookup.nodes = dict(storage_data.nodes)
 
@@ -178,8 +174,6 @@ def generate_initial_storage_record(
     stack = list(reversed(_children(expr, is_root=True)))
     while stack:
         sub_expr, h = stack.pop()
-        if h in not_followed:
-            continue
         if h in slot_map or get_from_radix_tree(lookup, node, h) is not None:
             if h not in slot_map:
                 found_exprs.append(h)
