@@ -15,6 +15,7 @@ from astreum.consensus.transaction import apply_transaction
 from astreum.consensus.transaction.storage.initial import generate_initial_storage_record
 from astreum.consensus.account import create_account
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
+from astreum.consensus.validation.validator import current_validator
 
 
 def _hex(value: Optional[bytes]) -> str:
@@ -177,7 +178,27 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         )
         return False, "tx head mismatch"
 
-    accounts_snapshot = Accounts(root_hash=prev_block.accounts_hash)
+    # Start from the same accounts the creator builds on: the previous state
+    # after the scheduled validator's stake has been halved. The creator calls
+    # current_validator without a target_time (one slot), so this does too.
+    try:
+        scheduled_validator, accounts_snapshot = current_validator(node, prev_hash)
+    except Exception as exc:
+        node.logger.debug(
+            "Block verify failed deriving scheduled validator block=%s error=%s",
+            _hex(block.expr_id),
+            exc,
+        )
+        return False, "failed deriving scheduled validator"
+    if scheduled_validator != block.validator_public_key_bytes:
+        node.logger.debug(
+            "Block verify unscheduled validator block=%s expected=%s actual=%s",
+            _hex(block.expr_id),
+            _hex(scheduled_validator),
+            _hex(block.validator_public_key_bytes),
+        )
+        return False, "unscheduled validator"
+
     work_block = type("_WorkBlock", (), {})()
     work_block.chain_id = block.chain_id
     work_block.previous_block_hash = block.previous_block_hash
