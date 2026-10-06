@@ -1,12 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
-
 from astreum.consensus.block.rate import calculate_storage_fee
-from astreum.expression import NIL, resolve_inner_exprs
-from astreum.consensus.models.receipt import Receipt
-from astreum.storage.radix import get_from_radix_tree, put_in_radix_tree
-from astreum.consensus.transaction.storage.initial import build_storage_contract_record
+from astreum.expression import NIL
 from astreum.consensus.transaction.model import Transaction
 
 
@@ -45,60 +40,3 @@ def calculate_transaction_costs(*, block: object, transaction: Transaction) -> i
 
     return tx_storage_cost + receipt_storage_cost
 
-
-def generate_transaction_storage_contract(
-    *,
-    node: Any,
-    block: object,
-    transaction_hash: bytes,
-    transaction: Transaction,
-    storage_account: Any,
-) -> int:
-    tx_exprs, _ = resolve_inner_exprs(node, transaction.expr(), contact=block.contact)
-    if not tx_exprs:
-        return 0
-
-    total_bytes = sum(expr.size() for expr in tx_exprs)
-    number_of_exprs = len(tx_exprs)
-    storage_cost = calculate_storage_fee(block, total_bytes)
-    record_value, record_exprs = build_storage_contract_record(
-        creation_previous_block_hash=block.previous_block_hash,
-        creation_height=block.height,
-        new_size=total_bytes,
-        new_count=number_of_exprs,
-    )
-
-    put_in_radix_tree(storage_account.data, node, transaction_hash, record_value)
-    storage_account.data_hash = storage_account.data.root_hash
-    block.pending_exprs.extend(record_exprs)
-    return storage_cost
-
-
-def generate_receipt_storage_contract(
-    *,
-    node: Any,
-    block: object,
-    storage_account: Any,
-    receipt: Receipt,
-    sender_public_key: bytes,
-) -> int:
-    receipt_id = receipt.expr().hash()
-    receipt_exprs, _ = resolve_inner_exprs(node, receipt.expr(), contact=block.contact)
-    receipt.expr_id = receipt_id
-
-    total_bytes = sum(expr.size() for expr in receipt_exprs)
-    number_of_exprs = len(receipt_exprs)
-    storage_cost = calculate_storage_fee(block, total_bytes)
-    record_value, record_exprs = build_storage_contract_record(
-        creation_previous_block_hash=block.previous_block_hash,
-        creation_height=block.height,
-        new_size=total_bytes,
-        new_count=number_of_exprs,
-    )
-
-    if get_from_radix_tree(storage_account.data, node, receipt_id) is None:
-        put_in_radix_tree(storage_account.data, node, receipt_id, record_value)
-        storage_account.data_hash = storage_account.data.root_hash
-        block.pending_exprs.extend(record_exprs)
-        return storage_cost
-    return 0
