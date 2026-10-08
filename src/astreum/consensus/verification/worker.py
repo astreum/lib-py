@@ -12,10 +12,14 @@ from astreum.consensus.block.holders import block_holder
 
 
 def _is_fully_verified(fork: Any) -> bool:
+    """Check if a fork is fully verified.
 
     Args:
-        fork (Any): Description.
+        fork: The fork to check.
 
+    Returns:
+        True if fully verified, else False.
+    """
     return (
         fork.header_verified_up_to == fork.root
         and fork.transactions_verified_up_to == fork.root
@@ -23,10 +27,14 @@ def _is_fully_verified(fork: Any) -> bool:
 
 
 def _merge_forks(node: Any) -> bool:
+    """Merge forks that share a root.
 
     Args:
-        node (Any): Description.
+        node: The node.
 
+    Returns:
+        True if any forks were merged.
+    """
     merged = False
     with node.forks_lock:
         forks = node.forks
@@ -73,11 +81,11 @@ def _merge_forks(node: Any) -> bool:
 
 
 def _scan_peer_heads(node: Any) -> None:
-    """Scan peers for latest block hashes and update forks/peers."""
+    """Scan peers for latest block hashes and update forks/peers.
 
     Args:
-        node (Any): Description.
-
+        node: The node to scan.
+    """
     grouped: dict[bytes, set[Any]] = {}
     with node.peers_lock:
         peers = list(node.peers.items())
@@ -103,10 +111,11 @@ def _scan_peer_heads(node: Any) -> None:
 
 
 def _select_latest_block(node: Any) -> None:
+    """Select the latest verified block as the chain head.
 
     Args:
-        node (Any): Description.
-
+        node: The node.
+    """
     config = node.config or {}
     try:
         max_stale = int(config.get("verification_max_stale_seconds", 10))
@@ -176,16 +185,20 @@ def _select_latest_block(node: Any) -> None:
 
 
 def make_verify_worker(node: Any):
-    """Build the consensus fork verify worker bound to the given node."""
+    """Build the consensus fork verify worker bound to the given node.
 
     Args:
-        node (Any): Description.
+        node: The node.
 
+    Returns:
+        The worker function.
+    """
     def _verify_worker() -> None:
+        """The verification worker loop.
 
         Args:
             None.
-
+        """
         stop = node._verify_stop_event
         while not stop.is_set():
             _scan_peer_heads(node)

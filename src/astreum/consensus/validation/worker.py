@@ -44,12 +44,14 @@ def included_transaction_exprs(node: Any, transactions: list) -> list:
 
     The trees are fully linked in memory, so nothing is fetched. Transactions
     that cannot be collected are logged and skipped.
-    """
 
     Args:
-        node (Any): Description.
-        transactions (list): Description.
+        node: The node.
+        transactions: List of transactions.
 
+    Returns:
+        List of all expressions from transactions.
+    """
     collected: list = []
     seen: set[bytes] = set()
     for tx in transactions:
@@ -80,12 +82,11 @@ def _announce_block(node: Any, block: Block) -> None:
     receivers fetch them from here. The validators relay it to each other,
     because the next validator is picked at random by stake and may not be
     connected to us.
-    """
 
     Args:
-        node (Any): Description.
-        block (Block): Description.
-
+        node: The node announcing.
+        block: The block to announce.
+    """
     try:
         from astreum.consensus.block.encoding.expr import get_block_expr
         from astreum.storage.exprs.network import build_provider_payload
@@ -122,19 +123,21 @@ def make_validation_worker(
     """Build the validation worker bound to the given node."""
 
     def _validation_worker() -> None:
+        """The validation worker loop.
 
         Args:
             None.
-
+        """
         node.logger.info("Validation worker started")
         stop = node._validation_stop_event
 
         def _award_validator_reward(block: Block, reward_amount: int) -> None:
+            """Award a reward to the validator.
 
             Args:
-                block (Block): Description.
-                reward_amount (int): Description.
-
+                block: The block.
+                reward_amount: The reward amount.
+            """
             if reward_amount <= 0:
                 return
             accounts = getattr(block, "accounts", None)

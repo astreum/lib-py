@@ -12,12 +12,15 @@ from astreum.consensus.fork.node import update_fork
 
 
 def verify_fork(node: Any, head_id: bytes) -> bool:
-    """Verify fork headers from head to root."""
+    """Verify fork headers from head to root.
 
     Args:
-        node (Any): Description.
-        head_id (bytes): Description.
+        node: The node to verify on.
+        head_id: The fork head identifier.
 
+    Returns:
+        True if verification succeeds, False otherwise.
+    """
     with node.forks_lock:
         fork = node.forks[head_id]
         root = fork.root

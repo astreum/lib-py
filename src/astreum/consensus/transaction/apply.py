@@ -44,10 +44,14 @@ _CREDIT_FUNDING_CODES = {TransactionCode.STORAGE_PAYMENT}
 
 
 def _data_nodes(data: Expr) -> list[Expr]:
+    """Extract nodes from a data expression.
 
     Args:
-        data (Expr): Description.
+        data: The data expression.
 
+    Returns:
+        List of expression nodes.
+    """
     result = []
     current = data
     while current is not None and current._tag == "link":
@@ -147,20 +151,24 @@ def _apply_tx_effects(
             receipt_status = STATUS_FAILED
             transfer_amount = 0
 
-    def _get_or_create_recipient_account() -> tuple["Account", bool]:
+        def _get_or_create_recipient_account() -> tuple["Account", bool]:
+            """Get or create the recipient account.
 
-        Args:
-            None.
+            Args:
+                None.
 
-        if transaction.recipient == transaction.sender:
-            return sender_account, False
-        if transaction.recipient == STORAGE_ADDRESS:
-            return storage_account, False
-        account = block.accounts.get_account(address=transaction.recipient, node=node)
-        if account is None:
-            return (create_account(), True)
+            Returns:
+                Tuple of (account, is_new).
+            """
+            if transaction.recipient == transaction.sender:
+                return sender_account, False
+            if transaction.recipient == STORAGE_ADDRESS:
+                return storage_account, False
+            account = block.accounts.get_account(address=transaction.recipient, node=node)
+            if account is None:
+                return (create_account(), True)
 
-        return (account, False)
+            return (account, False)
 
     recipient_account = None
     is_recipient_new = False
@@ -531,10 +539,14 @@ def _apply_tx_effects(
     receipt = None
     if not nested:
         def _build_receipt(storage_fee: int) -> Receipt:
+            """Build a receipt with the given storage fee.
 
             Args:
-                storage_fee (int): Description.
+                storage_fee: The storage fee amount.
 
+            Returns:
+                The constructed Receipt.
+            """
             return Receipt(
                 transaction_hash=transaction_hash,
                 transaction_fee=tx_fee,
@@ -615,13 +627,13 @@ def _apply_tx_effects(
 
 def apply_transaction(node: Any, block: object, transaction_hash: bytes) -> None:
     """Apply a transaction, collecting results on *block* (top-level entry
-    point used by block verification / production)."""
+    point used by block verification / production).
 
     Args:
-        node (Any): Description.
-        block (object): Description.
-        transaction_hash (bytes): Description.
-
+        node: The node.
+        block: The block to apply to.
+        transaction_hash: The transaction hash.
+    """
     # A verified block's transactions are asked from its provider.
     block_hash = getattr(block, "expr_id", None)
     scope = {} if not block_hash or block_hash == ZERO32 else {"block_hash": block_hash}
@@ -633,11 +645,11 @@ def apply_transaction(node: Any, block: object, transaction_hash: bytes) -> None
 
 def apply_transaction_obj(node: Any, block: object, transaction: Any) -> None:
     """Apply an already-decoded Transaction (whole-message path) without
-    re-parsing or fetching from storage."""
+    re-parsing or fetching from storage.
 
     Args:
-        node (Any): Description.
-        block (object): Description.
-        transaction (Any): Description.
-
+        node: The node.
+        block: The block to apply to.
+        transaction: The transaction object.
+    """
     _apply_tx_effects(node, block, transaction, transaction.hash)

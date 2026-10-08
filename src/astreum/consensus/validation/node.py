@@ -22,10 +22,11 @@ from astreum.consensus.models.accounts import extract_accounts_exprs
 
 
 def validate_blockchain(self, validation_secret_key: Ed25519PrivateKey):
+    """Set up and start blockchain validation.
 
     Args:
-        validation_secret_key (Ed25519PrivateKey): Description.
-
+        validation_secret_key: The validator's secret key.
+    """
     connect_node(self)
     fork_setup(self)
 
@@ -67,10 +68,11 @@ def validate_blockchain(self, validation_secret_key: Ed25519PrivateKey):
     self._validation_stop_event = threading.Event()
 
     def enqueue_transaction_hash(tx_hash: bytes) -> None:
+        """Enqueue a transaction hash for processing.
 
         Args:
-            tx_hash (bytes): Description.
-
+            tx_hash: The transaction hash bytes.
+        """
         if not isinstance(tx_hash, (bytes, bytearray)):
             raise TypeError("transaction hash must be bytes-like")
         from astreum.consensus.transaction.from_storage import get_transaction_from_storage

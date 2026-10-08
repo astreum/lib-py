@@ -28,11 +28,6 @@ def _extend_pending_exprs(block: object, exprs: list) -> None:
     Returns:
         None.
     """
-
-    Args:
-        block (object): Description.
-        exprs (list): Description.
-
     block.pending_exprs.extend(exprs)
 
 
@@ -45,10 +40,6 @@ def _data_nodes(data) -> list:
     Returns:
         The chain's elements in order, as a list of ``Expr`` heads.
     """
-
-    Args:
-        data: Description.
-
     result = []
     current = data
     while current is not None and getattr(current, "_tag", None) == "link":
@@ -67,10 +58,6 @@ def _current_height(block: object) -> int:
     Returns:
         The block's height as an int.
     """
-
-    Args:
-        block (object): Description.
-
     return int(
         getattr(
             block,

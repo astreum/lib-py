@@ -16,10 +16,6 @@ def get_block_expr(block: Block) -> Expr:
     Returns:
         The Expr representing the serialized block.
     """
-
-    Args:
-        block (Block): Description.
-
     if block._expr is not None:
         return block._expr
     from astreum.consensus.block.encoding.encode import block_to_expr

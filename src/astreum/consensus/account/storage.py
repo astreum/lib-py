@@ -9,12 +9,19 @@ from astreum.consensus.account.model import Account
 
 
 def get_account_from_storage(node: Any, expr_id: bytes, contact=None) -> Account:
+    """Load an account from storage.
 
     Args:
-        node (Any): Description.
-        expr_id (bytes): Description.
-        contact: Description.
+        node: The node to load from.
+        expr_id: The expression identifier bytes.
+        contact: Optional contact for fetching.
 
+    Returns:
+        The loaded Account instance.
+
+    Raises:
+        ValueError: If unable to load or malformed account.
+    """
     header = get_expr_list(node, expr_id, contact=contact)
     if header is None:
         raise ValueError("unable to load account from storage")

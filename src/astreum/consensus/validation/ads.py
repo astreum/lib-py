@@ -29,22 +29,23 @@ class PendingAd(NamedTuple):
 
 
 def init_pending_ads(node: Any) -> None:
+    """Initialize pending ads storage on the node.
 
     Args:
-        node (Any): Description.
-
+        node: The node to initialize.
+    """
     node.pending_ads = deque(maxlen=MAX_PENDING_ADS)
 
 
 def queue_ads(node: Any, height: int, block_hash: bytes, ids: list[bytes]) -> None:
-    """Hold *ids*, committed by the block at *height*, until it is adopted."""
+    """Hold *ids*, committed by the block at *height*, until it is adopted.
 
     Args:
-        node (Any): Description.
-        height (int): Description.
-        block_hash (bytes): Description.
-        ids (list[bytes]): Description.
-
+        node: The node.
+        height: The block height.
+        block_hash: The block hash.
+        ids: List of expression identifiers.
+    """
     if not ids:
         return
     if getattr(node, "pending_ads", None) is None:
@@ -53,10 +54,14 @@ def queue_ads(node: Any, height: int, block_hash: bytes, ids: list[bytes]) -> No
 
 
 def _block_hash(block: Any) -> Optional[bytes]:
+    """Get block hash from a block.
 
     Args:
-        block (Any): Description.
+        block: The block object.
 
+    Returns:
+        The block hash or None.
+    """
     expr_id = getattr(block, "expr_id", None)
     if expr_id and expr_id != ZERO32:
         return expr_id
@@ -72,13 +77,15 @@ def _hash_at_height(node: Any, head: Any, height: int) -> Optional[bytes]:
     """Hash of the block at *height* on the chain ending at *head*.
 
     None if the chain cannot be followed that far from what this node holds.
-    """
 
     Args:
-        node (Any): Description.
-        head (Any): Description.
-        height (int): Description.
+        node: The node.
+        head: The chain head.
+        height: The target height.
 
+    Returns:
+        The block hash or None.
+    """
     from astreum.consensus.block.encoding.decode import get_block_from_storage
 
     block = head
@@ -103,11 +110,13 @@ def flush_ads(node: Any) -> list[bytes]:
     A block is adopted once the head is past its height and the chain to the
     head passes through it. A block the chain skips lost a fork and is dropped
     unsent, as is one that cannot be placed after ``MAX_PENDING_AD_AGE`` blocks.
-    """
 
     Args:
-        node (Any): Description.
+        node: The node.
 
+    Returns:
+        List of sent expression identifiers.
+    """
     pending = getattr(node, "pending_ads", None)
     if not pending:
         return []

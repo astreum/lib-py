@@ -94,10 +94,14 @@ def current_validator(
     rng = random.Random(seed_value)
 
     def pick_validator() -> bytes:
+        """Pick a validator by weighted random choice.
 
         Args:
             None.
 
+        Returns:
+            The chosen validator's public key.
+        """
         positive_weights = [(key, weight) for key, weight in stakes.items() if weight > 0]
         if not positive_weights:
             raise ValueError("no validators with positive stake")
@@ -111,10 +115,11 @@ def current_validator(
         return positive_weights[-1][0]
 
     def halve_stake(validator_key: bytes) -> None:
+        """Halve the stake of a validator.
 
         Args:
-            validator_key (bytes): Description.
-
+            validator_key: The validator's public key.
+        """
         current_amount = stakes.get(validator_key, 0)
         if current_amount <= 0:
             raise ValueError("validator stake must be positive")

@@ -33,10 +33,14 @@ def _withdraw_message(
 
 
 def _data_nodes(data) -> list:
+    """Extract nodes from data.
 
     Args:
-        data: Description.
+        data: The data expression.
 
+    Returns:
+        List of nodes.
+    """
     result = []
     current = data
     while current is not None and getattr(current, "_tag", None) == "link":

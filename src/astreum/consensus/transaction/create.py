@@ -237,10 +237,6 @@ def _guarantee_refs_to_expr(guarantee_refs: Optional[Sequence[Tuple[bytes, bytes
         `NIL` if *guarantee_refs* is empty/`None`, otherwise a `link`-list
         `Expr` of the encoded entries.
     """
-
-    Args:
-        guarantee_refs (Optional[Sequence[Tuple[bytes, bytes]]]): Description.
-
     if not guarantee_refs:
         return NIL
     result: Expr = NIL

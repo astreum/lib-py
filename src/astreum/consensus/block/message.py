@@ -37,11 +37,13 @@ def block_header_exprs(block_expr: Expr) -> List[Expr]:
     references such as ``accounts_hash`` are left alone, so this never touches
     storage or the network. The encoded value of each builtin composite (int,
     ...) is included as its own bytes expr.
-    """
 
     Args:
-        block_expr (Expr): Description.
+        block_expr: The block expression to traverse.
 
+    Returns:
+        List of expressions in root-first order.
+    """
     result: List[Expr] = []
     seen: set[bytes] = set()
     stack: List[Expr] = [block_expr]
@@ -79,24 +81,30 @@ def block_header_exprs(block_expr: Expr) -> List[Expr]:
 def encode_block_message(provider_payload: bytes, block_expr: Expr) -> bytes:
     """Encode a ``BLOCK`` payload.
 
+    Args:
+        provider_payload: The provider payload bytes.
+        block_expr: The block expression.
+
+    Returns:
+        The encoded message payload.
+
     Raises:
         ValueError: if the provider payload is not 70 bytes or the header does
             not fit one datagram.
     """
-
-    Args:
-        provider_payload (bytes): Description.
-        block_expr (Expr): Description.
-
     if len(provider_payload) != PROVIDER_PAYLOAD_BYTES:
         raise ValueError("provider payload must be 70 bytes")
 
     def _no_skip(expr: Expr, size: int) -> None:
+        """Callback to reject oversized headers.
 
         Args:
-            expr (Expr): Description.
-            size (int): Description.
+            expr: The expression.
+            size: The size.
 
+        Raises:
+            ValueError: Always, to reject oversized headers.
+        """
         raise ValueError("block header expr too large for one page")
 
     pages = encode_found_pages(block_header_exprs(block_expr), on_skip=_no_skip)
@@ -116,11 +124,13 @@ def decode_block_message(content: bytes) -> Optional[Tuple[Contact, List[Expr]]]
     Pure in-memory. Returns ``None`` on any structural failure. The exprs are
     flat (hash references, as stored), so the first one's ``hash()`` is the
     block hash.
-    """
 
     Args:
-        content (bytes): Description.
+        content: The message payload bytes.
 
+    Returns:
+        Tuple of (contact, expressions) or None on failure.
+    """
     if not content or len(content) <= PROVIDER_PAYLOAD_BYTES:
         return None
     try:

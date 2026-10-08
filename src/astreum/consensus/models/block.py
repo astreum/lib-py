@@ -122,10 +122,14 @@ class Block:
         self._expr = None
 
     def snapshot(self) -> tuple:
+        """Create a snapshot of the block state.
 
         Args:
             None.
 
+        Returns:
+            A tuple of cached state for restoration.
+        """
         saved_cache = {
             addr: acct.clone()
             for addr, acct in self.accounts._cache.items()
@@ -143,10 +147,11 @@ class Block:
         )
 
     def restore(self, snapshot: tuple) -> None:
+        """Restore the block state from a snapshot.
 
         Args:
-            snapshot (tuple): Description.
-
+            snapshot: The snapshot tuple to restore from.
+        """
         (
             saved_cache,
             saved_pending_exprs,
@@ -162,28 +167,40 @@ class Block:
 
     @property
     def total_fee(self) -> int:
+        """Get the total fee.
 
         Args:
             None.
 
+        Returns:
+            The sum of transaction and storage fees.
+        """
         return (self.total_transaction_fee or 0) + (self.total_storage_fee or 0)
 
     @property
     def cumulative_total_fee(self) -> int:
+        """Get the cumulative total fee.
 
         Args:
             None.
 
+        Returns:
+            The cumulative fee from statistics.
+        """
         if self.statistics:
             return self.statistics[0][0]
         return 0
 
     @property
     def cumulative_stake(self) -> int:
+        """Get the cumulative stake.
 
         Args:
             None.
 
+        Returns:
+            The cumulative stake from statistics.
+        """
         if self.statistics:
             return self.statistics[0][1]
         return 0

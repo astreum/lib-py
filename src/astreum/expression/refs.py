@@ -97,7 +97,6 @@ def stored_ref_target(cell: Expr, part: PartReader = local_part) -> Optional[tup
         Tuple of (block_id, expr_id) if cell is a stored ref, else None.
     """
     if cell._tag != "link":
-    if cell._tag != "link":
         return None
     if _is_nil(cell._tail, cell._tail_hash):
         return None

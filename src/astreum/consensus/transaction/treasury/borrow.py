@@ -29,19 +29,24 @@ from astreum.consensus.transaction.treasury.utils import _remaining_payment_coun
 
 
 def _extend_pending_exprs(block: object, exprs: list[Expr]) -> None:
+    """Extend block's pending expressions.
 
     Args:
-        block (object): Description.
-        exprs (list[Expr]): Description.
-
+        block: The block.
+        exprs: The expressions to add.
+    """
     block.pending_exprs.extend(exprs)
 
 
 def _data_nodes(data) -> list:
+    """Extract nodes from data.
 
     Args:
-        data: Description.
+        data: The data expression.
 
+    Returns:
+        List of nodes.
+    """
     result = []
     current = data
     while current is not None and getattr(current, "_tag", None) == "link":
@@ -52,10 +57,14 @@ def _data_nodes(data) -> list:
 
 
 def _current_height(block: object) -> int:
+    """Get the current block height.
 
     Args:
-        block (object): Description.
+        block: The block.
 
+    Returns:
+        The block height.
+    """
     return int(
         getattr(
             block,

@@ -10,11 +10,11 @@ from astreum.expression import ZERO32
 
 
 def fork_setup(node: Any) -> None:
-    """Initialize fork storage and lock on the node."""
+    """Initialize fork storage and lock on the node.
 
     Args:
-        node (Any): Description.
-
+        node: The node to initialize.
+    """
     if hasattr(node, 'forks'):
         return
     node.forks = {}
@@ -22,13 +22,16 @@ def fork_setup(node: Any) -> None:
 
 
 def update_fork(node: Any, head_id: bytes, updates: Mapping[str, Any]) -> None:
-    """Update fields on an existing fork by head_id."""
+    """Update fields on an existing fork by head_id.
 
     Args:
-        node (Any): Description.
-        head_id (bytes): Description.
-        updates (Mapping[str, Any]): Description.
+        node: The node containing the fork.
+        head_id: The fork head identifier.
+        updates: Mapping of field names to new values.
 
+    Raises:
+        KeyError: If fork head not found.
+    """
     with node.forks_lock:
         fork = node.forks.get(head_id)
         if fork is None:
@@ -38,12 +41,18 @@ def update_fork(node: Any, head_id: bytes, updates: Mapping[str, Any]) -> None:
 
 
 def import_forks(node: Any, payload: bytes) -> dict[bytes, Fork]:
-    """Load forks from a byte stream into node.forks."""
+    """Load forks from a byte stream into node.forks.
 
     Args:
-        node (Any): Description.
-        payload (bytes): Description.
+        node: The node to import into.
+        payload: The serialized fork data.
 
+    Returns:
+        Dictionary of fork heads to Fork instances.
+
+    Raises:
+        ValueError: If payload length mismatches.
+    """
     # Fork encoding size: head + root + header flag + header + tx flag + tx + malicious flag + malicious
     block_size = len(ZERO32)
     fork_size = (
@@ -66,10 +75,13 @@ def import_forks(node: Any, payload: bytes) -> dict[bytes, Fork]:
 
 
 def export_forks(node: Any) -> bytes:
-    """Export node.forks as a single byte stream."""
+    """Export node.forks as a single byte stream.
 
     Args:
-        node (Any): Description.
+        node: The node to export from.
 
+    Returns:
+        Serialized bytes of all forks.
+    """
     with node.forks_lock:
         return b"".join(fork.to_bytes() for fork in node.forks.values())

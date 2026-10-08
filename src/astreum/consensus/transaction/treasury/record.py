@@ -25,11 +25,15 @@ class LoanType(IntEnum):
 
 
 def _root_item(root_hash: bytes, block: Optional[bytes]) -> Expr:
+    """Create a root item expression.
 
     Args:
-        root_hash (bytes): Description.
-        block (Optional[bytes]): Description.
+        root_hash: The root hash.
+        block: Optional block identifier.
 
+    Returns:
+        A link expression.
+    """
     if root_hash == ZERO32:
         return Expr("link", head_hash=ZERO32)
     return pointer_item(root_hash, block)
@@ -81,15 +85,12 @@ class TreasuryUserRecord:
     def to_expr(self) -> Expr:
         """Build (without caching) this record's canonical `Expr` encoding.
 
-        Returns:
-            A `link`-list `Expr` of the record's fields in storage order:
-            ``[balance, loans_root_hash, total_interest_paid,
-            guarantees_root_hash, loaned, defaulted, guaranteed]``.
-        """
-
         Args:
             None.
 
+        Returns:
+            A `link`-list `Expr` of the record's fields in storage order.
+        """
         if self._expr is not None:
             return self._expr
         detail: Expr = link(int_(self.guaranteed), NIL)
@@ -102,16 +103,14 @@ class TreasuryUserRecord:
         return detail
 
     def expr(self) -> Expr:
-        """Return this record's `Expr` encoding, computing and caching it on
-        first use.
-
-        Returns:
-            The cached (or freshly built) `Expr` from `to_expr`.
-        """
+        """Return this record's `Expr` encoding, computing and caching it on first use.
 
         Args:
             None.
 
+        Returns:
+            The cached (or freshly built) `Expr` from `to_expr`.
+        """
         if self._expr is not None:
             return self._expr
         self._expr = self.to_expr()
@@ -179,15 +178,18 @@ class TreasuryUserRecord:
 
 
 def load_from_tree(cls: Any, node: Any, tree: Any, key: bytes, contact=None):
-    """The record of type *cls* stored at *key* in *tree*, read from the block
-    that holds it; None if the key is absent or does not decode."""
+    """The record of type *cls* stored at *key* in *tree*, read from the block that holds it; None if the key is absent or does not decode.
 
     Args:
-        node (Any): Description.
-        tree (Any): Description.
-        key (bytes): Description.
-        contact: Description.
+        cls: The class to load.
+        node: The node.
+        tree: The tree to read from.
+        key: The key to look up.
+        contact: Optional contact.
 
+    Returns:
+        The loaded record or None.
+    """
     head, block = get_from_radix_tree_with_block(tree, node, key)
     return cls.from_storage(node, head or ZERO32, contact=contact, block_hash=block)
 
@@ -230,10 +232,6 @@ def _claimed_guarantees_to_expr(claimed_guarantees: list[tuple[bytes, bytes, int
         `NIL` if *claimed_guarantees* is empty, otherwise a `link`-list `Expr`
         of the encoded entries.
     """
-
-    Args:
-        claimed_guarantees (list[tuple[bytes, bytes, int]]): Description.
-
     if not claimed_guarantees:
         return NIL
     result: Expr = NIL
@@ -318,10 +316,14 @@ class TreasuryLoanRecord:
     _expr: Optional[Expr] = field(default=None, repr=False, compare=False)
 
     def to_expr(self) -> Expr:
+        """Convert loan record to expression.
 
         Args:
             None.
 
+        Returns:
+            The expression representation.
+        """
         if self._expr is not None:
             return self._expr
         detail: Expr = link(bytes_(self.owner), NIL)
@@ -338,10 +340,14 @@ class TreasuryLoanRecord:
         return detail
 
     def expr(self) -> Expr:
+        """Get cached expression or compute it.
 
         Args:
             None.
 
+        Returns:
+            The expression representation.
+        """
         if self._expr is not None:
             return self._expr
         self._expr = self.to_expr()
@@ -437,14 +443,13 @@ class TreasuryGuarantee:
     def to_expr(self) -> Expr:
         """Build (without caching) this guarantee's canonical `Expr` encoding.
 
+        Args:
+            None.
+
         Returns:
             A `link`-list `Expr` of the guarantee's fields in storage order:
             ``[amount, duration, price, expiry, claimed_by]``.
         """
-
-        Args:
-            None.
-
         if self._expr is not None:
             return self._expr
         detail: Expr = link(bytes_(self.claimed_by), NIL)
@@ -455,16 +460,14 @@ class TreasuryGuarantee:
         return detail
 
     def expr(self) -> Expr:
-        """Return this guarantee's `Expr` encoding, computing and caching it on
-        first use.
-
-        Returns:
-            The cached (or freshly built) `Expr` from `to_expr`.
-        """
+        """Return this guarantee's `Expr` encoding, computing and caching it on first use.
 
         Args:
             None.
 
+        Returns:
+            The cached (or freshly built) `Expr` from `to_expr`.
+        """
         if self._expr is not None:
             return self._expr
         self._expr = self.to_expr()
@@ -519,10 +522,14 @@ class TreasuryGuarantee:
 
 
 def encode_borrow_request(request: TreasuryBorrowRequest) -> bytes:
+    """Encode a borrow request.
 
     Args:
-        request (TreasuryBorrowRequest): Description.
+        request: The borrow request.
 
+    Returns:
+        The encoded bytes.
+    """
     if request.payment_interval_blocks <= 0:
         raise ValueError("payment_interval_blocks must be positive")
     if request.payment_count <= 0:
@@ -536,10 +543,14 @@ def encode_borrow_request(request: TreasuryBorrowRequest) -> bytes:
 
 
 def decode_borrow_request(payload: bytes) -> TreasuryBorrowRequest | None:
+    """Decode a borrow request.
 
     Args:
-        payload (bytes): Description.
+        payload: The payload bytes.
 
+    Returns:
+        The borrow request or None.
+    """
     payload_bytes = payload
     if len(payload_bytes) != BORROW_REQUEST_SIZE:
         return None

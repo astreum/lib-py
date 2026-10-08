@@ -23,11 +23,14 @@ MAX_PROOF_LEN = 64
 
 
 def _fib(n: int) -> int:
-    """Return the nth Fibonacci number (fib(0)=0, fib(1)=1, fib(2)=1, ...)."""
+    """Return the nth Fibonacci number (fib(0)=0, fib(1)=1, fib(2)=1, ...).
 
     Args:
-        n (int): Description.
+        n: The index.
 
+    Returns:
+        The Fibonacci number.
+    """
     if n < 0:
         return 0
     a, b = 0, 1
@@ -37,10 +40,14 @@ def _fib(n: int) -> int:
 
 
 def _leading_zero_bits(buf: bytes) -> int:
+    """Count leading zero bits in a buffer.
 
     Args:
-        buf (bytes): Description.
+        buf: The buffer.
 
+    Returns:
+        Number of leading zero bits.
+    """
     zeros = 0
     for byte in buf:
         if byte == 0:
@@ -65,10 +72,14 @@ Claim = tuple[bytes, bytes, list[bytes], int]
 
 
 def _is_nil(e: Expr | None) -> bool:
+    """Check if an expression is nil.
 
     Args:
-        e (Expr | None): Description.
+        e: The expression.
 
+    Returns:
+        True if nil, else False.
+    """
     return e is None or e is NIL or (
         e._tag == "link" and e._head is None and e._tail is None
         and e._head_hash in (None, ZERO32) and e._tail_hash in (None, ZERO32)
@@ -76,12 +87,15 @@ def _is_nil(e: Expr | None) -> bool:
 
 
 def _list_items(e: Expr | None, limit: int) -> list[Expr] | None:
-    """Items of a loaded link list, or None if it is not one (or is longer than *limit*)."""
+    """Items of a loaded link list, or None if it is not one (or is longer than *limit*).
 
     Args:
-        e (Expr | None): Description.
-        limit (int): Description.
+        e: The expression.
+        limit: The length limit.
 
+    Returns:
+        List of items or None.
+    """
     items: list[Expr] = []
     while not _is_nil(e):
         if e._tag != "link" or e._head is None:
@@ -129,13 +143,16 @@ def _parse_claim(
 
 
 def challenge_index(last_payment_block_hash: bytes, storage_id: bytes, new_count: int) -> int:
-    """Index of the slot a record is challenged on."""
+    """Index of the slot a record is challenged on.
 
     Args:
-        last_payment_block_hash (bytes): Description.
-        storage_id (bytes): Description.
-        new_count (int): Description.
+        last_payment_block_hash: The last payment block hash.
+        storage_id: The storage identifier.
+        new_count: The count of new items.
 
+    Returns:
+        The challenge index.
+    """
     seed = blake3(last_payment_block_hash + storage_id).digest()
     return int.from_bytes(seed[:8], "little", signed=False) % new_count
 

@@ -29,11 +29,14 @@ class UnresolvedRecordExpr(Exception):
 
 def block_scope(block: object) -> bytes | None:
     """The block whose record holds the cells a transaction of *block* carries:
-    its id once it has one (a verified block), else None (one being built)."""
+    its id once it has one (a verified block), else None (one being built).
 
     Args:
-        block (object): Description.
+        block: The block.
 
+    Returns:
+        The block id or None.
+    """
     block_id = getattr(block, "expr_id", None)
     if not block_id or block_id == ZERO32:
         return None
@@ -41,10 +44,14 @@ def block_scope(block: object) -> bytes | None:
 
 
 def _scope(block_hash: bytes | None) -> dict:
+    """Build scope dict for storage queries.
 
     Args:
-        block_hash (bytes | None): Description.
+        block_hash: The block hash or None.
 
+    Returns:
+        Scope dictionary.
+    """
     return {} if block_hash is None else {"block_hash": block_hash}
 
 
@@ -90,14 +97,16 @@ def _flat_size(expr: Expr, node: Any, contact: Any, block_hash: bytes | None = N
     differently on a node that holds the whole tree in memory and one that
     fetched it cell by cell. A record that follows hash references is built by
     several nodes and must agree, so a pair link counts as two hashes.
-    """
 
     Args:
-        expr (Expr): Description.
-        node (Any): Description.
-        contact (Any): Description.
-        block_hash (bytes | None): Description.
+        expr: The expression.
+        node: The node.
+        contact: The contact.
+        block_hash: Optional block hash.
 
+    Returns:
+        The flat size in bytes.
+    """
     typed = _typed_payload_size(expr, node, contact, block_hash)
     if typed is not None:
         return typed
@@ -111,14 +120,16 @@ def _single_cell(expr: Expr, node: Any, contact: Any, block_hash: bytes | None =
 
     The record walk slots every cell on its own, so each is stored on its own;
     storing a loaded tree per cell would write its subtree once per ancestor.
-    """
 
     Args:
-        expr (Expr): Description.
-        node (Any): Description.
-        contact (Any): Description.
-        block_hash (bytes | None): Description.
+        expr: The expression.
+        node: The node.
+        contact: The contact.
+        block_hash: Optional block hash.
 
+    Returns:
+        The single cell expression.
+    """
     if expr._tag != "link" or _typed_payload_size(expr, node, contact, block_hash) is not None:
         return expr
     cell = Expr("link", head_hash=_get_head_hash(expr), tail_hash=_get_tail_hash(expr))

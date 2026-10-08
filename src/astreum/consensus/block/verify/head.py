@@ -13,22 +13,29 @@ from astreum.consensus.block.utils.bits import count_leading_zero_bits
 
 
 def _hex(value: Optional[bytes]) -> str:
+    """Convert bytes to hex string for logging.
 
     Args:
-        value (Optional[bytes]): Description.
+        value: The bytes value.
 
+    Returns:
+        Hex string or str(value).
+    """
     if isinstance(value, (bytes, bytearray)):
         return value.hex()
     return str(value)
 
 
 def verify_block_head(node: Any, block: Any) -> bool:
-    """Verify block header fields, using attached previous block when available."""
+    """Verify block header fields, using attached previous block when available.
 
     Args:
-        node (Any): Description.
-        block (Any): Description.
+        node: The node.
+        block: The block to verify.
 
+    Returns:
+        True if verification succeeds, False otherwise.
+    """
     base_required = [
         "expr_id",
         "previous_block_hash",

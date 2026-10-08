@@ -8,11 +8,14 @@ from astreum.consensus.transaction.treasury.record import TreasuryLoanRecord, Tr
 
 
 def _collect_sub_exprs(expr: Expr) -> list:
-    """Walk an expr tree and collect all sub-expressions without resolving hashes."""
+    """Walk an expr tree and collect all sub-expressions without resolving hashes.
 
     Args:
-        expr (Expr): Description.
+        expr: The expression to walk.
 
+    Returns:
+        List of all expressions.
+    """
     result = [expr]
     if expr._tag == "link":
         if expr._head is not None:
@@ -23,10 +26,14 @@ def _collect_sub_exprs(expr: Expr) -> list:
 
 
 def _trie_exprs(trie: RadixTree) -> list:
+    """Extract all expressions from a radix trie.
 
     Args:
-        trie (RadixTree): Description.
+        trie: The radix trie.
 
+    Returns:
+        List of expressions.
+    """
     emitted: list = []
     if not trie.nodes:
         return emitted
@@ -40,10 +47,14 @@ def _trie_exprs(trie: RadixTree) -> list:
 
 
 def _paid_payment_count(loan: TreasuryLoanRecord) -> int | None:
+    """Count paid payments for a loan.
 
     Args:
-        loan (TreasuryLoanRecord): Description.
+        loan: The loan record.
 
+    Returns:
+        The count or None if invalid.
+    """
     if loan.next_payment_block_number == 0:
         return loan.payment_count
     if loan.payment_interval_blocks <= 0:
@@ -55,10 +66,14 @@ def _paid_payment_count(loan: TreasuryLoanRecord) -> int | None:
 
 
 def _remaining_payment_count(loan: TreasuryLoanRecord) -> int | None:
+    """Count remaining payments for a loan.
 
     Args:
-        loan (TreasuryLoanRecord): Description.
+        loan: The loan record.
 
+    Returns:
+        The count or None if invalid.
+    """
     total_payment_count = loan.payment_count
     paid_payment_count = _paid_payment_count(loan)
     if total_payment_count is None or paid_payment_count is None:

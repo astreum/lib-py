@@ -36,10 +36,14 @@ class Fork:
         self.malicious_block_hash: Optional[bytes] = malicious_block_hash
 
     def to_dict(self) -> dict[str, Any]:
+        """Convert fork to dictionary.
 
         Args:
             None.
 
+        Returns:
+            Dictionary representation of the fork.
+        """
         return {
             "head": self.head,
             "verified_up_to": self.verified_up_to,
@@ -50,10 +54,17 @@ class Fork:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> Fork:
+        """Create a Fork from a dictionary.
 
         Args:
-            payload (dict[str, Any]): Description.
+            payload: Dictionary with fork data.
 
+        Returns:
+            The Fork instance.
+
+        Raises:
+            TypeError: If fields have wrong types.
+        """
         head = payload.get("head")
         if not isinstance(head, (bytes, bytearray)):
             raise TypeError("fork head must be bytes")
@@ -95,29 +106,39 @@ class Fork:
         )
 
     def add_peer(self, peer_id: Any) -> None:
+        """Add a peer to the fork.
 
         Args:
-            peer_id (Any): Description.
-
+            peer_id: The peer identifier.
+        """
         self.peers.add(peer_id)
 
     def remove_peer(self, peer_id: Any) -> None:
+        """Remove a peer from the fork.
 
         Args:
-            peer_id (Any): Description.
-
+            peer_id: The peer identifier.
+        """
         self.peers.discard(peer_id)
 
     def verify(self, node: Any) -> bool:
+        """Verify the fork.
 
         Args:
-            node (Any): Description.
+            node: The node to verify on.
 
+        Returns:
+            True if verification succeeds, False otherwise.
+        """
         def _hex(value: Optional[bytes]) -> str:
+            """Convert bytes to hex string.
 
             Args:
-                value (Optional[bytes]): Description.
+                value: The bytes value.
 
+            Returns:
+                Hex string or str(value).
+            """
             if isinstance(value, (bytes, bytearray)):
                 return value.hex()
             return str(value)
@@ -130,10 +151,14 @@ class Fork:
         anchor_validated = False
 
         def is_on_other_fork_path(target_hash: bytes) -> Optional[bytes]:
+            """Check if target is on another fork path.
 
             Args:
-                target_hash (bytes): Description.
+                target_hash: The hash to check.
 
+            Returns:
+                Other fork head if found, else None.
+            """
             for other_head in node.forks:
                 if other_head == self.head:
                     continue
@@ -262,10 +287,14 @@ class Fork:
         current_validator = config.get("validation_public_key_bytes")
 
         def skip_slow_pass(block: Block) -> bool:
+            """Check if slow pass can be skipped.
 
             Args:
-                block (Block): Description.
+                block: The block to check.
 
+            Returns:
+                True if can skip, False otherwise.
+            """
             if not current_validator:
                 return False
             return (

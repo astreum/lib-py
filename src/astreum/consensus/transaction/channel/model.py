@@ -16,10 +16,14 @@ class Channel:
     _expr: Optional[Expr] = field(default=None, repr=False, compare=False)
 
     def to_expr(self) -> Expr:
+        """Convert channel to expression.
 
         Args:
             None.
 
+        Returns:
+            The expression representation.
+        """
         if self._expr is not None:
             return self._expr
         detail: Expr = link(int_(self.withdrawal_window), NIL)
@@ -28,10 +32,14 @@ class Channel:
         return detail
 
     def expr(self) -> Expr:
+        """Get cached expression or compute it.
 
         Args:
             None.
 
+        Returns:
+            The expression representation.
+        """
         if self._expr is not None:
             return self._expr
         self._expr = self.to_expr()
@@ -39,12 +47,16 @@ class Channel:
 
     @classmethod
     def from_storage(cls, node, head_hash: bytes, contact=None) -> Optional["Channel"]:
+        """Load a Channel from storage.
 
         Args:
-            node: Description.
-            head_hash (bytes): Description.
-            contact: Description.
+            node: The node.
+            head_hash: The head hash.
+            contact: Optional contact.
 
+        Returns:
+            The Channel or None.
+        """
         if not head_hash or head_hash == ZERO32:
             return None
         header = get_expr_list(node, head_hash, contact=contact)

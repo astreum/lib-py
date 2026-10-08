@@ -17,21 +17,25 @@ Contact = Tuple[bytes, str, int]
 
 
 def init_block_holders(node: Any) -> None:
+    """Initialize block holders storage on the node.
 
     Args:
-        node (Any): Description.
-
+        node: The node to initialize.
+    """
     node.block_holders = OrderedDict()
     node.block_holders_lock = threading.Lock()
 
 
 def block_holder(node: Any, block_hash: Optional[bytes]) -> Optional[Contact]:
-    """Return the ``(relay_key, address, port)`` holding *block_hash*, or None."""
+    """Return the ``(relay_key, address, port)`` holding *block_hash*, or None.
 
     Args:
-        node (Any): Description.
-        block_hash (Optional[bytes]): Description.
+        node: The node to query.
+        block_hash: The block hash to look up.
 
+    Returns:
+        Contact tuple if found, else None.
+    """
     holders = getattr(node, "block_holders", None)
     if holders is None or not block_hash:
         return None
@@ -40,11 +44,15 @@ def block_holder(node: Any, block_hash: Optional[bytes]) -> Optional[Contact]:
 
 
 def has_block_holder(node: Any, block_hash: bytes) -> bool:
+    """Check if a block holder exists for the given hash.
 
     Args:
-        node (Any): Description.
-        block_hash (bytes): Description.
+        node: The node to query.
+        block_hash: The block hash to check.
 
+    Returns:
+        True if a holder exists, False otherwise.
+    """
     return block_holder(node, block_hash) is not None
 
 
@@ -53,13 +61,15 @@ def record_block_holder(node: Any, block_hash: bytes, contact: Contact) -> bool:
 
     Keeps the first holder seen. Returns False if one was already recorded.
     Oldest entries are dropped beyond ``MAX_BLOCK_HOLDERS``.
-    """
 
     Args:
-        node (Any): Description.
-        block_hash (bytes): Description.
-        contact (Contact): Description.
+        node: The node to record on.
+        block_hash: The block hash.
+        contact: The contact tuple.
 
+    Returns:
+        True if recorded, False if already exists.
+    """
     with node.block_holders_lock:
         if block_hash in node.block_holders:
             return False

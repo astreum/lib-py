@@ -55,10 +55,14 @@ def calculate_transaction_costs(
     tx_hash = transaction.hash or transaction.expr().hash()
 
     def build(storage_fee: int) -> Receipt:
+        """Build a receipt with the given storage fee.
 
         Args:
-            storage_fee (int): Description.
+            storage_fee: The storage fee.
 
+        Returns:
+            The constructed Receipt.
+        """
         return Receipt(
             transaction_hash=tx_hash,
             transaction_fee=1,

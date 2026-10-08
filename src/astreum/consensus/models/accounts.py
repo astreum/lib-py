@@ -33,18 +33,29 @@ class Accounts:
 
     @property
     def root_hash(self) -> Optional[bytes]:
+        """Get the root hash of the accounts trie.
 
         Args:
             None.
 
+        Returns:
+            The root hash bytes or None.
+        """
         return self._trie.root_hash
 
     def get_account(self, address: bytes, node: Optional[Any] = None) -> Optional[Account]:
+        """Get an account by address.
 
         Args:
-            address (bytes): Description.
-            node (Optional[Any]): Description.
+            address: The account address.
+            node: Optional node for trie access.
 
+        Returns:
+            The Account if found, else None.
+
+        Raises:
+            ValueError: If node is None.
+        """
         cached = self._cache.get(address)
         if cached is not None:
             return cached
@@ -97,18 +108,23 @@ class Accounts:
         return account
 
     def set_account(self, address: bytes, account: Account) -> None:
+        """Set an account in the cache.
 
         Args:
-            address (bytes): Description.
-            account (Account): Description.
-
+            address: The account address.
+            account: The Account to set.
+        """
         self._cache[address] = account
 
     def update_trie(self, node: Any) -> Optional[bytes]:
+        """Update the trie with cached accounts.
 
         Args:
-            node (Any): Description.
+            node: The node for trie operations.
 
+        Returns:
+            The root hash of the updated trie.
+        """
         for address, account in self._cache.items():
             account.data_hash = account.data.root_hash or ZERO32
             account.data_block = account.data.root_block
@@ -125,10 +141,14 @@ class Accounts:
 
 
 def _trie_nodes_exprs(trie: RadixTree) -> List[Expr]:
+    """Extract all expressions from a radix trie.
 
     Args:
-        trie (RadixTree): Description.
+        trie: The radix trie.
 
+    Returns:
+        List of expressions from trie nodes.
+    """
     exprs: List[Expr] = []
     for node in trie.nodes.values():
         exprs.append(get_radix_node_expr(node))
@@ -139,10 +159,14 @@ def _trie_nodes_exprs(trie: RadixTree) -> List[Expr]:
 
 
 def extract_accounts_exprs(accounts: Accounts) -> List[Expr]:
+    """Extract all expressions from an Accounts instance.
 
     Args:
-        accounts (Accounts): Description.
+        accounts: The Accounts instance.
 
+    Returns:
+        List of all expressions from accounts and tries.
+    """
     exprs: List[Expr] = []
 
     exprs.extend(_trie_nodes_exprs(accounts._trie))
