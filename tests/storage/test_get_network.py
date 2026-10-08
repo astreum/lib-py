@@ -21,7 +21,6 @@ from astreum.expression import (
     RESOLUTION_SINGLE,
     RESOLUTION_LIST,
     RESOLUTION_FULL,
-    RESOLUTION_RECORD,
     int_,
     symbol,
     bytes_,
@@ -30,7 +29,6 @@ from astreum.expression import (
     collect_list,
     collect_full,
 )
-from astreum.communication.storage_request.handle import _collect_record_exprs
 from astreum.communication.storage_response.storage_found import (
     STORAGE_FOUND_PAYLOAD,
     encode_found_pages,
@@ -235,65 +233,6 @@ class TestObjectFoundCodec(unittest.TestCase):
 
 
 # ===========================================================================
-# TestCollectRecordExprs
-# ===========================================================================
-
-class TestCollectRecordExprs(unittest.TestCase):
-    """Unit tests for the record-aware serving assembly."""
-
-    def test_no_records_entry_returns_none(self) -> None:
-        node = _fake_node()
-        root = int_(1)
-        with patch(
-            "astreum.communication.storage_request.handle.get_record_from_cold_storage",
-            return_value=None,
-        ):
-            self.assertIsNone(_collect_record_exprs(node, root, root.hash()))
-
-    def test_root_first_and_slots_in_blob_order(self) -> None:
-        node = _fake_node()
-        root = int_(1)
-        slot_a = int_(2)
-        slot_b = int_(3)
-        blob = slot_a.hash() + ZERO32 + slot_b.hash()
-
-        def fake_local(_node, expr_id):
-            return {slot_a.hash(): slot_a, slot_b.hash(): slot_b}.get(expr_id)
-
-        with patch(
-            "astreum.communication.storage_request.handle.get_record_from_cold_storage",
-            return_value=blob,
-        ), patch(
-            "astreum.communication.storage_request.handle.get_expr_from_local_storage",
-            side_effect=fake_local,
-        ):
-            exprs = _collect_record_exprs(node, root, root.hash())
-
-        self.assertEqual(
-            [e.hash() for e in exprs],
-            [root.hash(), slot_a.hash(), slot_b.hash()],
-        )
-
-    def test_missing_and_zero_slots_are_skipped(self) -> None:
-        node = _fake_node()
-        root = int_(1)
-        present = int_(2)
-        missing = int_(3)
-        blob = present.hash() + ZERO32 + missing.hash()
-
-        with patch(
-            "astreum.communication.storage_request.handle.get_record_from_cold_storage",
-            return_value=blob,
-        ), patch(
-            "astreum.communication.storage_request.handle.get_expr_from_local_storage",
-            side_effect=lambda _node, h: present if h == present.hash() else None,
-        ):
-            exprs = _collect_record_exprs(node, root, root.hash())
-
-        self.assertEqual([e.hash() for e in exprs], [root.hash(), present.hash()])
-
-
-# ===========================================================================
 # TestGetExprFromNetwork
 # ===========================================================================
 
@@ -327,6 +266,61 @@ class TestGetExprFromNetwork(unittest.TestCase):
 
         self.assertEqual(result.hash(), target.hash())
         queue.assert_called_once_with(node, target.hash(), RESOLUTION_SINGLE, contact=None)
+
+    @patch("astreum.storage.exprs.network.sleep")
+    def test_scoped_get_is_queued_with_the_block(self, mock_sleep: MagicMock) -> None:
+        node = _fake_node()
+        target = int_(99)
+        block = b"\xb1" * 32
+        calls = []
+
+        def fake_get(n, h):
+            calls.append(h)
+            return target if len(calls) >= 3 else None
+
+        with patch(QUEUE, return_value=True) as queue, patch(LOCAL, side_effect=fake_get):
+            result = get_expr_from_network(
+                node, target.hash(), RESOLUTION_SINGLE, block_hash=block
+            )
+
+        self.assertEqual(result.hash(), target.hash())
+        queue.assert_called_once_with(
+            node, target.hash(), RESOLUTION_SINGLE, contact=None, block_hash=block
+        )
+
+    def test_scoped_get_checks_local_storage_first(self) -> None:
+        node = _fake_node()
+        target = int_(5)
+        with patch(QUEUE, return_value=True) as queue, patch(LOCAL, return_value=target):
+            result = get_expr_from_network(
+                node, target.hash(), RESOLUTION_SINGLE, block_hash=b"\xb1" * 32
+            )
+        self.assertEqual(result.hash(), target.hash())
+        queue.assert_not_called()
+
+    @patch("astreum.storage.exprs.network.sleep")
+    def test_inner_hashes_of_a_scoped_list_are_scoped_too(self, mock_sleep: MagicMock) -> None:
+        node = _fake_node(fetch_retries=2)
+        block = b"\xb1" * 32
+        inner = int_(7)
+        root = _make_hash_ref_link(inner.hash(), ZERO32)
+        scoped = []
+
+        def fake_queue(n, h, r, contact=None, **kw):
+            scoped.append((h, kw.get("block_hash")))
+            return True
+
+        stored = {root.hash(): root}
+
+        def fake_local(n, h):
+            return stored.get(h)
+
+        with patch(QUEUE, side_effect=fake_queue), patch(LOCAL, side_effect=fake_local), \
+             patch("astreum.storage.exprs.full.get_expr_from_local_storage", side_effect=fake_local):
+            get_expr_from_network(node, root.hash(), RESOLUTION_FULL, block_hash=block)
+
+        self.assertIn((root.hash(), block), scoped)
+        self.assertIn((inner.hash(), block), scoped)
 
     @patch("astreum.storage.exprs.network.sleep")
     def test_single_poll_timeout(self, mock_sleep: MagicMock) -> None:

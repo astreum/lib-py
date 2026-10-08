@@ -12,6 +12,9 @@ def clone_radix_node(node: RadixNode) -> RadixNode:
         ),
         child_0=None if node.child_0 is None else node.child_0,
         child_1=None if node.child_1 is None else node.child_1,
+        child_0_block=node.child_0_block,
+        child_1_block=node.child_1_block,
+        value_block=node.value_block,
     )
     cloned._hash = None if node._hash is None else node._hash
     cloned._expr = node._expr

@@ -12,6 +12,10 @@ from astreum.expression.floats.fp16 import _decode_fp16
 from astreum.expression.floats.bf16 import _decode_bf16
 
 
+def _scope(block_hash) -> dict:
+    return {} if block_hash is None else {"block_hash": block_hash}
+
+
 def is_builtin_composite(expr: Expr) -> bool:
     """Check if expr is a builtin composite represented as a link (e.g. int, str, float).
 
@@ -43,7 +47,7 @@ def get_referenced_hash(expr: Expr) -> bytes:
     return ZERO32
 
 
-def get_expr_tag(expr: Expr, node=None, contact=None):
+def get_expr_tag(expr: Expr, node=None, contact=None, block_hash=None):
     """Get the logical type tag of an expression.
 
     Base types (symbol, bytes) return their base.
@@ -51,7 +55,8 @@ def get_expr_tag(expr: Expr, node=None, contact=None):
     Links with an unresolved tail_hash matching a builtin type hash return the type name.
     Links with a custom unresolved tail_hash raise if node is None, else resolve and retry.
     Plain links (tail is not a symbol) return "link".
-    *contact* is passed to the fetch that resolves a custom tail_hash.
+    *contact* and *block_hash* (the block that holds the cell) are passed to the
+    fetch that resolves a custom tail_hash.
     """
     if expr.base in ("symbol", "bytes"):
         return expr.base
@@ -67,7 +72,9 @@ def get_expr_tag(expr: Expr, node=None, contact=None):
                 return name
             if node is not None:
                 from astreum.storage.exprs import get_expr
-                resolved = get_expr(node, expr.tail_hash, contact=contact)
+                resolved = get_expr(
+                    node, expr.tail_hash, contact=contact, **_scope(block_hash)
+                )
                 if resolved is not None:
                     expr.tail = resolved
                     expr.tail_hash = None
@@ -79,13 +86,14 @@ def get_expr_tag(expr: Expr, node=None, contact=None):
     return expr.base
 
 
-def get_expr_value(expr, node=None, contact=None):
+def get_expr_value(expr, node=None, contact=None, block_hash=None):
     """Get the payload value of an expression.
 
     For builtin composite links (int, str, float), resolves head_hash if needed.
     For bytes/symbol terminals, returns the value directly.
     For pair links, returns the head's value if it's a bytes expr, else raises.
-    *contact* is passed to the fetches that resolve head_hash and the tag.
+    *contact* and *block_hash* (the block that holds the cell) are passed to the
+    fetches that resolve head_hash and the tag.
     """
     if expr.value is not None:
         return expr.value
@@ -98,7 +106,9 @@ def get_expr_value(expr, node=None, contact=None):
             if head.base == "bytes":
                 from astreum.expression.expr import TAG_BYTE_DECODINGS
                 try:
-                    tag = get_expr_tag(expr, node, contact=contact)
+                    tag = get_expr_tag(
+                        expr, node, contact=contact, block_hash=block_hash
+                    )
                 except ValueError:
                     tag = None
                 if tag in TAG_BYTE_DECODINGS:
@@ -109,12 +119,12 @@ def get_expr_value(expr, node=None, contact=None):
                 raise ValueError("value requires node to resolve head_hash")
             from astreum.storage.exprs import get_expr
             from astreum.expression.expr import TAG_BYTE_DECODINGS
-            head = get_expr(node, expr.head_hash, contact=contact)
+            head = get_expr(node, expr.head_hash, contact=contact, **_scope(block_hash))
             if head is None:
                 raise ValueError("cannot resolve head for expr value")
             expr.head = head
             expr.head_hash = None
-            tag = get_expr_tag(expr, node, contact=contact)
+            tag = get_expr_tag(expr, node, contact=contact, block_hash=block_hash)
             if head.base == "bytes" and tag in TAG_BYTE_DECODINGS:
                 return TAG_BYTE_DECODINGS[tag](head.value)
             return head.value
@@ -209,8 +219,13 @@ def exprs_to_linked_expr(items: list[Expr]) -> Expr:
     return result
 
 
-def resolve_list_exprs(node, expr: Expr, contact=None) -> tuple[list[Expr], list[bytes]]:
+def resolve_list_exprs(
+    node, expr: Expr, contact=None, block_hash=None
+) -> tuple[list[Expr], list[bytes]]:
+    """Resolve the items of a list; *block_hash* scopes the fetches to a block."""
     from astreum.storage.exprs import get_expr
+
+    scope = {} if block_hash is None else {"block_hash": block_hash}
 
     result: list[Expr] = []
     missed: list[bytes] = []
@@ -221,7 +236,7 @@ def resolve_list_exprs(node, expr: Expr, contact=None) -> tuple[list[Expr], list
                 current.head = NIL
                 current.head_hash = None
             else:
-                resolved = get_expr(node, current.head_hash, contact=contact)
+                resolved = get_expr(node, current.head_hash, contact=contact, **scope)
                 if resolved is not None:
                     current.head = resolved
                     current.head_hash = None
@@ -234,7 +249,7 @@ def resolve_list_exprs(node, expr: Expr, contact=None) -> tuple[list[Expr], list
                 current.tail = None
                 current.tail_hash = None
             else:
-                resolved = get_expr(node, current.tail_hash, contact=contact)
+                resolved = get_expr(node, current.tail_hash, contact=contact, **scope)
                 if resolved is not None:
                     current.tail = resolved
                     current.tail_hash = None
@@ -245,8 +260,13 @@ def resolve_list_exprs(node, expr: Expr, contact=None) -> tuple[list[Expr], list
     return result, missed
 
 
-def resolve_inner_exprs(node, expr: Expr, contact=None) -> tuple[list[Expr], list[bytes]]:
+def resolve_inner_exprs(
+    node, expr: Expr, contact=None, block_hash=None
+) -> tuple[list[Expr], list[bytes]]:
+    """Resolve every inner expr; *block_hash* scopes the fetches to a block."""
     from astreum.storage.exprs import get_expr
+
+    scope = {} if block_hash is None else {"block_hash": block_hash}
 
     result: list[Expr] = []
     missed: list[bytes] = []
@@ -256,7 +276,7 @@ def resolve_inner_exprs(node, expr: Expr, contact=None) -> tuple[list[Expr], lis
         if e.base != "link":
             return
         if e.head is None and e.value is None and e.head_hash is not None:
-            resolved = get_expr(node, e.head_hash, contact=contact)
+            resolved = get_expr(node, e.head_hash, contact=contact, **scope)
             if resolved is not None:
                 e.head = resolved
                 e.head_hash = None
@@ -265,7 +285,7 @@ def resolve_inner_exprs(node, expr: Expr, contact=None) -> tuple[list[Expr], lis
         if e.head is not None:
             _walk(e.head)
         if e.tail is None and e.tail_hash is not None:
-            resolved = get_expr(node, e.tail_hash, contact=contact)
+            resolved = get_expr(node, e.tail_hash, contact=contact, **scope)
             if resolved is not None:
                 e.tail = resolved
                 e.tail_hash = None

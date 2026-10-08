@@ -5,7 +5,6 @@ from typing import Any
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.expression import resolve_inner_exprs
 from astreum.consensus.account import create_account
-from astreum.consensus.account.model import generate_new_account_storage_contracts
 from astreum.consensus.transaction.treasury.record import (
     TreasuryUserRecord,
 )
@@ -70,12 +69,5 @@ def create_genesis_block(
         transactions=[],
         receipts=[],
     )
-
-    generate_new_account_storage_contracts(node, block, storage_account, treasury_record_head, mint=True)
-
-    generate_new_account_storage_contracts(node, block, storage_account, validator_account.expr(), mint=True)
-
-    accounts.update_trie(node)
-    block.accounts_hash = accounts._trie.root_hash or ZERO32
 
     return block

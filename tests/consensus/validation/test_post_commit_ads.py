@@ -1,7 +1,7 @@
 """A validator advertises the records a block committed once it is adopted.
 
 The ids wait in ``node.pending_ads`` after the block is created. They go out
-once, with ``RESOLUTION_RECORD``, when a block has been built on it; blocks
+once, when a block has been built on it; blocks
 that lost a fork are dropped, and the queue is bounded.
 """
 
@@ -25,7 +25,7 @@ from astreum.consensus.validation.ads import (  # noqa: E402
     init_pending_ads,
     queue_ads,
 )
-from astreum.expression import RESOLUTION_RECORD  # noqa: E402
+from astreum.expression import RESOLUTION_SINGLE  # noqa: E402
 
 ADVERTISE = "astreum.storage.advertisements.advertise_exprs"
 LOAD_BLOCK = "astreum.consensus.block.encoding.decode.get_block_from_storage"
@@ -116,7 +116,7 @@ class TestFlush(unittest.TestCase):
             self.assertEqual(flush_ads(node), [])
         advertise.assert_called_once()
         entries = advertise.call_args.args[1]
-        self.assertEqual(entries, [(i, RESOLUTION_RECORD, None) for i in ids])
+        self.assertEqual(entries, [(i, RESOLUTION_SINGLE, None) for i in ids])
         self.assertEqual(len(node.pending_ads), 0)
 
     def test_sent_when_the_head_is_several_blocks_past(self):

@@ -17,6 +17,11 @@ from astreum.storage.radix import RadixTree, put_in_radix_tree, exists_in_radix_
 from astreum.storage.admission import is_expr_in_latest_block
 
 
+import itertools
+
+_block_ids = itertools.count(1000)
+
+
 class _FakeNode:
     pass
 
@@ -42,7 +47,9 @@ def _latest_block_with(expr_ids: list[bytes]):
         put_in_radix_tree(storage_account.data, node, eid, int_(1))
     accounts = Accounts()
     accounts.set_account(STORAGE_ADDRESS, storage_account)
-    block = type("_Block", (), {"expr_id": b"\x01" * 32, "accounts": accounts})()
+    # The admission lookup is cached per block hash: each fake block needs its own.
+    block_id = next(_block_ids).to_bytes(32, "big")
+    block = type("_Block", (), {"expr_id": block_id, "accounts": accounts})()
     node.latest_block = block
     return node
 
@@ -98,6 +105,18 @@ class TestIsExprInLatestBlock(unittest.TestCase):
         block = type("_Block", (), {"expr_id": b"\x01" * 32, "accounts": accounts})()
         node.latest_block = block
         self.assertFalse(is_expr_in_latest_block(node, b"\x55" * 32))
+
+
+class TestOneRecordPerBlock(unittest.TestCase):
+    """The storage trie holds only block record ids, so a block's inner exprs
+    (txs, receipts, values) are not admitted and its record id is."""
+
+    def test_block_record_id_is_admitted_and_inner_expr_is_not(self) -> None:
+        record_id = b"\x66" * 32
+        inner_expr_id = b"\x77" * 32  # a tx cell inside that block
+        node = _latest_block_with([record_id])
+        self.assertTrue(is_expr_in_latest_block(node, record_id))
+        self.assertFalse(is_expr_in_latest_block(node, inner_expr_id))
 
 
 if __name__ == "__main__":

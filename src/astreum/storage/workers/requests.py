@@ -34,8 +34,8 @@ class _Destination:
         self.address = address
         self.shared_key_bytes = shared_key_bytes
         self.difficulty = difficulty
-        # expr_id -> (resolution, preclaimed)
-        self.entries: dict[bytes, tuple[int, bool]] = {}
+        # expr_id -> (resolution, preclaimed, block_hash | None)
+        self.entries: dict[bytes, tuple[int, bool, bytes | None]] = {}
 
 
 def init_request_buffer(node: "Node") -> None:
@@ -54,18 +54,31 @@ def _provider_destination(node: "Node", relay_key_bytes: bytes, address: str, po
     return ("provider", relay_key_bytes, address, port), (address, port), shared_key_bytes, 1
 
 
-def _resolve_destination(node: "Node", expr_id: bytes, contact=None):
+def _resolve_destination(node: "Node", expr_id: bytes, contact=None, block_hash=None):
     """Return ``(key, address, shared_key_bytes, difficulty)`` or ``None``.
 
     *contact* (``(relay_key, address, port)``) overrides routing, for redirects.
-    Otherwise an indexed provider wins, then the closest peer.
+    A scoped request (*block_hash*) is routed by the block: its holder if there
+    is one, else the provider indexed for it, else the peer nearest the block
+    hash. Otherwise an indexed provider wins for *expr_id*, then the closest
+    peer.
     """
     try:
         if contact is not None:
             relay_key_bytes, address, port = contact
             return _provider_destination(node, relay_key_bytes, address, port)
 
-        provider_id = node.storage_index.get(expr_id)
+        route_id = expr_id
+        if block_hash is not None:
+            from astreum.consensus.block.holders import block_holder
+
+            holder = block_holder(node, block_hash)
+            if holder is not None:
+                relay_key_bytes, address, port = holder
+                return _provider_destination(node, relay_key_bytes, address, port)
+            route_id = block_hash
+
+        provider_id = node.storage_index.get(route_id)
         if provider_id is not None:
             from astreum.communication.storage_response.storage_provider import (
                 decode_storage_provider,
@@ -74,12 +87,12 @@ def _resolve_destination(node: "Node", expr_id: bytes, contact=None):
 
             payload = provider_payload_for_id(node, provider_id)
             if payload is None:
-                node.logger.debug("Unknown provider id %s for %s", provider_id, expr_id.hex())
+                node.logger.debug("Unknown provider id %s for %s", provider_id, route_id.hex())
                 return None
             _, relay_key_bytes, address, port = decode_storage_provider(payload)
             return _provider_destination(node, relay_key_bytes, address, port)
 
-        peer = node.peer_route.closest_peer_for_hash(expr_id)
+        peer = node.peer_route.closest_peer_for_hash(route_id)
         if peer is None or peer.address is None:
             return None
         return ("peer", peer.public_key_bytes), peer.address, peer.shared_key_bytes, peer.difficulty
@@ -104,6 +117,7 @@ def queue_storage_get(
     *,
     contact=None,
     preclaimed: bool = False,
+    block_hash: Optional[bytes] = None,
 ) -> bool:
     """Buffer a GET for *expr_id*; the flush thread sends it.
 
@@ -116,6 +130,8 @@ def queue_storage_get(
             routed destination (redirects and hints).
         preclaimed: The pending request was already claimed (redirect retries),
             so the flush must not claim it again.
+        block_hash: Ask the provider of this block for *expr_id* (a scoped
+            entry) instead of routing by *expr_id*.
     """
     with node.storage_request_buffer_lock:
         if expr_id in node.storage_request_buffered:
@@ -123,7 +139,7 @@ def queue_storage_get(
     if not preclaimed and has_expr_req(node, expr_id):
         return True
 
-    resolved = _resolve_destination(node, expr_id, contact)
+    resolved = _resolve_destination(node, expr_id, contact, block_hash)
     if resolved is None:
         return False
     key, address, shared_key_bytes, difficulty = resolved
@@ -135,7 +151,7 @@ def queue_storage_get(
         if destination is None:
             destination = _Destination(address, shared_key_bytes, difficulty)
             node.storage_request_buffer[key] = destination
-        destination.entries[expr_id] = (resolution, preclaimed)
+        destination.entries[expr_id] = (resolution, preclaimed, block_hash)
         node.storage_request_buffered.add(expr_id)
         full = len(destination.entries) >= _max_entries(node)
     if full:
@@ -143,7 +159,9 @@ def queue_storage_get(
     return True
 
 
-def _send_chunk(node: "Node", destination: _Destination, chunk: list[tuple[bytes, int]]) -> bool:
+def _send_chunk(
+    node: "Node", destination: _Destination, chunk: list[tuple[bytes, int, bytes | None]]
+) -> bool:
     from astreum.communication.models.message import Message, MessageTopic
     from astreum.communication.outgoing_queue import enqueue_outgoing
     from astreum.communication.storage_request.code import StorageRequestCode
@@ -182,14 +200,14 @@ def flush_storage_requests(node: "Node") -> int:
     per_datagram = _max_entries(node)
     sent = 0
     for destination in sorted(pending.values(), key=lambda d: d.difficulty):
-        live: list[tuple[bytes, int]] = []
-        for expr_id, (resolution, preclaimed) in destination.entries.items():
+        live: list[tuple[bytes, int, bytes | None]] = []
+        for expr_id, (resolution, preclaimed, block_hash) in destination.entries.items():
             if preclaimed:
                 if not has_expr_req(node, expr_id):
                     continue
-            elif not claim_expr_req(node, expr_id, resolution):
+            elif not claim_expr_req(node, expr_id, resolution, block_hash):
                 continue
-            live.append((expr_id, resolution))
+            live.append((expr_id, resolution, block_hash))
 
         for start in range(0, len(live), per_datagram):
             chunk = live[start : start + per_datagram]
@@ -209,7 +227,7 @@ def flush_storage_requests(node: "Node") -> int:
                     "Queued STORAGE_GET of %d exprs to %s", len(chunk), destination.address
                 )
             else:
-                for expr_id, _ in chunk:
+                for expr_id, _, _ in chunk:
                     pop_expr_req(node, expr_id)
     return sent
 

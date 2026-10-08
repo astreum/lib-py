@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from astreum.expression import Expr, resolve_list_exprs
+from astreum.expression import Expr, get_expr_tag, get_expr_value, resolve_inner_exprs, resolve_list_exprs
 from astreum.storage.exprs import get_expr_list
 from astreum.consensus.transaction.code import TransactionCode
 
@@ -14,10 +14,12 @@ def get_transaction_from_storage(
     node: Any,
     transaction_id: bytes,
     contact=None,
+    block_hash=None,
 ) -> "Transaction":
     from astreum.consensus.transaction.model import Transaction as TxModel
 
-    header = get_expr_list(node, transaction_id, contact=contact)
+    scope = {} if block_hash is None else {"block_hash": block_hash}
+    header = get_expr_list(node, transaction_id, contact=contact, **scope)
     if header is None:
         raise ValueError("unable to load transaction from storage")
     if not header._tag == "link":
@@ -31,7 +33,7 @@ def get_transaction_from_storage(
     if inner is None or inner._tag != "link":
         raise ValueError("transaction inner header must be a Link")
 
-    inner_nodes, missed = resolve_list_exprs(node, inner, contact=contact)
+    inner_nodes, missed = resolve_list_exprs(node, inner, contact=contact, **scope)
     if missed:
         raise ValueError(
             f"unable to resolve transaction header (missed={[h.hex()[:8] for h in missed]})"
@@ -48,7 +50,7 @@ def get_transaction_from_storage(
     if not body._tag == "link":
         raise ValueError("transaction body must be a Link chain")
 
-    body_nodes, missed = resolve_list_exprs(node, body, contact=contact)
+    body_nodes, missed = resolve_list_exprs(node, body, contact=contact, **scope)
     if missed:
         raise ValueError(
             f"unable to resolve transaction body (missed={[h.hex()[:8] for h in missed]})"
@@ -69,27 +71,32 @@ def get_transaction_from_storage(
         sender_node,
     ) = body_nodes
 
-    if not amount_node._tag == "int":
+    if not get_expr_tag(amount_node, node, contact, block_hash) == "int":
         raise ValueError("expected Int for amount")
-    if not chain_id_node._tag == "int":
+    if not get_expr_tag(chain_id_node, node, contact, block_hash) == "int":
         raise ValueError("expected Int for chain_id")
-    if not code_node._tag == "int":
+    if not get_expr_tag(code_node, node, contact, block_hash) == "int":
         raise ValueError("expected Int for code")
-    if not cost_limit_node._tag == "int":
+    if not get_expr_tag(cost_limit_node, node, contact, block_hash) == "int":
         raise ValueError("expected Int for cost_limit")
-    if not counter_node._tag == "int":
+    if not get_expr_tag(counter_node, node, contact, block_hash) == "int":
         raise ValueError("expected Int for counter")
     if not recipient_node._tag == "bytes":
         raise ValueError("expected Bytes for recipient")
     if not sender_node._tag == "bytes":
         raise ValueError("expected Bytes for sender")
 
+    # The handlers read the data whole: a transaction fetched cell by cell has
+    # children by hash, which are in the transaction's block. What cannot be
+    # fetched stays a hash; the handler for its code fails the transaction.
+    resolve_inner_exprs(node, data_node, contact=contact, **scope)
+
     tx = TxModel(
-        chain_id=chain_id_node.value,
-        amount=amount_node.value,
-        code=TransactionCode(code_node.value),
-        counter=counter_node.value,
-        cost_limit=cost_limit_node.value,
+        chain_id=get_expr_value(chain_id_node, node, contact, block_hash),
+        amount=get_expr_value(amount_node, node, contact, block_hash),
+        code=TransactionCode(get_expr_value(code_node, node, contact, block_hash)),
+        counter=get_expr_value(counter_node, node, contact, block_hash),
+        cost_limit=get_expr_value(cost_limit_node, node, contact, block_hash),
         data=data_node,
         recipient=recipient_node.value,
         sender=sender_node.value,

@@ -7,7 +7,6 @@ from astreum.consensus.models.accounts import Accounts
 if TYPE_CHECKING:
     from astreum.storage.radix import RadixTree
     from astreum.consensus.transaction.model import Transaction
-    from astreum.consensus.transaction.storage.pending import PendingStorageContract
     from astreum.crypto.bloom_tree import BloomTree
 
 
@@ -32,7 +31,6 @@ class Block:
 
     body_hash: Optional[bytes]
     signature: Optional[bytes]
-    total_mint: int
 
     accounts: Optional["RadixTree"]
     transactions: Optional[List["Transaction"]]
@@ -40,7 +38,6 @@ class Block:
     receipts_trie: Optional["RadixTree"]
     statistics: Optional[list]
     pending_exprs: List[Expr]
-    pending_storage_contracts: List["PendingStorageContract"]
     bloom_tree: Optional["BloomTree"]
     pending_bloom_keys: set[bytes]
     global_loaned: int
@@ -68,7 +65,6 @@ class Block:
         bloom_hash: Optional[bytes] = None,
         previous_era_hash: Optional[bytes] = None,
         signature: Optional[bytes] = None,
-        total_mint: int = 0,
         expr_id: Optional[bytes] = None,
         body_hash: Optional[bytes] = None,
         accounts: Optional["RadixTree"] = None,
@@ -77,7 +73,6 @@ class Block:
         receipts_trie: Optional["RadixTree"] = None,
         statistics: Optional[list] = None,
         pending_exprs: Optional[List[Expr]] = None,
-        pending_storage_contracts: Optional[List["PendingStorageContract"]] = None,
         global_loaned: int = 0,
         global_defaulted: int = 0,
         global_loan_count: int = 0,
@@ -106,9 +101,12 @@ class Block:
         self.previous_era_hash = previous_era_hash
         self.body_hash = body_hash
         self.signature = signature
-        self.total_mint = total_mint
         if accounts is None and accounts_hash and accounts_hash != ZERO32:
-            self.accounts = Accounts(root_hash=accounts_hash, contact=contact)
+            self.accounts = Accounts(
+                root_hash=accounts_hash,
+                contact=contact,
+                block_hash=expr_id if expr_id and expr_id != ZERO32 else None,
+            )
         else:
             self.accounts = accounts
         self.transactions = transactions
@@ -116,7 +114,6 @@ class Block:
         self.receipts_trie = receipts_trie
         self.pending_exprs = list(pending_exprs or [])
         self.statistics = statistics or []
-        self.pending_storage_contracts = list(pending_storage_contracts or [])
         self.bloom_tree = None
         self.pending_bloom_keys = set()
         self.global_loaned = global_loaned
@@ -130,16 +127,12 @@ class Block:
             for addr, acct in self.accounts._cache.items()
         }
         saved_pending_exprs = list(self.pending_exprs)
-        saved_pending_storage = list(self.pending_storage_contracts)
-        saved_total_mint = self.total_mint
         saved_global_loaned = self.global_loaned
         saved_global_defaulted = self.global_defaulted
         saved_global_loan_count = self.global_loan_count
         return (
             saved_cache,
             saved_pending_exprs,
-            saved_pending_storage,
-            saved_total_mint,
             saved_global_loaned,
             saved_global_defaulted,
             saved_global_loan_count,
@@ -149,16 +142,12 @@ class Block:
         (
             saved_cache,
             saved_pending_exprs,
-            saved_pending_storage,
-            saved_total_mint,
             saved_global_loaned,
             saved_global_defaulted,
             saved_global_loan_count,
         ) = snapshot
         self.accounts._cache = saved_cache
         self.pending_exprs = saved_pending_exprs
-        self.pending_storage_contracts = saved_pending_storage
-        self.total_mint = saved_total_mint
         self.global_loaned = saved_global_loaned
         self.global_defaulted = saved_global_defaulted
         self.global_loan_count = saved_global_loan_count

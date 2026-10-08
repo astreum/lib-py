@@ -7,7 +7,6 @@ from astreum.consensus.models.block import Block
 if TYPE_CHECKING:
     from astreum.storage.radix import RadixTree
     from astreum.consensus.transaction.model import Transaction
-    from astreum.consensus.transaction.storage.pending import PendingStorageContract
 
 
 def create_block(
@@ -28,7 +27,6 @@ def create_block(
     bloom_hash: Optional[bytes] = None,
     previous_era_hash: Optional[bytes] = None,
     signature: Optional[bytes] = None,
-    total_mint: int = 0,
     expr_id: Optional[bytes] = None,
     body_hash: Optional[bytes] = None,
     accounts: Optional["RadixTree"] = None,
@@ -37,7 +35,6 @@ def create_block(
     receipts_trie: Optional["RadixTree"] = None,
     statistics: Optional[list] = None,
     pending_exprs: Optional[List[Expr]] = None,
-    pending_storage_contracts: Optional[List["PendingStorageContract"]] = None,
     global_loaned: int = 0,
     global_defaulted: int = 0,
     global_loan_count: int = 0,
@@ -56,7 +53,11 @@ def create_block(
     nonce = nonce or 0
 
     if accounts is None and accounts_hash and accounts_hash != ZERO32:
-        accounts = Accounts(root_hash=accounts_hash, contact=contact)
+        accounts = Accounts(
+            root_hash=accounts_hash,
+            contact=contact,
+            block_hash=expr_id if expr_id != ZERO32 else None,
+        )
     return Block(
         chain_id=chain_id,
         previous_block_hash=previous_block_hash,
@@ -74,7 +75,6 @@ def create_block(
         bloom_hash=bloom_hash,
         previous_era_hash=previous_era_hash,
         signature=signature,
-        total_mint=total_mint,
         expr_id=expr_id,
         body_hash=body_hash,
         accounts=accounts,
@@ -83,7 +83,6 @@ def create_block(
         receipts_trie=receipts_trie,
         statistics=statistics,
         pending_exprs=pending_exprs,
-        pending_storage_contracts=pending_storage_contracts,
         global_loaned=global_loaned,
         global_defaulted=global_defaulted,
         global_loan_count=global_loan_count,

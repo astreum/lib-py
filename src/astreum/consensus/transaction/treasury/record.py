@@ -4,9 +4,12 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any, Optional
 
-from astreum.expression import Expr, NIL, resolve_list_exprs, link, int_, get_expr_tag, get_expr_value
+from astreum.expression import Expr, NIL, resolve_list_exprs, link, int_, bytes_, get_expr_tag, get_expr_value
 from astreum.expression import ZERO32
+from astreum.expression.refs import pointer_item
 from astreum.storage.exprs import get_expr_list
+from astreum.storage.pointers import read_field
+from astreum.storage.radix import get_from_radix_tree_with_block
 from astreum.consensus.constants import TREASURY_ADDRESS
 
 
@@ -19,6 +22,12 @@ U64_SIZE = 8
 class LoanType(IntEnum):
     SECURED = 0
     UNSECURED = 1
+
+
+def _root_item(root_hash: bytes, block: Optional[bytes]) -> Expr:
+    if root_hash == ZERO32:
+        return Expr("link", head_hash=ZERO32)
+    return pointer_item(root_hash, block)
 
 
 @dataclass
@@ -58,6 +67,10 @@ class TreasuryUserRecord:
     loaned: int = 0
     defaulted: int = 0
     guaranteed: int = 0
+    # The block whose record holds each trie root's cell, when it is older than
+    # the block writing this record: the root is written as a stored ref.
+    loans_root_block: Optional[bytes] = field(default=None, compare=False)
+    guarantees_root_block: Optional[bytes] = field(default=None, compare=False)
     _expr: Optional[Expr] = field(default=None, repr=False, compare=False)
 
     def to_expr(self) -> Expr:
@@ -73,9 +86,9 @@ class TreasuryUserRecord:
         detail: Expr = link(int_(self.guaranteed), NIL)
         detail = link(int_(self.defaulted), detail)
         detail = link(int_(self.loaned), detail)
-        detail = link(Expr("link", head_hash=self.guarantees_root_hash), detail)
+        detail = link(_root_item(self.guarantees_root_hash, self.guarantees_root_block), detail)
         detail = link(int_(self.total_interest_paid), detail)
-        detail = link(Expr("link", head_hash=self.loans_root_hash), detail)
+        detail = link(_root_item(self.loans_root_hash, self.loans_root_block), detail)
         detail = link(int_(self.balance), detail)
         return detail
 
@@ -93,7 +106,7 @@ class TreasuryUserRecord:
 
     @classmethod
     def from_storage(
-        cls, node: Any, head_hash: bytes, contact=None
+        cls, node: Any, head_hash: bytes, contact=None, block_hash=None
     ) -> TreasuryUserRecord | None:
         """Decode a `TreasuryUserRecord` from its stored `Expr` encoding.
 
@@ -101,6 +114,9 @@ class TreasuryUserRecord:
             node: Storage node used to resolve any hash-only sub-exprs.
             head_hash: The 32-byte hash of the record's `link`-list head, as
                 produced by `to_expr`/`expr`.
+            block_hash: The block whose record holds the record's cells; its
+                provider is asked for them, and a trie root held by a plain
+                hash is in it. A root written as a stored ref names its own.
 
         Returns:
             The decoded `TreasuryUserRecord`, or `None` if *head_hash* is
@@ -110,26 +126,35 @@ class TreasuryUserRecord:
         """
         if not head_hash or head_hash == ZERO32:
             return None
-        header = get_expr_list(node, head_hash, contact=contact)
+        scope = {} if block_hash is None else {"block_hash": block_hash}
+        header = get_expr_list(node, head_hash, contact=contact, **scope)
         if header is None or not header._tag == "link":
             return None
-        nodes, missed = resolve_list_exprs(node, header, contact=contact)
+        nodes, missed = resolve_list_exprs(node, header, contact=contact, **scope)
         if missed:
             return None
         if len(nodes) not in (4, 7):
             return None
         fields = []
-        for n in nodes:
-            tag = get_expr_tag(n, node, contact)
+        blocks: dict[int, Optional[bytes]] = {}
+        for i, n in enumerate(nodes):
+            if i in (1, 3):  # the loans and guarantees trie roots
+                root = read_field(node, n, block_hash, contact)
+                if root is None:
+                    return None
+                fields.append(root[0])
+                blocks[i] = root[1] if root[0] != ZERO32 else None
+                continue
+            tag = get_expr_tag(n, node, contact, block_hash)
             if tag == "int":
-                fields.append(get_expr_value(n, node, contact))
-            elif tag == "link" and (n._head_hash is not None or n.head is NIL):
-                fields.append(n._head_hash if n._head_hash is not None else ZERO32)
+                fields.append(get_expr_value(n, node, contact, block_hash))
             else:
                 return None
         if len(fields) not in (4, 7):
             return None
         return cls(
+            loans_root_block=blocks.get(1),
+            guarantees_root_block=blocks.get(3),
             balance=fields[0],
             loans_root_hash=fields[1],
             total_interest_paid=fields[2],
@@ -138,6 +163,28 @@ class TreasuryUserRecord:
             defaulted=fields[5] if len(fields) == 7 else 0,
             guaranteed=fields[6] if len(fields) == 7 else 0,
         )
+
+
+def load_from_tree(cls: Any, node: Any, tree: Any, key: bytes, contact=None):
+    """The record of type *cls* stored at *key* in *tree*, read from the block
+    that holds it; None if the key is absent or does not decode."""
+    head, block = get_from_radix_tree_with_block(tree, node, key)
+    return cls.from_storage(node, head or ZERO32, contact=contact, block_hash=block)
+
+
+def load_user_record(
+    node: Any, tree: Any, key: bytes, contact=None
+) -> TreasuryUserRecord | None:
+    """The `TreasuryUserRecord` stored at *key* in *tree* (the treasury
+    account's data trie), read from the block that holds it."""
+    return load_from_tree(TreasuryUserRecord, node, tree, key, contact)
+
+
+def load_loan_record(
+    node: Any, tree: Any, key: bytes, contact=None
+) -> TreasuryLoanRecord | None:
+    """The `TreasuryLoanRecord` stored at *key* in a loans trie."""
+    return load_from_tree(TreasuryLoanRecord, node, tree, key, contact)
 
 
 @dataclass(frozen=True)
@@ -151,10 +198,9 @@ def _claimed_guarantees_to_expr(claimed_guarantees: list[tuple[bytes, bytes, int
     """Encode a loan's claimed-guarantees list as a nested `Expr` link-list.
 
     Each entry is a 3-field sub-list: ``[guarantor_address,
-    guarantee_transaction_id, guarantee_amount]``, where the two 32-byte ids are stored as
-    bare hash-carrying `link` nodes (the same convention used for
-    `claimed_by`/`loans_root_hash` elsewhere in this module) and ``guarantee_amount``
-    is a plain int.
+    guarantee_transaction_id, guarantee_amount]``, where the two 32-byte ids are `bytes`
+    values (ids, not exprs a block record could follow, as are `owner` and
+    `claimed_by`) and ``guarantee_amount`` is a plain int.
 
     Args:
         claimed_guarantees: The `(guarantor_address, guarantee_transaction_id, guarantee_amount)`
@@ -169,15 +215,15 @@ def _claimed_guarantees_to_expr(claimed_guarantees: list[tuple[bytes, bytes, int
     result: Expr = NIL
     for guarantor, guarantee_transaction_id, guarantee_amount in reversed(claimed_guarantees):
         entry: Expr = link(
-            Expr("link", head_hash=guarantor),
-            link(Expr("link", head_hash=guarantee_transaction_id), link(int_(guarantee_amount), NIL)),
+            bytes_(guarantor),
+            link(bytes_(guarantee_transaction_id), link(int_(guarantee_amount), NIL)),
         )
         result = link(entry, result)
     return result
 
 
 def _claimed_guarantees_from_expr(
-    node: Any, claimed_guarantees_node: Expr, contact=None
+    node: Any, claimed_guarantees_node: Expr, contact=None, block_hash=None
 ) -> list[tuple[bytes, bytes, int]] | None:
     """Decode a claimed-guarantees `Expr` (as produced by `_claimed_guarantees_to_expr`).
 
@@ -192,26 +238,25 @@ def _claimed_guarantees_from_expr(
     """
     if claimed_guarantees_node is NIL:
         return []
-    entry_nodes, missed = resolve_list_exprs(node, claimed_guarantees_node, contact=contact)
+    scope = {} if block_hash is None else {"block_hash": block_hash}
+    entry_nodes, missed = resolve_list_exprs(node, claimed_guarantees_node, contact=contact, **scope)
     if missed:
         return None
     result: list[tuple[bytes, bytes, int]] = []
     for entry_node in entry_nodes:
-        sub_nodes, sub_missed = resolve_list_exprs(node, entry_node, contact=contact)
+        sub_nodes, sub_missed = resolve_list_exprs(node, entry_node, contact=contact, **scope)
         if sub_missed or len(sub_nodes) != 3:
             return None
         guarantor_node, guarantee_node, guarantee_amount_node = sub_nodes
-        if get_expr_tag(guarantor_node, node, contact) != "link" or guarantor_node._head_hash is None:
+        if guarantor_node._tag != "bytes" or guarantee_node._tag != "bytes":
             return None
-        if get_expr_tag(guarantee_node, node, contact) != "link" or guarantee_node._head_hash is None:
-            return None
-        if get_expr_tag(guarantee_amount_node, node, contact) != "int":
+        if get_expr_tag(guarantee_amount_node, node, contact, block_hash) != "int":
             return None
         result.append(
             (
-                guarantor_node._head_hash,
-                guarantee_node._head_hash,
-                get_expr_value(guarantee_amount_node, node, contact),
+                guarantor_node.value,
+                guarantee_node.value,
+                get_expr_value(guarantee_amount_node, node, contact, block_hash),
             )
         )
     return result
@@ -251,7 +296,7 @@ class TreasuryLoanRecord:
     def to_expr(self) -> Expr:
         if self._expr is not None:
             return self._expr
-        detail: Expr = link(Expr("link", head_hash=self.owner), NIL)
+        detail: Expr = link(bytes_(self.owner), NIL)
         detail = link(int_(self.missed_count), detail)
         detail = link(int_(self.insurance_fee), detail)
         detail = link(_claimed_guarantees_to_expr(self.claimed_guarantees), detail)
@@ -272,14 +317,15 @@ class TreasuryLoanRecord:
 
     @classmethod
     def from_storage(
-        cls, node: Any, head_hash: bytes, contact=None
+        cls, node: Any, head_hash: bytes, contact=None, block_hash=None
     ) -> TreasuryLoanRecord | None:
         if not head_hash or head_hash == ZERO32:
             return None
-        header = get_expr_list(node, head_hash, contact=contact)
+        scope = {} if block_hash is None else {"block_hash": block_hash}
+        header = get_expr_list(node, head_hash, contact=contact, **scope)
         if header is None or not header._tag == "link":
             return None
-        nodes, missed = resolve_list_exprs(node, header, contact=contact)
+        nodes, missed = resolve_list_exprs(node, header, contact=contact, **scope)
         if missed:
             return None
         if len(nodes) != 11:
@@ -291,18 +337,18 @@ class TreasuryLoanRecord:
         owner = TREASURY_ADDRESS
         for i, n in enumerate(nodes):
             if i == 7:
-                decoded = _claimed_guarantees_from_expr(node, n, contact)
+                decoded = _claimed_guarantees_from_expr(node, n, contact, block_hash)
                 if decoded is None:
                     return None
                 claimed_guarantees = decoded
                 continue
             if i == 10:
-                if get_expr_tag(n, node, contact) != "link" or n._head_hash is None:
+                if n._tag != "bytes":
                     return None
-                owner = n._head_hash
+                owner = n.value
                 continue
-            if get_expr_tag(n, node, contact) == "int":
-                int_fields.append(get_expr_value(n, node, contact))
+            if get_expr_tag(n, node, contact, block_hash) == "int":
+                int_fields.append(get_expr_value(n, node, contact, block_hash))
             else:
                 return None
         if len(int_fields) != 9:
@@ -332,8 +378,8 @@ class TreasuryLoanRecord:
 class TreasuryGuarantee:
     """A guarantor's posted, fixed-size, fixed-duration, fixed-price guarantee.
 
-    ``claimed_by`` is ``ZERO32`` while available (the same "unset hash"
-    convention used by ``TreasuryUserRecord.loans_root_hash``), or the
+    ``claimed_by`` is ``ZERO32`` while available (stored as a `bytes` value),
+    or the
     claimant's opaque 32-byte id once claimed. A claim is permanent — there
     is no way to reset ``claimed_by`` back to ``ZERO32``.
 
@@ -365,7 +411,7 @@ class TreasuryGuarantee:
         """
         if self._expr is not None:
             return self._expr
-        detail: Expr = link(Expr("link", head_hash=self.claimed_by), NIL)
+        detail: Expr = link(bytes_(self.claimed_by), NIL)
         detail = link(int_(self.expiry), detail)
         detail = link(int_(self.price), detail)
         detail = link(int_(self.duration), detail)
@@ -386,7 +432,7 @@ class TreasuryGuarantee:
 
     @classmethod
     def from_storage(
-        cls, node: Any, head_hash: bytes, contact=None
+        cls, node: Any, head_hash: bytes, contact=None, block_hash=None
     ) -> TreasuryGuarantee | None:
         """Decode a `TreasuryGuarantee` from its stored `Expr` encoding.
 
@@ -394,6 +440,7 @@ class TreasuryGuarantee:
             node: Storage node used to resolve any hash-only sub-exprs.
             head_hash: The 32-byte hash of the guarantee's `link`-list head, as
                 produced by `to_expr`/`expr`.
+            block_hash: The block whose record holds the guarantee's cells.
 
         Returns:
             The decoded `TreasuryGuarantee`, or `None` if *head_hash* is
@@ -402,21 +449,22 @@ class TreasuryGuarantee:
         """
         if not head_hash or head_hash == ZERO32:
             return None
-        header = get_expr_list(node, head_hash, contact=contact)
+        scope = {} if block_hash is None else {"block_hash": block_hash}
+        header = get_expr_list(node, head_hash, contact=contact, **scope)
         if header is None or not header._tag == "link":
             return None
-        nodes, missed = resolve_list_exprs(node, header, contact=contact)
+        nodes, missed = resolve_list_exprs(node, header, contact=contact, **scope)
         if missed:
             return None
         if len(nodes) != 5:
             return None
         fields = []
         for n in nodes:
-            tag = get_expr_tag(n, node, contact)
+            tag = get_expr_tag(n, node, contact, block_hash)
             if tag == "int":
-                fields.append(get_expr_value(n, node, contact))
-            elif tag == "link" and (n._head_hash is not None or n.head is NIL):
-                fields.append(n._head_hash if n._head_hash is not None else ZERO32)
+                fields.append(get_expr_value(n, node, contact, block_hash))
+            elif tag == "bytes":
+                fields.append(n.value)
             else:
                 return None
         if len(fields) != 5:

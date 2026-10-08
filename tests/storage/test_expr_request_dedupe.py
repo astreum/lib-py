@@ -13,7 +13,7 @@ for p in (str(ROOT), str(ROOT / "src")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from astreum.expression import RESOLUTION_SINGLE, RESOLUTION_RECORD
+from astreum.expression import RESOLUTION_SINGLE, RESOLUTION_FULL
 from astreum.storage import requests as reqs
 from astreum.storage.requests import (
     PendingExprRequest,
@@ -57,14 +57,14 @@ class TestRegistry(unittest.TestCase):
         node = _node()
         self.assertTrue(claim_expr_req(node, H1, RESOLUTION_SINGLE))
         self.assertFalse(claim_expr_req(node, H1, RESOLUTION_SINGLE))
-        self.assertFalse(claim_expr_req(node, H1, RESOLUTION_RECORD))
+        self.assertFalse(claim_expr_req(node, H1, RESOLUTION_FULL))
         self.assertEqual(get_expr_req_payload(node, H1), RESOLUTION_SINGLE)
 
-    def test_record_pending_blocks_single(self):
+    def test_full_pending_blocks_single(self):
         node = _node()
-        self.assertTrue(claim_expr_req(node, H1, RESOLUTION_RECORD))
+        self.assertTrue(claim_expr_req(node, H1, RESOLUTION_FULL))
         self.assertFalse(claim_expr_req(node, H1, RESOLUTION_SINGLE))
-        self.assertEqual(get_expr_req_payload(node, H1), RESOLUTION_RECORD)
+        self.assertEqual(get_expr_req_payload(node, H1), RESOLUTION_FULL)
 
     def test_expired_entry_is_dead_without_sweep(self):
         node = _node(ttl=4.0)
@@ -77,8 +77,8 @@ class TestRegistry(unittest.TestCase):
 
     def test_pop_returns_payload_and_none_when_expired(self):
         node = _node()
-        claim_expr_req(node, H1, RESOLUTION_RECORD)
-        self.assertEqual(pop_expr_req(node, H1), RESOLUTION_RECORD)
+        claim_expr_req(node, H1, RESOLUTION_FULL)
+        self.assertEqual(pop_expr_req(node, H1), RESOLUTION_FULL)
         self.assertFalse(has_expr_req(node, H1))
         claim_expr_req(node, H2, RESOLUTION_SINGLE)
         self.clock.now += 10
@@ -114,10 +114,10 @@ class TestRegistry(unittest.TestCase):
 
     def test_claim_creates_pending_request_object(self):
         node = _node(ttl=4.0)
-        claim_expr_req(node, H1, RESOLUTION_RECORD)
+        claim_expr_req(node, H1, RESOLUTION_FULL)
         req = node.expr_requests[H1]
         self.assertIsInstance(req, PendingExprRequest)
-        self.assertEqual(req.payload_type, RESOLUTION_RECORD)
+        self.assertEqual(req.payload_type, RESOLUTION_FULL)
         self.assertEqual(req.expires_at, self.clock.now + 4.0)
         self.assertIsNone(req.sender)
         self.assertIsNone(req.total)

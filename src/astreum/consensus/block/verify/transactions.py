@@ -10,6 +10,7 @@ from astreum.consensus.models.accounts import Accounts
 
 ZERO32 = b"\x00" * 32
 from astreum.consensus.models.receipt import Receipt
+from astreum.consensus.block.create import create_block
 from astreum.consensus.block.encoding.expr import get_block_expr
 from astreum.consensus.transaction import apply_transaction
 from astreum.consensus.transaction.storage.initial import (
@@ -19,6 +20,8 @@ from astreum.consensus.transaction.storage.initial import (
 from astreum.consensus.account import create_account
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.validation.validator import current_validator
+from astreum.crypto.bloom_search import ERA_SIZE
+from astreum.crypto.bloom_tree import BloomTree
 
 
 def _hex(value: Optional[bytes]) -> str:
@@ -56,7 +59,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
     def _load_hash_list(head: bytes) -> Optional[List[bytes]]:
         if head == ZERO32:
             return []
-        expr = get_expr_list(node, head, contact=block.contact)
+        expr = get_expr_list(node, head, contact=block.contact, block_hash=block.expr_id)
         if expr is None:
             node.logger.debug(
                 "Block verify missing list expr head=%s block=%s",
@@ -66,7 +69,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
             return None
         result = []
         current = expr
-        while current._tag == "link":
+        while current is not None and current._tag == "link":
             if current._head_hash is None:
                 node.logger.debug(
                     "Block verify list node missing head_hash head=%s block=%s",
@@ -126,7 +129,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
                 _hex(block.expr_id),
             )
             return False, "genesis missing accounts hash"
-        genesis_accounts = Accounts(root_hash=block.accounts_hash)
+        genesis_accounts = Accounts(root_hash=block.accounts_hash, block_hash=block.expr_id)
         treasury_account = genesis_accounts.get_account(TREASURY_ADDRESS, node)
         if treasury_account is None:
             node.logger.debug(
@@ -202,21 +205,53 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         )
         return False, "unscheduled validator"
 
-    work_block = type("_WorkBlock", (), {})()
-    work_block.chain_id = block.chain_id
-    work_block.contact = block.contact
-    work_block.previous_block_hash = block.previous_block_hash
-    work_block.previous_block = prev_block
-    work_block.height = block.height
-    work_block.accounts = accounts_snapshot
+    # The block the transactions are applied to is a real Block, as the
+    # creator's is: the machine snapshots and restores it.
+    work_block = create_block(
+        chain_id=block.chain_id,
+        previous_block_hash=block.previous_block_hash,
+        previous_block=prev_block,
+        height=block.height,
+        timestamp=block.timestamp,
+        accounts_hash=prev_block.accounts_hash,
+        bloom_hash=prev_block.bloom_hash,
+        total_transaction_fee=0,
+        total_storage_fee=0,
+        transactions_hash=None,
+        receipts_hash=None,
+        difficulty=block.difficulty,
+        validator_public_key_bytes=block.validator_public_key_bytes,
+        nonce=0,
+        signature=None,
+        accounts=accounts_snapshot,
+        transactions=[],
+        receipts=[],
+        global_loaned=getattr(prev_block, "global_loaned", 0) or 0,
+        global_defaulted=getattr(prev_block, "global_defaulted", 0) or 0,
+        global_loan_count=getattr(prev_block, "global_loan_count", 0) or 0,
+        contact=block.contact,
+        expr_id=block.expr_id,
+    )
     work_block.transactions = []
     work_block.receipts = []
     work_block.receipts_trie = None
-    work_block.total_mint = 0
     work_block.pending_exprs = []
-    work_block.global_loaned = getattr(prev_block, "global_loaned", 0) or 0
-    work_block.global_defaulted = getattr(prev_block, "global_defaulted", 0) or 0
-    work_block.global_loan_count = getattr(prev_block, "global_loan_count", 0) or 0
+
+    # The era's bloom tree, built as the creator builds it: the previous
+    # block's tree (its nodes are in that block's record), or a new tree at
+    # the first block of an era.
+    if block.height % ERA_SIZE == 0:
+        work_block.bloom_tree = BloomTree()
+    else:
+        work_block.bloom_tree = BloomTree(
+            prev_block.bloom_hash,
+            node,
+            contact=block.contact,
+            block_hash=prev_block.expr_id,
+        )
+        work_block.bloom_tree.set_leaf_start_hash(
+            prev_block.height % ERA_SIZE, prev_block.expr_id, node
+        )
 
     # Pre-commit previous block expr to storage data (replicating block builder)
     storage_account = work_block.accounts.get_account(STORAGE_ADDRESS, node)
@@ -226,7 +261,6 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
                 node,
                 work_block,
                 get_block_expr(prev_block),
-                mint=True,
                 follow_refs=True,
             )
         except UnresolvedRecordExpr as exc:
@@ -237,16 +271,15 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
             )
             return False, "failed building parent block record"
         if result is not None:
-            record, slot_map, _, _ = result
+            record, _, _, _ = result
             put_in_radix_tree(storage_account.data, node, prev_block.expr_id, record.expr())
-            storage_account.data_hash = storage_account.data.root_hash
-            for h, slot in slot_map.items():
-                put_in_radix_tree(storage_account.data, node, h, slot.expr())
             storage_account.data_hash = storage_account.data.root_hash
 
     # The tx hashes are all known now: fetch the missing tx trees in one batch
     # instead of one request per transaction.
-    prefetch_exprs_from_network(node, tx_hashes, RESOLUTION_FULL, contact=block.contact)
+    prefetch_exprs_from_network(
+        node, tx_hashes, RESOLUTION_FULL, contact=block.contact, block_hash=block.expr_id
+    )
     for tx_hash in tx_hashes:
         apply_transaction(node, work_block, tx_hash)
 
@@ -271,13 +304,11 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         validator_account.balance += reward_amount
         work_block.accounts.set_account(validator_key, validator_account)
 
-    # Set start_hash on the previous era leaf and verify bloom hash
-    era_offset = block.height % 1024
-    if era_offset > 0 and prev_block is not None and block.bloom_tree is not None:
-        block.bloom_tree.set_leaf_start_hash(era_offset - 1, prev_block.expr_id)
+    # The bloom tree the transactions built must be the one the header names.
+    work_block.bloom_tree.rewrite_root()
     expected_bloom = (
-        block.bloom_tree.root.expr().hash()
-        if block.bloom_tree is not None and block.bloom_tree.root
+        work_block.bloom_tree.root.expr().hash()
+        if work_block.bloom_tree.root
         else ZERO32
     )
     if block.bloom_hash != expected_bloom:
@@ -379,7 +410,9 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         )
         return False, "receipts head mismatch"
 
-    stored_receipts_trie = RadixTree(root_hash=block.receipts_hash, contact=block.contact)
+    stored_receipts_trie = RadixTree(
+        root_hash=block.receipts_hash, contact=block.contact, root_block=block.expr_id
+    )
     for expected in expected_receipts:
         stored_expr = get_from_radix_tree(stored_receipts_trie, node, expected.transaction_hash)
         if stored_expr is None:
@@ -390,7 +423,9 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
             )
             return False, f"receipt not found in trie tx={_hex(expected.transaction_hash)}"
         try:
-            stored = Receipt.from_storage(node, stored_expr.hash(), contact=block.contact)
+            stored = Receipt.from_storage(
+                node, stored_expr.hash(), contact=block.contact, block_hash=block.expr_id
+            )
         except Exception as exc:
             node.logger.debug(
                 "Block verify failed loading receipt block=%s tx=%s error=%s",
@@ -463,7 +498,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         return False, "missing treasury account"
     treasury_balance = treasury_account.balance or 0
 
-    delta_fee = total_transaction_fee + total_storage_fee + (getattr(work_block, "total_mint", 0) or 0)
+    delta_fee = total_transaction_fee + total_storage_fee
     delta_stake = treasury_balance
     expected_statistics = update_statistics(
         block.height,

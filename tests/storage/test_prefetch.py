@@ -8,7 +8,6 @@ sys.path.insert(0, "src")
 
 from astreum.expression import (
     RESOLUTION_FULL,
-    RESOLUTION_RECORD,
     RESOLUTION_SINGLE,
     ZERO32,
     int_,
@@ -95,6 +94,26 @@ class TestBloomSearchPrefetch(unittest.TestCase):
         self.assertEqual(len(txs), 2)
 
 
+    def test_block_txs_are_asked_from_the_blocks_provider(self):
+        from astreum.crypto.bloom_search import search
+
+        tx_list = link(None, NIL)
+        tx_list._head_hash = H[0]
+        block = SimpleNamespace(transactions_hash=b"\x09" * 32, expr_id=b"\xb7" * 32)
+        calls = {}
+
+        with patch.object(search, "get_expr_list",
+                          side_effect=lambda n, h, **kw: calls.setdefault("list", kw) and tx_list), \
+             patch.object(search, "prefetch_exprs_from_network",
+                          side_effect=lambda n, hashes, res, **kw: calls.setdefault("prefetch", kw)), \
+             patch("astreum.consensus.transaction.from_storage.get_transaction_from_storage",
+                   side_effect=lambda n, h, **kw: calls.setdefault("tx", kw) and SimpleNamespace(hash=h)):
+            search._load_block_txs(_node(), block)
+
+        scope = {"block_hash": b"\xb7" * 32}
+        self.assertEqual(calls, {"list": scope, "prefetch": scope, "tx": scope})
+
+
 class TestValidatorPrefetch(unittest.TestCase):
     def test_stake_records_are_prefetched_before_decoding(self):
         from astreum.consensus.validation import validator
@@ -106,7 +125,11 @@ class TestValidatorPrefetch(unittest.TestCase):
 
         with patch.object(validator, "get_block_from_storage", return_value=block), \
              patch.object(validator, "Accounts", return_value=accounts), \
-             patch.object(validator, "get_all_from_radix_tree", return_value=records), \
+             patch.object(
+                 validator,
+                 "get_all_from_radix_tree_with_blocks",
+                 return_value={k: (v, None) for k, v in records.items()},
+             ), \
              patch.object(validator, "prefetch_exprs_from_network", side_effect=_Stop) as prefetch:
             with self.assertRaises(_Stop):
                 validator.current_validator(_node(), b"\x02" * 32)
@@ -115,79 +138,36 @@ class TestValidatorPrefetch(unittest.TestCase):
         self.assertEqual(hashes, [e.hash() for e in records.values()])
         self.assertEqual(resolution, RESOLUTION_FULL)
 
+    def test_stake_records_are_prefetched_per_block(self):
+        from astreum.consensus.validation import validator
 
-class TestPaymentPrefetch(unittest.TestCase):
-    """_prefetch_claim_records only fetches for claims the verify loop would process."""
+        block_a, block_b = b"\xa1" * 32, b"\xb2" * 32
+        entries = {
+            b"A" * 32: (int_(1), block_a),
+            b"B" * 32: (int_(2), block_b),
+            b"C" * 32: (int_(3), block_a),
+        }
+        treasury = SimpleNamespace(data=SimpleNamespace(contact=None))
+        accounts = SimpleNamespace(get_account=lambda address, node: treasury)
+        block = SimpleNamespace(timestamp=10, accounts_hash=b"\x01" * 32)
+        calls = []
 
-    def _run(self, *, record_ok=True, slot=None, local=None, claims=None, record=None):
-        from astreum.consensus.transaction.storage import payment
+        def record(node, hashes, resolution, **kw):
+            calls.append((hashes, kw.get("block_hash")))
+            if len(calls) == 2:
+                raise _Stop
 
-        storage_id, slot_id = b"\x01" * 32, b"\x02" * 32
-        record = record or SimpleNamespace(last_payment_block_hash=b"\x03" * 32, new_count=4)
-        claims = claims if claims is not None else [(storage_id, slot_id, 0)]
+        with patch.object(validator, "get_block_from_storage", return_value=block), \
+             patch.object(validator, "Accounts", return_value=accounts), \
+             patch.object(validator, "get_all_from_radix_tree_with_blocks", return_value=entries), \
+             patch.object(validator, "prefetch_exprs_from_network", side_effect=record):
+            with self.assertRaises(_Stop):
+                validator.current_validator(_node(), b"\x02" * 32)
 
-        from blake3 import blake3
-        seed = blake3(record.last_payment_block_hash + storage_id).digest()
-        challenge = int.from_bytes(seed[:8], "little") % record.new_count
-        slot = (storage_id, challenge) if slot is None else slot
-
-        with patch.object(payment, "get_from_radix_tree",
-                          side_effect=lambda tree, n, k: SimpleNamespace(hash=lambda: k)), \
-             patch.object(payment.StorageRecord, "from_storage",
-                          return_value=record if record_ok else None), \
-             patch("astreum.storage.records.parse_slot", return_value=slot), \
-             patch("astreum.storage.exprs.get_expr_from_local_storage", return_value=local), \
-             patch("astreum.storage.exprs.get_exprs_from_network") as fetch:
-            payment._prefetch_claim_records(_node(), SimpleNamespace(data=SimpleNamespace(contact=None)), claims)
-        return fetch
-
-    def test_fetches_record_when_slot_data_is_missing(self):
-        fetch = self._run()
-        fetch.assert_called_once()
-        self.assertEqual(fetch.call_args.args[1], [(b"\x01" * 32, RESOLUTION_RECORD)])
-
-    def test_slot_data_already_local_sends_nothing(self):
-        self._run(local=int_(1)).assert_not_called()
-
-    def test_missing_record_sends_nothing(self):
-        self._run(record_ok=False).assert_not_called()
-
-    def test_slot_for_another_record_sends_nothing(self):
-        self._run(slot=(b"\x09" * 32, 0)).assert_not_called()
-
-    def test_wrong_challenge_index_sends_nothing(self):
-        self._run(slot=(b"\x01" * 32, 99)).assert_not_called()
-
-    def test_bad_payment_block_hash_sends_nothing(self):
-        record = SimpleNamespace(last_payment_block_hash=b"short", new_count=4)
-        self._run(record=record).assert_not_called()
-
-    def test_zero_count_record_is_ignored_not_raised(self):
-        record = SimpleNamespace(last_payment_block_hash=b"\x03" * 32, new_count=0)
-        from astreum.consensus.transaction.storage import payment
-        with patch.object(payment, "get_from_radix_tree",
-                          side_effect=lambda t, n, k: SimpleNamespace(hash=lambda: k)), \
-             patch.object(payment.StorageRecord, "from_storage", return_value=record), \
-             patch("astreum.storage.exprs.get_exprs_from_network") as fetch:
-            payment._prefetch_claim_records(
-                _node(), SimpleNamespace(data=SimpleNamespace(contact=None)), [(b"\x01" * 32, b"\x02" * 32, 0)]
-            )
-        fetch.assert_not_called()
-
-    def test_many_claims_go_out_in_one_call(self):
-        claims = [(bytes([i]) * 32, b"\x02" * 32, 0) for i in (1, 2, 3)]
-        from astreum.consensus.transaction.storage import payment
-        record = SimpleNamespace(last_payment_block_hash=b"\x03" * 32, new_count=1)
-        with patch.object(payment, "get_from_radix_tree",
-                          side_effect=lambda t, n, k: SimpleNamespace(hash=lambda: k)), \
-             patch.object(payment.StorageRecord, "from_storage", return_value=record), \
-             patch("astreum.storage.records.parse_slot",
-                   side_effect=[(claims[0][0], 0), (claims[1][0], 0), (claims[2][0], 0)]), \
-             patch("astreum.storage.exprs.get_expr_from_local_storage", return_value=None), \
-             patch("astreum.storage.exprs.get_exprs_from_network") as fetch:
-            payment._prefetch_claim_records(_node(), SimpleNamespace(data=SimpleNamespace(contact=None)), claims)
-        fetch.assert_called_once()
-        self.assertEqual([e[0] for e in fetch.call_args.args[1]], [c[0] for c in claims])
+        self.assertEqual(
+            calls,
+            [([int_(1).hash(), int_(3).hash()], block_a), ([int_(2).hash()], block_b)],
+        )
 
 
 if __name__ == "__main__":

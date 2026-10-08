@@ -20,7 +20,6 @@ class Machine():
         self.tx: Optional[object] = None
         self.block: Optional[object] = None
         self.logs: list[Expr] = []
-        self.log_contract_entries: list = []
         self.library: Dict[bytes, Env] = {}
 
     def snapshot_env(self, env: Env) -> bytes:

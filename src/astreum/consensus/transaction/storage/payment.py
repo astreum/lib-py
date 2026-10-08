@@ -4,17 +4,22 @@ from typing import Any
 
 from blake3 import blake3
 
-from astreum.expression import Expr, resolve_inner_exprs, resolve_list_exprs, int_, bytes_, link
+from astreum.expression import Expr, get_expr_tag, get_expr_value, resolve_list_exprs, int_, bytes_, link
 from astreum.expression.expr import _encode_int
-from astreum.expression.encoding import encode_expr_to_bytes
+from astreum.expression.encoding import decode_expr_from_bytes
 from astreum.expression import ZERO32, NIL
-from astreum.storage.radix import get_from_radix_tree, put_in_radix_tree
+from astreum.storage.radix import get_from_radix_tree_with_block, put_in_radix_tree
 from astreum.consensus.transaction.model import Transaction
+from astreum.consensus.transaction.storage.initial import block_scope
 from astreum.consensus.transaction.storage.model import StorageRecord
 from astreum.crypto.bloom_search import ERA_SIZE
+from astreum.crypto.merkle import MerkleTree, verify_merkle_tree_proof
 
 # Fib(13) = 233, largest fib <= 256-bit hash size
 _N = 13
+
+# A proof has one sibling per tree level; 64 levels cover 2**64 slots.
+MAX_PROOF_LEN = 64
 
 
 def _fib(n: int) -> int:
@@ -48,171 +53,140 @@ def _required_bits(*, sender: bytes, last_payment_winner: bytes,
     return base_bits + penalty
 
 
-def _parse_claim(claim_expr: Expr) -> tuple[bytes, bytes, int] | None:
+Claim = tuple[bytes, bytes, list[bytes], int]
+
+
+def _is_nil(e: Expr | None) -> bool:
+    return e is None or e is NIL or (
+        e._tag == "link" and e._head is None and e._tail is None
+        and e._head_hash in (None, ZERO32) and e._tail_hash in (None, ZERO32)
+    )
+
+
+def _list_items(e: Expr | None, limit: int) -> list[Expr] | None:
+    """Items of a loaded link list, or None if it is not one (or is longer than *limit*)."""
+    items: list[Expr] = []
+    while not _is_nil(e):
+        if e._tag != "link" or e._head is None:
+            return None
+        items.append(e._head)
+        if len(items) > limit:
+            return None
+        e = e._tail
+    return items
+
+
+def _parse_claim(
+    claim_expr: Expr, node: Any = None, contact=None, block_hash=None
+) -> Claim | None:
     """Parse a single claim from its Expr representation.
 
-    Claim format: Link(Bytes(storage_id), Link(Bytes(slot_id), Link(Int(nonce), NIL)))
+    Claim format::
+
+        Link(Bytes(storage_id),
+          Link(Bytes(slot_expr_bytes),
+            Link(<proof: list of Bytes(sibling hash), leaf to root>,
+              Link(Int(nonce), NIL))))
+
+    The proof carries no index: the challenge fixes it. Returns
+    ``(storage_id, slot_expr_bytes, proof, nonce)``.
     """
-    if not claim_expr._tag == "link":
+    items = _list_items(claim_expr, 4)
+    if items is None or len(items) != 4:
         return None
-    head = claim_expr._head
-    tail = claim_expr._tail
-    if not head._tag == "bytes" or not tail._tag == "link":
+    storage_id_e, slot_e, proof_e, nonce_e = items
+    if storage_id_e._tag != "bytes" or slot_e._tag != "bytes":
         return None
-    storage_id = head.value
-    head2 = tail._head
-    tail2 = tail._tail
-    if not head2._tag == "bytes" or not tail2._tag == "link":
+    try:
+        # A fetched int holds its payload by hash.
+        if get_expr_tag(nonce_e, node, contact, block_hash) != "int":
+            return None
+        nonce = get_expr_value(nonce_e, node, contact, block_hash)
+    except ValueError:
         return None
-    slot_id = head2.value
-    head3 = tail2._head
-    tail3 = tail2._tail
-    if not head3._tag == "int" or tail3 is not NIL:
+    proof_items = _list_items(proof_e, MAX_PROOF_LEN)
+    if proof_items is None or any(i._tag != "bytes" for i in proof_items):
         return None
-    nonce = head3.value
-    return storage_id, slot_id, nonce
+    proof = [i.value for i in proof_items]
+    return storage_id_e.value, slot_e.value, proof, nonce
 
 
-def _verify_single_claim(
+def challenge_index(last_payment_block_hash: bytes, storage_id: bytes, new_count: int) -> int:
+    """Index of the slot a record is challenged on."""
+    seed = blake3(last_payment_block_hash + storage_id).digest()
+    return int.from_bytes(seed[:8], "little", signed=False) % new_count
+
+
+def _check_claim(
     node: Any,
     block: object,
     transaction: Transaction,
     storage_account: Any,
-    claim: tuple[bytes, bytes, int],
-) -> bool:
-    """Verify and pay out a single storage claim. Returns True on success."""
-    storage_id, slot_id, nonce = claim
+    claim: Claim,
+) -> tuple[StorageRecord, int] | None:
+    """Verify one claim against its record. Returns ``(record, payout)`` or None.
 
-    # 1. Fetch StorageRecord from storage trie
-    contract_head = get_from_radix_tree(storage_account.data, node, storage_id)
-    if not contract_head or contract_head == ZERO32:
-        return False
+    Fetches nothing but the record: the claim carries the challenged slot and
+    its proof, and the record carries the root they are checked against.
+    """
+    storage_id, slot_bytes, proof, nonce = claim
+
+    # 1. The record, from the storage trie
+    record_head, record_block = get_from_radix_tree_with_block(
+        storage_account.data, node, storage_id
+    )
+    if not record_head or record_head == ZERO32:
+        return None
     record = StorageRecord.from_storage(
-        node, contract_head.hash(), contact=block.contact
+        node, record_head.hash(), contact=block.contact, block_hash=record_block
     )
     if record is None:
-        return False
+        return None
 
     last_payment_block_hash = record.last_payment_block_hash
     if len(last_payment_block_hash) != 32:
-        return False
+        return None
+    if record.new_count <= 0 or len(record.slots_root) != 32:
+        return None
 
-    # 2. Derive challenge index
-    challenge_seed = blake3(last_payment_block_hash + storage_id).digest()
-    challenge_index = (
-        int.from_bytes(challenge_seed[:8], "little", signed=False) % record.new_count
-    )
+    # 2. The challenged slot is in the record: its proof reaches slots_root at
+    #    the index the challenge fixes
+    index = challenge_index(last_payment_block_hash, storage_id, record.new_count)
+    try:
+        slot_id = decode_expr_from_bytes(slot_bytes).hash()
+    except Exception:
+        return None
+    tree = MerkleTree(root=record.slots_root, count=record.new_count)
+    if not verify_merkle_tree_proof(tree, index, slot_id, proof):
+        return None
 
-    # 3. Fetch StorageSlot from storage trie, verify it belongs to this record
-    from astreum.storage.records import parse_slot
-
-    parsed = parse_slot(
-        node,
-        get_from_radix_tree(storage_account.data, node, slot_id),
-        contact=block.contact,
-    )
-    if parsed is None:
-        return False
-    parsed_storage_id, parsed_sequence = parsed
-    if parsed_storage_id != storage_id:
-        return False
-    if parsed_sequence != challenge_index:
-        return False
-
-    # 4. Fetch the slot data expr from local storage; pull the record if absent
-    from astreum.storage.exprs import (
-        get_expr_from_local_storage,
-        get_expr_from_network,
-    )
-    from astreum.expression import RESOLUTION_RECORD
-
-    data_expr = get_expr_from_local_storage(node, slot_id)
-    if data_expr is None:
-        get_expr_from_network(node, storage_id, RESOLUTION_RECORD)
-        data_expr = get_expr_from_local_storage(node, slot_id)
-    if data_expr is None:
-        return False
-
-    fetched_data_bytes = encode_expr_to_bytes(data_expr)
-
-    # 5. Compute work hash
-    nonce_encoded = _encode_int(nonce)
+    # 3. Proof of work over the slot's bytes
     sender_bytes = transaction.sender
     work_hash = blake3(
         last_payment_block_hash
         + sender_bytes
         + storage_id
         + slot_id
-        + fetched_data_bytes
-        + nonce_encoded
+        + slot_bytes
+        + _encode_int(nonce)
     ).digest()
-
-    base_bits = 0  # storage payment uses pure PoW; no XOR-distance base
     required_bits = _required_bits(
         sender=sender_bytes,
         last_payment_winner=record.last_payment_winner,
         block_height=block.height,
         last_payment_height=record.last_payment_height,
-        base_bits=base_bits,
+        base_bits=0,  # storage payment uses pure PoW; no XOR-distance base
     )
-
     if _leading_zero_bits(work_hash) < required_bits:
-        return False
+        return None
 
-    # 6. Payout
-    total_bytes = record.new_size
-    if total_bytes <= 0:
-        return False
-    if block.height <= record.last_payment_height:
-        return False
-    payout = total_bytes * (block.height - record.last_payment_height)
+    # 4. Payout
+    if record.new_size <= 0 or block.height <= record.last_payment_height:
+        return None
+    payout = record.new_size * (block.height - record.last_payment_height)
     if payout <= 0:
-        return False
-
-    # Must update outside the per-claim loop (partial success).
-    # We mutate storage_account on the last successful claim.
-    # For now, apply inline and track updated records at the caller level.
-    return True
-
-
-def _prefetch_claim_records(node: Any, storage_account: Any, parsed_claims) -> None:
-    """Fetch, as one batch, the records whose challenged slot data this node lacks.
-
-    Runs the verify loop's cheap checks first (record exists, slot belongs to
-    the record and is the challenged one), so a claim the loop would skip never
-    causes a network request. Optimisation only: failures are ignored and the
-    loop fetches whatever is still missing.
-    """
-    from astreum.expression import RESOLUTION_RECORD
-    from astreum.storage.exprs import get_expr_from_local_storage, get_exprs_from_network
-    from astreum.storage.records import parse_slot
-
-    try:
-        wanted: list[tuple[bytes, int]] = []
-        for storage_id, slot_id, _nonce in parsed_claims:
-            contract_head = get_from_radix_tree(storage_account.data, node, storage_id)
-            if not contract_head or contract_head == ZERO32:
-                continue
-            record = StorageRecord.from_storage(
-                node, contract_head.hash(), contact=storage_account.data.contact
-            )
-            if record is None or len(record.last_payment_block_hash) != 32:
-                continue
-            seed = blake3(record.last_payment_block_hash + storage_id).digest()
-            challenge_index = int.from_bytes(seed[:8], "little", signed=False) % record.new_count
-            parsed = parse_slot(
-                node,
-                get_from_radix_tree(storage_account.data, node, slot_id),
-                contact=storage_account.data.contact,
-            )
-            if parsed != (storage_id, challenge_index):
-                continue
-            if get_expr_from_local_storage(node, slot_id) is None:
-                wanted.append((storage_id, RESOLUTION_RECORD))
-        if wanted:
-            get_exprs_from_network(node, wanted)
-    except Exception:
-        pass
+        return None
+    return record, payout
 
 
 def handle_storage_payment_contract(
@@ -223,7 +197,7 @@ def handle_storage_payment_contract(
     sender_account: Any,
     storage_account: Any,
     payload: Expr,
-) -> tuple[bool, int]:
+) -> bool:
     """Handle a storage-payment contract transaction.
 
     ``payload`` is the transaction's ``data`` field, which is an Expr
@@ -231,143 +205,52 @@ def handle_storage_payment_contract(
 
     Multi-claim: each claim is verified independently.  Invalid claims are
     silently skipped.  The transaction succeeds if at least one claim is valid.
-    The record is updated only for the last valid claim (all share the same
-    ``storage_id`` per the plan — or we could support multiple records
-    by tracking the last update per record key).
+    A valid claim pays the sender and rewrites its record at once, so a second
+    claim on the same record in the same transaction no longer pays.
 
-    Returns (any_valid, total_minted) where total_minted is the sum of payouts
-    for claims where record.mint is True.
+    Returns True if at least one claim was valid.
     """
     try:
         # Resolve the link list of claims
-        claims_nodes, missed = resolve_list_exprs(node, payload, contact=block.contact)
+        claims_nodes, missed = resolve_list_exprs(
+            node, payload, contact=block.contact, block_hash=block_scope(block)
+        )
         if missed:
-            return (False, 0)
+            return False
 
-        # Parse each claim
-        parsed_claims: list[tuple[bytes, bytes, int]] = []
+        parsed_claims: list[Claim] = []
         for claim_node in claims_nodes:
-            parsed = _parse_claim(claim_node)
+            parsed = _parse_claim(claim_node, node, block.contact, block_scope(block))
             if parsed is not None:
                 parsed_claims.append(parsed)
 
         if not parsed_claims:
-            return (False, 0)
+            return False
 
-        _prefetch_claim_records(node, storage_account, parsed_claims)
-
-        # Verify each claim; collect the last valid record update data
-        last_valid_record: StorageRecord | None = None
-        last_valid_storage_id: bytes | None = None
         any_valid = False
-        minted_sum = 0
-
-        for storage_id, slot_id, nonce in parsed_claims:
-            # Fetch StorageRecord
-            contract_head = get_from_radix_tree(storage_account.data, node, storage_id)
-            if not contract_head or contract_head == ZERO32:
+        for claim in parsed_claims:
+            checked = _check_claim(node, block, transaction, storage_account, claim)
+            if checked is None:
                 continue
-            record = StorageRecord.from_storage(
-                node, contract_head.hash(), contact=block.contact
-            )
-            if record is None:
-                continue
-
-            last_payment_block_hash = record.last_payment_block_hash
-            if len(last_payment_block_hash) != 32:
-                continue
-
-            # Derive challenge index
-            challenge_seed = blake3(last_payment_block_hash + storage_id).digest()
-            challenge_index = (
-                int.from_bytes(challenge_seed[:8], "little", signed=False) % record.new_count
-            )
-
-            # Fetch StorageSlot, verify it belongs to this record
-            from astreum.storage.records import parse_slot
-
-            parsed = parse_slot(
-                node,
-                get_from_radix_tree(storage_account.data, node, slot_id),
-                contact=block.contact,
-            )
-            if parsed is None:
-                continue
-            parsed_storage_id, parsed_sequence = parsed
-            if parsed_storage_id != storage_id:
-                continue
-            if parsed_sequence != challenge_index:
-                continue
-
-            # Fetch the slot data expr; pull the record if not local
-            from astreum.storage.exprs import (
-                get_expr_from_local_storage,
-                get_expr_from_network,
-            )
-            from astreum.expression import RESOLUTION_RECORD
-
-            data_expr = get_expr_from_local_storage(node, slot_id)
-            if data_expr is None:
-                get_expr_from_network(node, storage_id, RESOLUTION_RECORD)
-                data_expr = get_expr_from_local_storage(node, slot_id)
-            if data_expr is None:
-                continue
-
-            fetched_data_bytes = encode_expr_to_bytes(data_expr)
-            nonce_encoded = _encode_int(nonce)
-            sender_bytes = transaction.sender
-            work_hash = blake3(
-                last_payment_block_hash
-                + sender_bytes
-                + storage_id
-                + slot_id
-                + fetched_data_bytes
-                + nonce_encoded
-            ).digest()
-
-            required_bits = _required_bits(
-                sender=sender_bytes,
-                last_payment_winner=record.last_payment_winner,
-                block_height=block.height,
-                last_payment_height=record.last_payment_height,
-                base_bits=0,
-            )
-            if _leading_zero_bits(work_hash) < required_bits:
-                continue
-
-            total_bytes = record.new_size
-            if total_bytes <= 0:
-                continue
-            if block.height <= record.last_payment_height:
-                continue
-            payout = total_bytes * (block.height - record.last_payment_height)
-            if payout <= 0:
-                continue
+            record, payout = checked
+            storage_id = claim[0]
 
             sender_account.balance += payout
-            minted_sum += payout if record.mint else 0
 
-            last_valid_record = StorageRecord(
+            updated = StorageRecord(
                 creation_block_hash=record.creation_block_hash,
                 last_payment_block_hash=block.previous_block_hash,
                 last_payment_height=block.height,
-                last_payment_winner=sender_bytes,
+                last_payment_winner=transaction.sender,
                 new_size=record.new_size,
                 new_count=record.new_count,
+                slots_root=record.slots_root,
             )
-            last_valid_storage_id = storage_id
+            put_in_radix_tree(storage_account.data, node, storage_id, updated.expr())
+            storage_account.data_hash = storage_account.data.root_hash
+            block.pending_exprs.extend(updated.cells())
             any_valid = True
 
-        if not any_valid:
-            return (False, 0)
-
-        # Update the storage trie for the last valid record
-        updated_record_head = last_valid_record.expr().hash()
-        put_in_radix_tree(storage_account.data, node, last_valid_storage_id, updated_record_head)
-        storage_account.data_hash = storage_account.data.root_hash
-
-        inner_exprs, _ = resolve_inner_exprs(node, last_valid_record.expr())
-        block.pending_exprs.extend(inner_exprs)
-        return (True, minted_sum)
+        return any_valid
     except Exception:
-        return (False, 0)
+        return False

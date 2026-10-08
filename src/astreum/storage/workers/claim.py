@@ -9,9 +9,16 @@ from astreum.consensus.block.rate import calculate_storage_fee
 from astreum.consensus.transaction import create_transaction
 from astreum.consensus.transaction.code import TransactionCode
 from astreum.consensus.transaction.storage.model import StorageRecord
-from astreum.consensus.transaction.storage.payment import _leading_zero_bits, _required_bits
+from astreum.consensus.transaction.storage.initial import _single_cell
+from astreum.consensus.transaction.storage.payment import (
+    _leading_zero_bits,
+    _required_bits,
+    challenge_index as _challenge_index,
+)
+from astreum.crypto.merkle import create_merkle_tree, generate_merkle_tree_proof
 from astreum.crypto.bloom_search import ERA_SIZE
 from astreum.expression import Expr, NIL, int_, bytes_, link, ZERO32
+from astreum.expression.helpers import bytes_list_to_expr
 from astreum.expression.encoding import encode_expr_to_bytes
 from astreum.expression.expr import _encode_int
 from astreum.storage.exprs import get_expr_from_local_storage
@@ -22,16 +29,25 @@ if TYPE_CHECKING:
     from astreum.node import Node
 
 
+# A claim: (storage_id, slot_expr_bytes, proof, nonce).
+Claim = tuple[bytes, bytes, list[bytes], int]
+
+# A claim tx is cut at about this many bytes, well under one STORAGE_FOUND page
+# (PAGE_ENTRY_BUDGET), so a peer can fetch it in one response.
+MAX_CLAIM_TX_BYTES = 60_000
+
+
 def _compute_pow_and_challenge(
     node: Node,
     storage_id: bytes,
     record: StorageRecord,
-) -> tuple[bytes, bytes, int] | None:
+) -> Claim | None:
     """Compute a PoW claim for the given record.
 
-    The challenged slot's data id is resolved from the record's value blob in
-    the records table (byte offset = sequence).  Returns
-    (storage_id, slot_id, nonce) or None if unavailable.
+    The challenged slot's id is read from the record's slot list in the records
+    table (byte offset = index * 32); the tree over that list is built in
+    memory and gives the slot's proof against ``record.slots_root``. Returns
+    ``(storage_id, slot_expr_bytes, proof, nonce)`` or None if unavailable.
     """
     last_payment_block_hash = record.last_payment_block_hash
     if len(last_payment_block_hash) != 32:
@@ -39,29 +55,24 @@ def _compute_pow_and_challenge(
     if record.new_count <= 0:
         return None
 
-    # Determine which slot to challenge
-    challenge_seed = blake3(last_payment_block_hash + storage_id).digest()
-    challenge_index = (
-        int.from_bytes(challenge_seed[:8], "little", signed=False) % record.new_count
-    )
+    challenge_index = _challenge_index(last_payment_block_hash, storage_id, record.new_count)
 
-    # Resolve the challenged slot from the records table value blob
+    # The slot list from the records table
     value = get_record_from_cold_storage(node, storage_id)
-    if value is None:
+    if value is None or len(value) != record.new_count * 32:
         return None
-    offset = challenge_index * 32
-    if offset + 32 > len(value):
+    slot_ids = [value[i : i + 32] for i in range(0, len(value), 32)]
+    tree = create_merkle_tree(slot_ids)
+    if tree.root != record.slots_root:
         return None
-    slot_id = value[offset : offset + 32]
-    if slot_id == ZERO32 or len(slot_id) != 32:
-        return None
+    slot_id = slot_ids[challenge_index]
+    proof = generate_merkle_tree_proof(tree, challenge_index)
 
-    # Fetch the actual data
+    # The slot's data, as the single cell the record walk slotted
     data_expr = get_expr_from_local_storage(node, slot_id)
     if data_expr is None:
         return None
-
-    fetched_data_bytes = encode_expr_to_bytes(data_expr)
+    fetched_data_bytes = encode_expr_to_bytes(_single_cell(data_expr, node, None))
     sender_bytes = node.storage_public_key_bytes
 
     # Compute required bits
@@ -87,7 +98,7 @@ def _compute_pow_and_challenge(
             + nonce_encoded
         ).digest()
         if _leading_zero_bits(work_hash) >= required_bits:
-            return storage_id, slot_id, nonce
+            return storage_id, fetched_data_bytes, proof, nonce
         nonce += 1
 
     return None
@@ -118,23 +129,69 @@ def _next_claim_counter(node: Node) -> int:
     return max(node.next_claim_counter, on_chain)
 
 
+def _claim_expr(claim: Claim) -> Expr:
+    storage_id, slot_bytes, proof, nonce = claim
+    return link(
+        bytes_(storage_id),
+        link(
+            bytes_(slot_bytes),
+            link(bytes_list_to_expr(proof), link(int_(nonce), NIL)),
+        ),
+    )
+
+
+def _tree_bytes(expr: Expr) -> int:
+    """Encoded size of every distinct cell of a loaded expr: what a peer fetching
+    the whole tree receives."""
+    seen: set[bytes] = set()
+    total = 0
+    stack = [expr]
+    while stack:
+        e = stack.pop()
+        if e is None:
+            continue
+        h = e.hash()
+        if h in seen:
+            continue
+        seen.add(h)
+        total += len(encode_expr_to_bytes(e))
+        if e.base == "link":
+            stack.append(e.tail)
+            stack.append(e.head)
+    return total
+
+
+def _split_claims(entries: list[tuple]) -> list[list[tuple]]:
+    """Group claim entries greedily into transactions of about ``MAX_CLAIM_TX_BYTES``.
+
+    Each entry is ``(*claim, payout)``. A claim bigger than the limit on its
+    own gets a transaction of its own.
+    """
+    groups: list[list[tuple]] = []
+    current: list[tuple] = []
+    size = 0
+    for entry in entries:
+        entry_size = _tree_bytes(_claim_expr(entry[:4]))
+        if current and size + entry_size > MAX_CLAIM_TX_BYTES:
+            groups.append(current)
+            current, size = [], 0
+        current.append(entry)
+        size += entry_size
+    if current:
+        groups.append(current)
+    return groups
+
+
 def _build_multi_claim_tx(
     node: Node,
-    claims: list[tuple[bytes, bytes, int]],
+    claims: list[Claim],
     secret_key,
     counter: int,
 ) -> object:
     """Build a signed STORAGE_PAYMENT transaction with the given claims."""
     claims_expr = NIL
-    for storage_id, slot_id, nonce in reversed(claims):
-        claim = link(
-            bytes_(storage_id),
-            link(
-                bytes_(slot_id),
-                link(int_(nonce), NIL),
-            ),
-        )
-        claims_expr = link(claim, claims_expr)
+    for claim in reversed(claims):
+        claims_expr = link(_claim_expr(claim), claims_expr)
 
     return create_transaction(
         chain_id=node.config["chain_id"],
@@ -152,17 +209,17 @@ def _build_claims_for_records(
     node: Node,
     latest_block,
     spacing_eras: dict[bytes, int],
-) -> list[tuple[bytes, bytes, int, int]]:
+) -> list[tuple[bytes, bytes, list[bytes], int, int]]:
     """Evaluate every record in the records table and build eligible claims.
 
-    Returns ``(storage_id, slot_id, nonce, payout)`` tuples,
+    Returns ``(storage_id, slot_expr_bytes, proof, nonce, payout)`` tuples,
     where ``payout = new_size × (block_height − last_payment_height)``
     mirrors the reward calculation in ``storage/payment.py`` so the submit
     gate can check the bundle's aggregate economics.
     """
     from astreum.consensus.constants import STORAGE_ADDRESS
 
-    claims_to_make: list[tuple[bytes, bytes, int, int]] = []
+    claims_to_make: list[tuple[bytes, bytes, list[bytes], int, int]] = []
     seen: set[bytes] = set()
 
     storage_account = None
@@ -209,38 +266,50 @@ def _build_claims_for_records(
 
 
 _BASE_TX_FEE = 1  # apply.py:77 — protocol-derived base transaction fee
-_RECEIPT_OVERHEAD_BYTES = 160  # fixed-size 8-field receipt expr (models/receipt.py:42-58)
+# Walk size of a 7-field receipt (models/receipt.py): 17 cells, 717 bytes with
+# one-byte ints, the size the block record counts for it.
+_RECEIPT_OVERHEAD_BYTES = 720
 
 
-def _submit_claims(node: Node, entries: list[tuple[bytes, bytes, int, int]]) -> None:
-    """Bundle the given claims into a single STORAGE_PAYMENT tx and send it,
-    only if the aggregate payout covers the tx's protocol cost."""
+def _submit_claims(node: Node, entries: list[tuple]) -> None:
+    """Send the given claims (``(*claim, payout)`` entries) as STORAGE_PAYMENT
+    transactions of about ``MAX_CLAIM_TX_BYTES`` each, every one only if its
+    own payout covers its protocol cost."""
     if not entries:
         return
     latest_block = getattr(node, "latest_block", None)
     if latest_block is None:
         return
+    for group in _split_claims(entries):
+        if not _submit_claim_group(node, latest_block, group):
+            return
+
+
+def _submit_claim_group(node: Node, latest_block, entries: list[tuple]) -> bool:
+    """Build and send one claim transaction. Returns False to stop submitting
+    (the cost cannot be computed yet); an unprofitable or failed group is
+    dropped and the next one still goes."""
     try:
-        claims = [entry[:3] for entry in entries]
+        claims = [entry[:4] for entry in entries]
         counter = _next_claim_counter(node)
         tx = _build_multi_claim_tx(node, claims, node.storage_secret_key, counter)
         try:
             cost = (
                 _BASE_TX_FEE
-                + calculate_storage_fee(latest_block, len(encode_expr_to_bytes(tx.expr())))
+                + calculate_storage_fee(latest_block, _tree_bytes(tx.expr()))
                 + calculate_storage_fee(latest_block, _RECEIPT_OVERHEAD_BYTES)
             )
         except ValueError:
             # cumulative_total_fee <= 0 (young/odd block, rate.py:36-37)
-            return  # pass skipped; retried next era
-        total_payout = sum(entry[3] for entry in entries)
+            return False  # pass skipped; retried next era
+        total_payout = sum(entry[4] for entry in entries)
         if total_payout < cost:
             node.logger.info(
                 "Claim worker: bundle unprofitable (%d payouts < %d cost); dropped",
                 total_payout,
                 cost,
             )
-            return  # drop, retry next era
+            return True  # drop, retry next era
         from astreum.consensus.transaction.send import send_transaction
         send_transaction(node, tx)
         node.next_claim_counter = counter + 1
@@ -253,6 +322,7 @@ def _submit_claims(node: Node, entries: list[tuple[bytes, bytes, int, int]]) -> 
         )
     except Exception as exc:
         node.logger.exception("Claim worker: failed to submit claims: %s", exc)
+    return True
 
 
 def claim_storage(node: Node) -> None:

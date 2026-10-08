@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from astreum.expression import Expr, NIL, resolve_list_exprs, link, int_
+from astreum.expression import Expr, NIL, resolve_list_exprs, link, int_, bytes_
 from astreum.expression import ZERO32, get_expr_tag, get_expr_value
 from astreum.storage.exprs import get_expr
 
@@ -14,10 +14,10 @@ class StorageRecord:
     creation_block_hash: bytes = b""
     last_payment_block_hash: bytes = b""
     last_payment_height: int = 0
-    last_payment_winner: bytes = b""
+    last_payment_winner: bytes = ZERO32
     new_size: int = 0
     new_count: int = 0
-    mint: bool = False
+    slots_root: bytes = ZERO32
     _expr: Optional[Expr] = field(default=None, repr=False, compare=False)
 
     def to_expr(self) -> Expr:
@@ -26,10 +26,13 @@ class StorageRecord:
         # Permanent core (innermost to outermost)
         tail: Expr = link(int_(self.new_size), NIL)
         tail = link(int_(self.new_count), tail)
+        # A bytes value, not a hash link: the root names no stored expr, and
+        # the record walk follows every hash link.
+        tail = link(bytes_(self.slots_root), tail)
         tail = link(Expr("link", head_hash=self.creation_block_hash), tail)
-        # Transient wrapper (rewritten each payment — 5 new nodes)
-        tail = link(int_(1 if self.mint else 0), tail)
-        tail = link(Expr("link", head_hash=self.last_payment_winner), tail)
+        # Transient wrapper (rewritten each payment). The winner is an address,
+        # also a bytes value.
+        tail = link(bytes_(self.last_payment_winner), tail)
         tail = link(int_(self.last_payment_height), tail)
         tail = link(Expr("link", head_hash=self.last_payment_block_hash), tail)
         return tail
@@ -39,6 +42,28 @@ class StorageRecord:
             return self._expr
         self._expr = self.to_expr()
         return self._expr
+
+    def cells(self) -> list[Expr]:
+        """The record's own exprs, to store with the block that writes it.
+
+        Only what the record holds: the hashes it names (blocks) are left
+        unresolved, so this never fetches and never pulls a block's tree in.
+        """
+        out: list[Expr] = []
+        seen: set[bytes] = set()
+        stack = [self.expr()]
+        while stack:
+            e = stack.pop()
+            h = e.hash()
+            if h in seen or h == ZERO32:
+                continue
+            seen.add(h)
+            out.append(e)
+            if e._tag == "link":
+                for child in (e._tail, e._head):
+                    if child is not None:
+                        stack.append(child)
+        return out
 
     @staticmethod
     def _extract_hash(n: Expr) -> bytes:
@@ -52,79 +77,48 @@ class StorageRecord:
 
     @classmethod
     def from_storage(
-        cls, node: Any, expr_id: bytes, contact=None
+        cls, node: Any, expr_id: bytes, contact=None, block_hash=None
     ) -> StorageRecord | None:
-        header = get_expr(node, expr_id, contact=contact)
+        """*block_hash* is the block whose record holds the record's cells."""
+        scope = {} if block_hash is None else {"block_hash": block_hash}
+        header = get_expr(node, expr_id, contact=contact, **scope)
+        return cls.from_expr(node, header, contact=contact, block_hash=block_hash)
+
+    @classmethod
+    def from_expr(
+        cls, node: Any, header: Optional[Expr], contact=None, block_hash=None
+    ) -> StorageRecord | None:
+        """Parse a record header already in hand (the layout lives here)."""
         if header is None or not header._tag == "link":
             return None
-        nodes, missed = resolve_list_exprs(node, header, contact=contact)
+        nodes, missed = resolve_list_exprs(node, header, contact=contact, block_hash=block_hash)
         if missed:
             return None
-        if len(nodes) not in (6, 7):
+        if len(nodes) != 7:
             return None
-        # nodes[0-2]: Link hash pointers (block_hash, winner, creation)
-        # nodes[3]: Int/0/1 mint flag (added in 7-node format)
-        # nodes[4]: Link (creation_block_hash)
-        # nodes[5-6]: Int (count, size)
-        mint_node_idx = 3
+        # nodes[0]: Link (last_payment_block_hash)   nodes[1]: Int (height)
+        # nodes[2]: Bytes (winner)                   nodes[3]: Link (creation_block_hash)
+        # nodes[4]: Bytes (slots_root)               nodes[5]: Int (count)
+        # nodes[6]: Int (size)
         winner_node_idx = 2
-        creation_node_idx = 4 if len(nodes) == 7 else 3
-        count_node_idx = 5 if len(nodes) == 7 else 4
-        size_node_idx = 6 if len(nodes) == 7 else 5
-        if not get_expr_tag(nodes[mint_node_idx], node, contact) == "int":
+        creation_node_idx = 3
+        root_node_idx = 4
+        count_node_idx = 5
+        size_node_idx = 6
+        if not all(get_expr_tag(n, node, contact, block_hash) == "link" for n in [nodes[0], nodes[creation_node_idx]]):
             return None
-        if not all(get_expr_tag(n, node, contact) == "link" for n in [nodes[0], nodes[winner_node_idx], nodes[creation_node_idx]]):
+        if not all(get_expr_tag(n, node, contact, block_hash) == "bytes" for n in [nodes[winner_node_idx], nodes[root_node_idx]]):
             return None
-        if not all(get_expr_tag(n, node, contact) == "int" for n in [nodes[1], nodes[count_node_idx], nodes[size_node_idx]]):
+        if not all(get_expr_tag(n, node, contact, block_hash) == "int" for n in [nodes[1], nodes[count_node_idx], nodes[size_node_idx]]):
             return None
         obj = cls(
             last_payment_block_hash=cls._extract_hash(nodes[0]),
-            last_payment_height=get_expr_value(nodes[1], node, contact),
-            mint=bool(get_expr_value(nodes[mint_node_idx], node, contact)),
-            last_payment_winner=cls._extract_hash(nodes[winner_node_idx]),
+            last_payment_height=get_expr_value(nodes[1], node, contact, block_hash),
+            last_payment_winner=get_expr_value(nodes[winner_node_idx], node, contact, block_hash),
             creation_block_hash=cls._extract_hash(nodes[creation_node_idx]),
-            new_count=get_expr_value(nodes[count_node_idx], node, contact),
-            new_size=get_expr_value(nodes[size_node_idx], node, contact),
+            slots_root=get_expr_value(nodes[root_node_idx], node, contact, block_hash),
+            new_count=get_expr_value(nodes[count_node_idx], node, contact, block_hash),
+            new_size=get_expr_value(nodes[size_node_idx], node, contact, block_hash),
         )
         obj._expr = header
-        return obj
-
-
-@dataclass
-class StorageSlot:
-    storage_id: bytes
-    sequence: int
-    _expr: Optional[Expr] = field(default=None, repr=False, compare=False)
-
-    def to_expr(self) -> Expr:
-        if self._expr is not None:
-            return self._expr
-        return Expr("link",
-            head_hash=self.storage_id,
-            tail=int_(self.sequence),
-        )
-
-    def expr(self) -> Expr:
-        if self._expr is not None:
-            return self._expr
-        self._expr = self.to_expr()
-        return self._expr
-
-    @classmethod
-    def from_storage(
-        cls, node: Any, expr_id: bytes, contact=None
-    ) -> StorageSlot | None:
-        expr = get_expr(node, expr_id, contact=contact)
-        if not expr._tag == "link":
-            return None
-        if expr._head_hash is None:
-            return None
-        tail = expr._tail
-        if not get_expr_tag(tail, node, contact) == "int":
-            return None
-        obj = cls(
-            storage_id=expr._head_hash,
-            sequence=get_expr_value(tail, node, contact),
-        )
-        obj._expr = expr
         return obj

@@ -7,7 +7,9 @@ from astreum.storage.exprs.cascade import get_expr
 from astreum.storage.exprs.local import get_expr_from_local_storage
 
 
-def get_expr_list(node, root: Union[bytes, Expr], contact=None) -> Optional[Expr]:
+def get_expr_list(
+    node, root: Union[bytes, Expr], contact=None, block_hash=None
+) -> Optional[Expr]:
     """Resolve an Expr and its tail chain using full resolution.
 
     Fetches the root expression, then walks the ``_tail`` pointers,
@@ -21,15 +23,18 @@ def get_expr_list(node, root: Union[bytes, Expr], contact=None) -> Optional[Expr
             instance that has already been fetched.
         contact: Optional ``(relay_key, address, port)`` passed to every
             network fetch along the chain.
+        block_hash: Optional block passed to every network fetch along the
+            chain (the tail of a cell is in the block of the cell).
 
     Returns:
         The root Expr with the tail chain expanded inline, or None
         if any part of the chain cannot be found.
     """
+    scope = {} if block_hash is None else {"block_hash": block_hash}
     if isinstance(root, Expr):
         expr = root
     else:
-        expr = get_expr(node, root, contact=contact)
+        expr = get_expr(node, root, contact=contact, **scope)
         if expr is None:
             return None
 
@@ -40,7 +45,9 @@ def get_expr_list(node, root: Union[bytes, Expr], contact=None) -> Optional[Expr
                 current._tail = None
                 current._tail_hash = None
             else:
-                resolved = get_expr(node, current._tail_hash, contact=contact)
+                resolved = get_expr(
+                    node, current._tail_hash, contact=contact, **scope
+                )
                 if resolved is None:
                     return None
                 current._tail = resolved

@@ -12,15 +12,21 @@ BATCH_ENTRY_BYTES = 32 + 1
 
 
 # STORAGE_GET layout (after the 1-byte request code):
-#   count u16 + count * (expr_id 32B + resolution 1B)
+#   count u16 + count * entry
+# A plain entry is expr_id 32B + resolution 1B. A scoped entry sets the high
+# bit of the resolution byte (resolutions are 1-4) and is followed by the
+# block_hash 32B whose provider holds the expr: it is routed by that hash.
 GET_HEADER_BYTES = 2
 GET_ENTRY_BYTES = 32 + 1
+SCOPED_GET_ENTRY_BYTES = GET_ENTRY_BYTES + 32
+SCOPED_FLAG = 0x80
 
 
 def max_get_entries(budget_bytes: int) -> int:
     """Return how many entries fit in one STORAGE_GET datagram of at most
-    *budget_bytes* on the wire (message framing and request code included)."""
-    return (budget_bytes - MESSAGE_FRAMING_BYTES - 1 - GET_HEADER_BYTES) // GET_ENTRY_BYTES
+    *budget_bytes* on the wire (message framing and request code included).
+    Counted at the scoped size, the worst case, so any batch fits."""
+    return (budget_bytes - MESSAGE_FRAMING_BYTES - 1 - GET_HEADER_BYTES) // SCOPED_GET_ENTRY_BYTES
 
 
 def max_batch_entries(budget_bytes: int) -> int:
@@ -34,7 +40,7 @@ class StorageRequest:
     data: bytes
     expr_id: bytes
     payload_type: int | None
-    entries: list[tuple[bytes, int]] | None
+    entries: list[tuple] | None
 
     def __init__(
         self,
@@ -42,12 +48,19 @@ class StorageRequest:
         data: bytes = b"",
         expr_id: bytes = None,
         payload_type: int | None = None,
-        entries: list[tuple[bytes, int]] | None = None,
+        entries: list[tuple] | None = None,
     ):
+        """*entries* are ``(expr_id, payload_type)`` for STORAGE_PUT. For
+        STORAGE_GET they are ``(expr_id, resolution, block_hash | None)``; a
+        2-tuple is taken as unscoped."""
         self.code = code
         self.data = data
         self.expr_id = expr_id
         self.payload_type = payload_type
+        if code == StorageRequestCode.STORAGE_GET and entries is not None:
+            entries = [
+                (e[0], e[1], e[2] if len(e) > 2 else None) for e in entries
+            ]
         self.entries = entries
 
     def to_bytes(self):
@@ -66,10 +79,15 @@ class StorageRequest:
             bytes([self.code.value]),
             len(self.entries).to_bytes(2, "big"),
         ]
-        for expr_id, resolution in self.entries:
+        for expr_id, resolution, block_hash in self.entries:
             if len(expr_id) != 32:
                 raise ValueError("STORAGE_GET expr_id must be 32 bytes")
-            parts.append(expr_id + bytes([resolution]))
+            if block_hash is None:
+                parts.append(expr_id + bytes([resolution]))
+                continue
+            if len(block_hash) != 32:
+                raise ValueError("STORAGE_GET block_hash must be 32 bytes")
+            parts.append(expr_id + bytes([resolution | SCOPED_FLAG]) + block_hash)
         body = b"".join(parts)
         if len(body) > MAX_INLINE_MESSAGE_BYTES:
             raise ValueError(
@@ -132,14 +150,28 @@ class StorageRequest:
         if count < 1:
             raise ValueError("STORAGE_GET count must be at least 1")
         body = data[1 + GET_HEADER_BYTES :]
-        if len(body) != count * GET_ENTRY_BYTES:
+        entries: list[tuple[bytes, int, bytes | None]] = []
+        pos = 0
+        for _ in range(count):
+            if pos + GET_ENTRY_BYTES > len(body):
+                raise ValueError(
+                    f"STORAGE_GET length mismatch (count={count}, body={len(body)} bytes)"
+                )
+            expr_id = bytes(body[pos : pos + 32])
+            resolution = body[pos + 32]
+            pos += GET_ENTRY_BYTES
+            block_hash = None
+            if resolution & SCOPED_FLAG:
+                if pos + 32 > len(body):
+                    raise ValueError("STORAGE_GET truncated scoped entry")
+                resolution &= ~SCOPED_FLAG
+                block_hash = bytes(body[pos : pos + 32])
+                pos += 32
+            entries.append((expr_id, resolution, block_hash))
+        if pos != len(body):
             raise ValueError(
                 f"STORAGE_GET length mismatch (count={count}, body={len(body)} bytes)"
             )
-        entries = [
-            (bytes(body[i : i + 32]), body[i + 32])
-            for i in range(0, len(body), GET_ENTRY_BYTES)
-        ]
         return cls(StorageRequestCode.STORAGE_GET, entries=entries)
 
     @classmethod

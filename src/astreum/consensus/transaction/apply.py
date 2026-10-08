@@ -9,7 +9,6 @@ from astreum.expression.helpers import exprs_to_linked_expr
 from astreum.storage.radix import RadixTree, get_from_radix_tree, put_in_radix_tree
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.account import create_account
-from astreum.consensus.account.model import generate_new_account_storage_contracts
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS, Receipt
 from astreum.consensus.block.rate import calculate_storage_fee
 from astreum.crypto.bloom_search import make_search_variants
@@ -20,13 +19,17 @@ from astreum.consensus.transaction.accounts.expression import handle_expression_
 from astreum.consensus.transaction.channel.close import handle_channel_close
 from astreum.consensus.transaction.channel.update import handle_channel_update
 from astreum.consensus.transaction.channel.withdraw import handle_channel_withdraw
-from astreum.consensus.transaction.storage.initial import handle_storage_initial_contract
-from astreum.consensus.transaction.storage.pending import add_pending_storage_contract
+from astreum.consensus.transaction.storage.contract import receipt_at_fixed_point
+from astreum.consensus.transaction.storage.initial import (
+    handle_storage_initial_contract,
+    storage_walk_fee,
+)
 from astreum.consensus.transaction.storage.payment import handle_storage_payment_contract
 from astreum.consensus.transaction.treasury.borrow import handle_treasury_borrow
 from astreum.consensus.transaction.bloom.pending import finalize_pending_bloom_inserts
 from astreum.consensus.transaction.treasury.record import (
     TreasuryUserRecord,
+    load_user_record,
 )
 from astreum.consensus.transaction.treasury.close import handle_treasury_close
 from astreum.consensus.transaction.treasury.repay import handle_treasury_repay
@@ -78,6 +81,8 @@ def _apply_tx_effects(
     storage_account = block.accounts.get_account(address=STORAGE_ADDRESS, node=node)
 
     receipt_status = STATUS_SUCCESS
+    # The base fee, plus the evaluation fee once a call has run: tx_fee already
+    # holds the execution, so it is charged once and counted once.
     tx_fee = 1 if not nested else 0
 
     # Pre-fee guard: top-level sender must always cover at least the base tx_fee.
@@ -157,7 +162,6 @@ def _apply_tx_effects(
     current_evaluation_fee = 0
     current_storage_fee = 0
     collected_logs: list[Expr] = []
-    receipt_mint = 0
 
     match transaction.code:
         case TransactionCode.TRANSFER:
@@ -240,26 +244,19 @@ def _apply_tx_effects(
                 pass
             elif receipt_status == STATUS_SUCCESS:
                 stake_trie = recipient_account.data
-                existing_record_head = get_from_radix_tree(stake_trie, node, transaction.sender)
-                if not existing_record_head or existing_record_head == ZERO32:
+                treasury_user_record = load_user_record(
+                    node, stake_trie, transaction.sender, contact=block.contact
+                )
+                if treasury_user_record is None:
                     receipt_status = STATUS_FAILED
                     transfer_amount = 0
                 else:
-                    treasury_user_record = TreasuryUserRecord.from_storage(
-                        node,
-                        existing_record_head,
-                        contact=block.contact,
+                    updated_stake_record = replace(
+                        treasury_user_record,
+                        balance=treasury_user_record.balance + transfer_amount,
                     )
-                    if treasury_user_record is None:
-                        receipt_status = STATUS_FAILED
-                        transfer_amount = 0
-                    else:
-                        updated_stake_record = replace(
-                            treasury_user_record,
-                            balance=treasury_user_record.balance + transfer_amount,
-                        )
-                        updated_record_head = updated_stake_record.expr().hash()
-                        put_in_radix_tree(stake_trie, node, transaction.sender, updated_record_head)
+                    updated_record_head = updated_stake_record.expr().hash()
+                    put_in_radix_tree(stake_trie, node, transaction.sender, updated_record_head)
                 recipient_account.data_hash = stake_trie.root_hash or ZERO32
                 recipient_account.balance += transfer_amount
 
@@ -387,7 +384,7 @@ def _apply_tx_effects(
                 pass
             else:
                 if receipt_status == STATUS_SUCCESS:
-                    payment_contract_success, total_minted = handle_storage_payment_contract(
+                    payment_contract_success = handle_storage_payment_contract(
                         node=node,
                         block=block,
                         transaction=transaction,
@@ -397,7 +394,6 @@ def _apply_tx_effects(
                     )
                     if not payment_contract_success:
                         receipt_status = STATUS_FAILED
-                    receipt_mint = total_minted
                 if transfer_amount > 0:
                     recipient_account.balance += transfer_amount
 
@@ -467,7 +463,7 @@ def _apply_tx_effects(
         current_storage_fee += bloom_storage_fee
         if sender_account.balance < (
             tx_fee + transfer_amount + current_data_fee
-            + current_evaluation_fee + current_storage_fee
+            + current_storage_fee
         ):
             receipt_status = STATUS_FAILED
 
@@ -475,23 +471,24 @@ def _apply_tx_effects(
         current_storage_fee += operator_bloom_fee
         if sender_account.balance < (
             tx_fee + transfer_amount + current_data_fee
-            + current_evaluation_fee + current_storage_fee
+            + current_storage_fee
         ):
             receipt_status = STATUS_FAILED
     else:
         transaction.pending_bloom_keys.clear()
         transaction.pending_bloom_inserts.clear()
 
-    # Transaction expr storage contract — top-level only.
+    # Transaction expr — top-level only. Nothing is registered for it: the
+    # block record covers it, and the sender pays for its cells.
     if not nested:
-        transaction_storage_fee = add_pending_storage_contract(node, block, None, None, transaction.expr())
+        transaction_storage_fee = storage_walk_fee(node, block, transaction.expr())
         if transaction_storage_fee is None:
             receipt_status = STATUS_FAILED
         else:
             current_storage_fee += transaction_storage_fee
             if sender_account.balance < (
                 tx_fee + transfer_amount + current_data_fee
-                + current_evaluation_fee + current_storage_fee
+                + current_storage_fee
             ):
                 receipt_status = STATUS_FAILED
 
@@ -499,41 +496,60 @@ def _apply_tx_effects(
     logs_expr = NIL
     if collected_logs:
         logs_expr = exprs_to_linked_expr(collected_logs)
-        logs_storage_fee = add_pending_storage_contract(node, block, None, None, logs_expr)
+        logs_storage_fee = storage_walk_fee(node, block, logs_expr)
         if logs_storage_fee is None:
             receipt_status = STATUS_FAILED
         else:
             current_storage_fee += logs_storage_fee
             if not nested and sender_account.balance < (
                 tx_fee + transfer_amount + current_data_fee
-                + current_evaluation_fee + current_storage_fee
+                + current_storage_fee
             ):
                 receipt_status = STATUS_FAILED
+        if not nested:
+            block.pending_exprs.append(logs_expr)
 
-    # Receipt — top-level only.
+    # New account: the sender pays for its cell before the balance is deducted.
+    # (to_expr, not expr(): expr() caches, and the account changes later.)
+    if is_recipient_new:
+        new_account_fee = storage_walk_fee(node, block, recipient_account.to_expr())
+        if new_account_fee is None:
+            receipt_status = STATUS_FAILED
+        else:
+            current_storage_fee += new_account_fee
+
+    # Receipt — top-level only. Its own fee is part of its storage_fee, which
+    # changes its size, so the fee is a fixed point.
     receipt = None
     if not nested:
-        receipt = Receipt(
-            transaction_hash=transaction_hash,
-            transaction_fee=tx_fee,
-            storage_fee=current_storage_fee,
-            data_fee=current_data_fee,
-            execution_fee=current_evaluation_fee,
-            status=receipt_status,
-            logs_hash=logs_expr.hash(),
-            mint=receipt_mint,
-        )
+        def _build_receipt(storage_fee: int) -> Receipt:
+            return Receipt(
+                transaction_hash=transaction_hash,
+                transaction_fee=tx_fee,
+                storage_fee=storage_fee,
+                data_fee=current_data_fee,
+                execution_fee=current_evaluation_fee,
+                status=receipt_status,
+                logs_hash=logs_expr.hash(),
+            )
 
-        receipt_storage_fee = add_pending_storage_contract(node, block, None, None, receipt.expr())
-        if receipt_storage_fee is None:
+        # The transaction and its logs are charged above; the receipt only
+        # names them.
+        named = (transaction_hash, logs_expr.hash())
+        receipt = receipt_at_fixed_point(
+            node, block, _build_receipt, current_storage_fee, named
+        )
+        if receipt is None:
             receipt_status = STATUS_FAILED
+            receipt = _build_receipt(current_storage_fee)
+        current_storage_fee = receipt.storage_fee
 
     # Final affordability check — top-level only.
     affordability_failed = False
     if not nested:
         if sender_account.balance < (
             tx_fee + transfer_amount + current_data_fee
-            + current_evaluation_fee + current_storage_fee
+            + current_storage_fee
         ):
             receipt_status = STATUS_FAILED
             # Revert any amount already credited to the recipient, then skip
@@ -542,6 +558,10 @@ def _apply_tx_effects(
                 recipient_account.balance -= transfer_amount
             transfer_amount = 0
             affordability_failed = True
+        if receipt.status != receipt_status:
+            # The receipt records the final status. 0 and 1 are the same size,
+            # so its fee does not move.
+            receipt = _build_receipt(current_storage_fee)
 
     # Balance deductions.
     if not affordability_failed:
@@ -549,17 +569,10 @@ def _apply_tx_effects(
             sender_account.balance -= transfer_amount
         else:
             total_fees = (
-                tx_fee + current_data_fee + current_evaluation_fee + current_storage_fee
+                tx_fee + current_data_fee + current_storage_fee
             )
             sender_account.balance -= total_fees + transfer_amount
             storage_account.balance += current_storage_fee
-
-        # New account storage.
-        if is_recipient_new:
-            new_account_storage_fee = calculate_storage_fee(block, recipient_account.expr().size())
-            current_storage_fee += new_account_storage_fee
-
-            generate_new_account_storage_contracts(node, block, storage_account, recipient_account.expr())
 
     # Accounts write-back (cache).
     if not nested and counter_matched:
@@ -591,7 +604,12 @@ def _apply_tx_effects(
 def apply_transaction(node: Any, block: object, transaction_hash: bytes) -> None:
     """Apply a transaction, collecting results on *block* (top-level entry
     point used by block verification / production)."""
-    transaction = get_transaction_from_storage(node, transaction_hash, contact=block.contact)
+    # A verified block's transactions are asked from its provider.
+    block_hash = getattr(block, "expr_id", None)
+    scope = {} if not block_hash or block_hash == ZERO32 else {"block_hash": block_hash}
+    transaction = get_transaction_from_storage(
+        node, transaction_hash, contact=block.contact, **scope
+    )
     _apply_tx_effects(node, block, transaction, transaction_hash)
 
 

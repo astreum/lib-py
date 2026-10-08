@@ -16,10 +16,12 @@ from astreum.consensus.block.difficulty import calculate_block_difficulty
 from astreum.consensus.block.nonce import generate_block_nonce
 from astreum.consensus.block.encoding.decode import get_block_from_storage
 from astreum.consensus.transaction import Transaction, apply_transaction_obj
-from astreum.consensus.transaction.storage.pending import add_pending_storage_contract, finalize_pending_storage_contract
-from astreum.consensus.transaction.storage.initial import UnresolvedRecordExpr
-from astreum.consensus.transaction.storage.model import StorageRecord
+from astreum.consensus.transaction.storage.initial import (
+    UnresolvedRecordExpr,
+    generate_initial_storage_record,
+)
 from astreum.storage.radix import get_radix_node_expr, put_in_radix_tree
+from astreum.storage.records import put_record_in_cold_storage
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.validation.validator import current_validator
 from astreum.consensus.validation.ads import flush_ads, queue_ads
@@ -228,22 +230,24 @@ def make_validation_worker(
             new_block.transactions = new_block.transactions or []
             new_block.receipts = new_block.receipts or []
 
+            storage_ids: list[bytes] = []
+
+            # The previous block's record is put in the storage trie before any
+            # transaction, as the verifier does, so a transaction that reads
+            # the trie sees the same one on both.
             storage_account = new_block.accounts.get_account(STORAGE_ADDRESS, node)
             if storage_account is not None:
                 from astreum.consensus.block.encoding.expr import get_block_expr
 
-                # The previous block's record covers everything new in it,
+                # The record covers everything new in the previous block,
                 # including the tries its header names by root hash. Those
                 # were fetched from its holder, so they are stored here too.
                 previous_block_exprs: dict[bytes, Any] = {}
                 try:
-                    add_pending_storage_contract(
+                    result = generate_initial_storage_record(
                         node,
                         new_block,
-                        None,
-                        None,
                         get_block_expr(previous_block),
-                        mint=True,
                         follow_refs=True,
                         collected=previous_block_exprs,
                     )
@@ -254,15 +258,35 @@ def make_validation_worker(
                     time.sleep(0.5)
                     continue
                 new_block.pending_exprs.extend(previous_block_exprs.values())
+                if result is not None:
+                    record, slot_hashes, _, _ = result
+                    record_id = previous_block.expr_id
+                    put_in_radix_tree(storage_account.data, node, record_id, record.expr())
+                    new_block.pending_exprs.append(record.expr())
+                    storage_account.data_hash = storage_account.data.root_hash
+                    storage_ids.append(record_id)
+                    try:
+                        put_record_in_cold_storage(node, record_id, slot_hashes)
+                    except Exception:
+                        node.logger.exception(
+                            "Records table write failed for record %s", record_id.hex()
+                        )
 
             offset = new_block.height % ERA_SIZE
             if offset == 0 and new_block.height > 0:
                 new_block.bloom_tree = BloomTree()
                 new_block.previous_era_hash = previous_block.expr_id
             else:
-                new_block.bloom_tree = BloomTree(new_block.bloom_hash)
+                # The era's tree so far: its nodes are in the previous block's
+                # record, and the nodes this block leaves alone stay there.
+                new_block.bloom_tree = BloomTree(
+                    new_block.bloom_hash,
+                    node,
+                    contact=head_holder,
+                    block_hash=previous_block.expr_id,
+                )
                 new_block.bloom_tree.set_leaf_start_hash(
-                    previous_block.height % ERA_SIZE, previous_block.expr_id
+                    previous_block.height % ERA_SIZE, previous_block.expr_id, node
                 )
 
             while current_tx is not None:
@@ -291,31 +315,15 @@ def make_validation_worker(
                 included_transaction_exprs(node, new_block.transactions or [])
             )
 
-            storage_ids: list[bytes] = []
-
-            if new_block.pending_storage_contracts:
-                contracts, _, refunds = finalize_pending_storage_contract(
-                    node, new_block
-                )
-                storage_account = new_block.accounts.get_account(STORAGE_ADDRESS, node)
-                if storage_account is not None:
-                    for key, contract in contracts:
-                        put_in_radix_tree(storage_account.data, node, key, contract.expr())
-                        new_block.pending_exprs.append(contract.expr())
-                        if isinstance(contract, StorageRecord):
-                            storage_ids.append(key)
-                    for trie_node in storage_account.data.nodes.values():
-                        new_block.pending_exprs.append(get_radix_node_expr(trie_node))
-                    storage_account.data_hash = storage_account.data.root_hash
-                for sender_addr, refund_amount in refunds:
-                    sender = new_block.accounts.get_account(sender_addr, node)
-                    if sender is not None:
-                        sender.balance += refund_amount
-                        new_block.accounts.set_account(sender_addr, sender)
+            # The storage trie's nodes are stored with the block.
+            storage_account = new_block.accounts.get_account(STORAGE_ADDRESS, node)
+            if storage_account is not None:
+                for trie_node in storage_account.data.nodes.values():
+                    new_block.pending_exprs.append(get_radix_node_expr(trie_node))
+                storage_account.data_hash = storage_account.data.root_hash
 
             total_transaction_fee = sum(r.transaction_fee for r in new_block.receipts)
             total_storage_fee = sum(r.storage_fee for r in new_block.receipts)
-            total_mint = sum(r.mint for r in new_block.receipts)
             total_fee = sum(r.total_fee for r in new_block.receipts)
 
             new_block.total_transaction_fee = total_transaction_fee
@@ -323,7 +331,7 @@ def make_validation_worker(
 
             treasury_account = new_block.accounts.get_account(TREASURY_ADDRESS, node)
 
-            delta_fee = total_transaction_fee + total_storage_fee + new_block.total_mint
+            delta_fee = total_transaction_fee + total_storage_fee
             delta_stake = treasury_account.balance
             new_block.statistics = update_statistics(
                 new_block.height,
@@ -356,6 +364,12 @@ def make_validation_worker(
                 new_block.transactions_hash = ZERO32
             node.logger.debug("Block includes %d transactions", len(transactions))
 
+            # The header names the root by plain hash, so the root is a cell of
+            # this block even when nothing was inserted.
+            new_block.bloom_tree.rewrite_root()
+            for bloom_expr in new_block.bloom_tree.new_exprs():
+                new_block.pending_exprs.append(bloom_expr)
+                pending_exprs.append(bloom_expr)
             new_block.bloom_hash = (
                 new_block.bloom_tree.root.expr().hash()
                 if new_block.bloom_tree.root else ZERO32

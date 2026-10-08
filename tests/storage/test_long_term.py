@@ -9,7 +9,8 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, "src")
 
 from astreum.expression import Expr, NIL, ZERO32, bytes_, int_, link
-from astreum.consensus.transaction.storage.model import StorageSlot
+from astreum.consensus.transaction.storage.model import StorageRecord
+from astreum.crypto.merkle import create_merkle_tree, generate_merkle_tree_proof, verify_merkle_tree_proof
 from astreum.utils.config import (
     DEFAULT_LONG_TERM_STORAGE_INTERVAL_SECONDS,
     config_setup,
@@ -108,104 +109,136 @@ class TestLongTermSetup(unittest.TestCase):
 
 
 class TestFetchAndStoreRecord(unittest.TestCase):
+    """The provider replays the validators' walk, cell by cell, and checks the
+    record's root before it writes the records-table entry."""
+
+    GET_EXPR = "astreum.consensus.transaction.storage.initial.get_expr"
+    GET_BLOCK = "astreum.consensus.block.encoding.decode.get_block_from_storage"
+    ROOT_GET = "astreum.storage.records.fetch.get_expr"
+    TRIE = "astreum.consensus.transaction.storage.initial.get_from_radix_tree"
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.node = _make_node(self.temp_dir.name)
-        self.storage_id = b"\x0a" * 32
+        # A "block": a root whose cells the walk reaches only by hash.
+        self.deep = link(int_(7), link(bytes_(b"deep"), NIL))
         self.leaf_a = link(int_(1), NIL)
         self.leaf_b = link(int_(2), NIL)
-        self.other = link(int_(3), NIL)
+        whole = link(link(self.leaf_a, self.deep), link(self.leaf_b, NIL))
+        self.storage_id = whole.hash()
+        self.whole = whole
+
+        # What the creator derives, holding the block whole.
+        from tests.consensus.transaction.test_storage_record_refs import flat, store_flat
+
+        self.flat, self.store_flat = flat, store_flat
+        self.cells = {}
+        self.record, self.slots = self._creator_record(whole)
 
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def _shallow_root(self, head, tail):
-        return Expr("link", head_hash=head.hash(), tail_hash=tail.hash())
+    def _creator_record(self, whole):
+        sys.path.insert(0, "tests/consensus/validation")
+        from _helpers import _FakeNode, make_block, make_previous_block, seed_storage_account
+        from astreum.consensus.transaction.storage.initial import generate_initial_storage_record
 
-    def _run(self, root, trie_values, new_count):
-        exprs = {
-            self.storage_id: root,
-            self.leaf_a.hash(): self.leaf_a,
-            self.leaf_b.hash(): self.leaf_b,
-            self.other.hash(): self.other,
-        }
-        with patch(
-            "astreum.storage.records.fetch.get_expr_from_local_storage",
-            side_effect=lambda n, h: exprs.get(h),
-        ), patch(
-            "astreum.storage.records.fetch.get_from_radix_tree",
-            side_effect=lambda tree, n, h: trie_values.get(h),
-        ):
-            return fetch_and_store_record(
-                self.node, self.storage_id, SimpleNamespace(), new_count
-            )
-
-    def _slot(self, storage_id, sequence):
-        return StorageSlot(storage_id=storage_id, sequence=sequence).expr()
-
-    def test_slots_written_in_sequence_order(self):
-        root = self._shallow_root(self.leaf_a, self.leaf_b)
-        trie = {
-            self.leaf_a.hash(): self._slot(self.storage_id, 0),
-            self.leaf_b.hash(): self._slot(self.storage_id, 1),
-        }
-        self.assertTrue(self._run(root, trie, 2))
-        self.assertEqual(
-            get_record_from_cold_storage(self.node, self.storage_id),
-            self.leaf_a.hash() + self.leaf_b.hash(),
+        fake = _FakeNode()
+        block = make_block(fake, make_previous_block())
+        seed_storage_account(block)
+        self.store_flat(fake, whole)
+        self.cells = dict(fake.hot_storage)
+        record, slots, _, _ = generate_initial_storage_record(
+            fake, block, whole, follow_refs=True
         )
+        return record, slots
 
-    def test_cold_files_written_for_root_and_subexprs(self):
-        root = self._shallow_root(self.leaf_a, self.leaf_b)
-        trie = {
-            self.leaf_a.hash(): self._slot(self.storage_id, 0),
-            self.leaf_b.hash(): self._slot(self.storage_id, 1),
-        }
-        self.assertTrue(self._run(root, trie, 2))
-        for expr in (root, self.leaf_a, self.leaf_b):
-            self.assertIsNotNone(
-                get_expr_from_cold_storage(self.node, expr.hash())
+    def _run(self, *, record=None, cells=None, registered=(), storage_id=None):
+        record = record or self.record
+        cells = self.cells if cells is None else cells
+        storage_id = storage_id or self.storage_id
+        account = SimpleNamespace(data=SimpleNamespace(root_hash=b"\x05" * 32, root_block=None))
+        block = SimpleNamespace(accounts=SimpleNamespace(get_account=lambda a, n: account))
+        served = []
+
+        def get(n, h, **kw):
+            served.append((h, kw.get("block_hash")))
+            return cells.get(h)
+
+        with patch(self.GET_BLOCK, return_value=block), \
+             patch(self.GET_EXPR, side_effect=get), \
+             patch(self.ROOT_GET, side_effect=get), \
+             patch(self.TRIE, side_effect=lambda tree, n, h: (1 if h in registered else None)):
+            ok = fetch_and_store_record(self.node, storage_id, record)
+        self.served = served
+        return ok
+
+    def _written(self):
+        return get_record_from_cold_storage(self.node, self.storage_id)
+
+    def test_replay_gives_the_creators_slot_list(self):
+        self.assertTrue(self._run())
+        self.assertEqual(self._written(), b"".join(self.slots))
+
+    def test_the_stored_list_proves_every_slot(self):
+        self.assertTrue(self._run())
+        blob = self._written()
+        ids = [blob[i : i + 32] for i in range(0, len(blob), 32)]
+        tree = create_merkle_tree(ids)
+        self.assertEqual(tree.root, self.record.slots_root)
+        from astreum.crypto.merkle import MerkleTree
+
+        committed = MerkleTree(self.record.slots_root, self.record.new_count)
+        for i, slot_id in enumerate(ids):
+            self.assertTrue(
+                verify_merkle_tree_proof(committed, i, slot_id, generate_merkle_tree_proof(tree, i))
             )
 
-    def test_shared_ref_skipped_from_slot_list(self):
-        # `other` is slotted under a different record: excluded from the slot
-        # list and its subtree is not walked.
-        root = self._shallow_root(self.leaf_a, self.other)
-        trie = {
-            self.leaf_a.hash(): self._slot(self.storage_id, 0),
-            self.other.hash(): self._slot(b"\x99" * 32, 0),
-        }
-        self.assertTrue(self._run(root, trie, 2))
-        self.assertEqual(
-            get_record_from_cold_storage(self.node, self.storage_id),
-            self.leaf_a.hash() + ZERO32,
-        )
-        self.assertIsNone(get_expr_from_cold_storage(self.node, self.other.hash()))
+    def test_cells_are_fetched_scoped_to_the_block(self):
+        self.assertTrue(self._run())
+        fetched = [(h, b) for h, b in self.served if h != self.storage_id]
+        self.assertTrue(fetched)
+        self.assertEqual({b for _, b in fetched}, {self.storage_id})
 
-    def test_fetch_failure_writes_nothing(self):
-        with patch(
-            "astreum.storage.records.fetch.get_expr_from_local_storage",
-            return_value=None,
-        ), patch(
-            "astreum.storage.exprs.network.get_expr_from_network",
-            return_value=None,
-        ):
-            result = fetch_and_store_record(
-                self.node, self.storage_id, SimpleNamespace(), 2
-            )
-        self.assertFalse(result)
-        self.assertIsNone(get_record_from_cold_storage(self.node, self.storage_id))
+    def test_cold_files_written_for_root_and_every_slot(self):
+        self.assertTrue(self._run())
+        for h in [self.storage_id, *self.slots]:
+            self.assertIsNotNone(get_expr_from_cold_storage(self.node, h), h.hex())
 
-    def test_idempotent_when_everything_local(self):
-        root = self._shallow_root(self.leaf_a, self.leaf_b)
-        trie = {
-            self.leaf_a.hash(): self._slot(self.storage_id, 0),
-            self.leaf_b.hash(): self._slot(self.storage_id, 1),
-        }
-        self.assertTrue(self._run(root, trie, 2))
-        first = get_record_from_cold_storage(self.node, self.storage_id)
-        self.assertTrue(self._run(root, trie, 2))
-        self.assertEqual(get_record_from_cold_storage(self.node, self.storage_id), first)
+    def test_a_missing_cell_writes_no_entry(self):
+        cells = dict(self.cells)
+        del cells[self.deep.hash()]
+        self.assertFalse(self._run(cells=cells))
+        self.assertIsNone(self._written())
+
+    def test_a_root_that_does_not_match_is_rejected(self):
+        bad = StorageRecord(**{**self.record.__dict__, "slots_root": b"\x77" * 32, "_expr": None})
+        self.assertFalse(self._run(record=bad))
+        self.assertIsNone(self._written())
+
+    def test_a_count_or_size_that_does_not_match_is_rejected(self):
+        for field in ("new_count", "new_size"):
+            fields = {**self.record.__dict__, "_expr": None}
+            fields[field] += 1
+            self.assertFalse(self._run(record=StorageRecord(**fields)), field)
+            self.assertIsNone(self._written(), field)
+
+    def test_an_extra_registered_cell_changes_the_list_and_is_rejected(self):
+        # The same block replayed against a trie that already holds one of its
+        # cells gives another list than the record committed to.
+        self.assertFalse(self._run(registered={self.deep.hash()}))
+        self.assertIsNone(self._written())
+
+    def test_idempotent(self):
+        self.assertTrue(self._run())
+        first = self._written()
+        self.assertTrue(self._run())
+        self.assertEqual(self._written(), first)
+
+    def test_unavailable_block_header_is_a_failure_not_a_raise(self):
+        with patch(self.GET_BLOCK, side_effect=ValueError("no header")):
+            self.assertFalse(fetch_and_store_record(self.node, self.storage_id, self.record))
+        self.assertIsNone(self._written())
 
 
 REC_HASH = b"\x0b" * 32
@@ -285,7 +318,7 @@ class TestLongTermStoreOne(unittest.TestCase):
         fetch.assert_not_called()
 
     def test_header_not_in_trie_noop(self):
-        account = SimpleNamespace(data=SimpleNamespace(root_hash=b"\x01" * 32))
+        account = SimpleNamespace(data=SimpleNamespace(root_hash=b"\x01" * 32, root_block=None))
         node = _lt_node(latest_block=_latest_block(account=account))
         patcher, fetch = self._patch_fetch()
         with patcher, patch(
@@ -299,8 +332,9 @@ class TestLongTermStoreOne(unittest.TestCase):
         fetch.assert_not_called()
 
     def test_happy_path_fetches_and_stores(self):
-        account = SimpleNamespace(data=SimpleNamespace(root_hash=b"\x01" * 32))
+        account = SimpleNamespace(data=SimpleNamespace(root_hash=b"\x01" * 32, root_block=None))
         node = _lt_node(latest_block=_latest_block(account=account))
+        record = StorageRecord(new_count=3, slots_root=b"\x04" * 32)
         patcher, fetch = self._patch_fetch(result=True)
         with patcher, patch(
             "astreum.storage.workers.advertisements.get_record_from_cold_storage",
@@ -309,18 +343,14 @@ class TestLongTermStoreOne(unittest.TestCase):
             "astreum.storage.workers.advertisements.get_from_radix_tree",
             return_value=object(),  # record header sentinel
         ), patch(
-            "astreum.storage.workers.advertisements.parse_record_new_count",
-            return_value=3,
-        ) as mock_count:
+            "astreum.storage.workers.advertisements.parse_record",
+            return_value=record,
+        ) as mock_parse:
             self.assertTrue(_long_term_store_one(node))
-        mock_count.assert_called_once()
+        mock_parse.assert_called_once()
         fetch.assert_called_once()
         args = fetch.call_args.args
-        self.assertEqual(args[0], node)
-        self.assertEqual(args[1], REC_HASH)
-        self.assertIsInstance(args[2], RadixTree)
-        self.assertEqual(args[2].root_hash, b"\x01" * 32)
-        self.assertEqual(args[3], 3)
+        self.assertEqual(args, (node, REC_HASH, record))
         self.assertEqual(node.long_term_cursor, 1)
 
 

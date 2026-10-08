@@ -17,9 +17,16 @@ def handle_expression_account_create(
     if transaction.data._tag != "link" or transaction.data._head is None:
         return False
     data_head = transaction.data._head
-    if data_head._tag != "link" or data_head._head_hash is None:
+    if data_head._tag != "link":
         return False
-    program_hash = data_head._head_hash
+    # The program is named by hash, or already loaded (a transaction read from
+    # a message or fetched whole): its hash is the same.
+    if data_head._head_hash is not None:
+        program_hash = data_head._head_hash
+    elif data_head._head is not None:
+        program_hash = data_head._head.hash()
+    else:
+        return False
 
     if transaction.recipient != b"":
         return False

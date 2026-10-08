@@ -32,7 +32,10 @@ from astreum.consensus.validation.node import validate_blockchain  # noqa: E402
 from astreum.expression import ZERO32  # noqa: E402
 from astreum.node import Node  # noqa: E402
 from astreum.storage.exprs import get_expr_from_local_storage  # noqa: E402
+from astreum.storage.radix import get_all_from_radix_tree  # noqa: E402
 from astreum.storage.records import get_record_from_cold_storage  # noqa: E402
+from astreum.consensus.transaction.storage.model import StorageRecord  # noqa: E402
+from astreum.crypto.merkle import create_merkle_tree  # noqa: E402
 from tests.consensus.validation.test_verify_stake_halving import (  # noqa: E402
     _free_port,
     _genesis_with_stake,
@@ -70,7 +73,7 @@ class TestBlockRecordAndAds(unittest.TestCase):
                 validate_blockchain(cls.node, secret_key)
 
             deadline = time.time() + 900
-            while time.time() < deadline and cls.node.latest_block.height < 2:
+            while time.time() < deadline and cls.node.latest_block.height < 7:
                 time.sleep(0.5)
             cls.node._validation_stop_event.set()
             cls.node.consensus_validation_thread.join(timeout=60)
@@ -133,6 +136,80 @@ class TestBlockRecordAndAds(unittest.TestCase):
                 get_record_from_cold_storage(self.node, block.previous_block_hash)
             )
             self.assertIn(storage_root, slots, f"height {block.height}")
+
+    def _storage_entries(self, block):
+        tree = Accounts(root_hash=block.accounts_hash).get_account(
+            STORAGE_ADDRESS, self.node
+        ).data
+        return get_all_from_radix_tree(tree, self.node)
+
+    def test_record_commits_to_the_records_table_list(self) -> None:
+        for block in self.chain:
+            blob = get_record_from_cold_storage(self.node, block.previous_block_hash)
+            slots = [blob[i : i + 32] for i in range(0, len(blob), 32)]
+            record = StorageRecord.from_expr(
+                self.node, self._storage_entries(block)[block.previous_block_hash]
+            )
+            self.assertIsNotNone(record, f"height {block.height}")
+            self.assertEqual(record.new_count, len(slots), f"height {block.height}")
+            self.assertEqual(
+                record.slots_root, create_merkle_tree(slots).root, f"height {block.height}"
+            )
+
+    def test_the_storage_trie_holds_only_block_records(self) -> None:
+        block_ids = {b.previous_block_hash for b in self.chain}
+        for block in self.chain:
+            entries = self._storage_entries(block)
+            self.assertIn(block.previous_block_hash, entries, f"height {block.height}")
+            for key, value in entries.items():
+                self.assertIn(key, block_ids, f"height {block.height}: stray key {key.hex()[:12]}")
+                self.assertIsNotNone(
+                    StorageRecord.from_expr(self.node, value),
+                    f"height {block.height}: {key.hex()[:12]} is not a record",
+                )
+
+    def test_slots_per_record_stay_about_flat_over_empty_blocks(self) -> None:
+        counts = [
+            StorageRecord.from_expr(
+                self.node, self._storage_entries(b)[b.previous_block_hash]
+            ).new_count
+            for b in self.chain
+        ]
+        self.assertTrue(counts)
+        # Without per-slot trie entries a record no longer covers the previous
+        # records' slots (79, 1,049, 13,129 and 164,076 at heights 1-4 before).
+        # It still re-walks unchanged trie nodes until refs in tries.
+        self.assertLess(max(counts), 1000, counts)
+        # Flat: the records grow with what a block changes (the same three
+        # accounts every block), not with the state or the height.
+        self.assertLess(max(counts[3:]) - min(counts[3:]), 40, counts)
+
+    def test_refs_in_the_accounts_trie_name_the_block_that_holds_the_cell(self) -> None:
+        from astreum.expression.refs import stored_ref_target
+
+        block_ids = {b.expr_id for b in self.chain} | {self.chain[0].previous_block_hash}
+        seen_refs = 0
+        for block in self.chain:
+            accounts = Accounts(root_hash=block.accounts_hash, block_hash=block.expr_id)
+            tree = accounts._trie
+            get_all_from_radix_tree(tree, self.node)
+            for trie_node in tree.nodes.values():
+                for h, blk in (
+                    (trie_node.child_0, trie_node.child_0_block),
+                    (trie_node.child_1, trie_node.child_1_block),
+                ):
+                    if h is None or blk is None:
+                        continue
+                    seen_refs += 1
+                    self.assertIn(blk, block_ids, f"height {block.height}")
+                    self.assertIsNone(
+                        stored_ref_target(get_expr_from_local_storage(self.node, h)),
+                        f"height {block.height}: a ref names a ref",
+                    )
+                    blob = get_record_from_cold_storage(self.node, blk)
+                    if blob is not None:
+                        self.assertIn(h, _slot_ids(blob), f"height {block.height}")
+        self.assertGreater(seen_refs, 0)
 
     def test_record_ids_are_advertised_only_once_the_block_is_built_on(self) -> None:
         head = self.chain[-1]

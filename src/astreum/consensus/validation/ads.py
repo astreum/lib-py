@@ -5,7 +5,7 @@ records B commits (the transactions' records, and the previous block's record).
 Nothing else knows it holds them. Advertising at creation does not work: peers
 drop ids that are not in their latest block's storage trie, and B is not their
 latest block yet. So the ids wait here until a block has been built on B, then
-go out once with ``RESOLUTION_RECORD``.
+go out once.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections import deque
 from typing import Any, NamedTuple, Optional
 
-from astreum.expression import RESOLUTION_RECORD, ZERO32
+from astreum.expression import RESOLUTION_SINGLE, ZERO32
 
 # Blocks whose ads are waiting; the oldest is dropped beyond this.
 MAX_PENDING_ADS = 8
@@ -122,7 +122,7 @@ def flush_ads(node: Any) -> list[bytes]:
     sent: list[bytes] = []
     for entry in ready:
         advertised, warning = advertise_exprs(
-            node, [(expr_id, RESOLUTION_RECORD, None) for expr_id in entry.ids]
+            node, [(expr_id, RESOLUTION_SINGLE, None) for expr_id in entry.ids]
         )
         if warning:
             node.logger.warning("Ads for block #%s: %s", entry.height, warning)

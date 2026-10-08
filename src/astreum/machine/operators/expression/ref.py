@@ -1,28 +1,30 @@
 from typing import List
 
-from astreum.expression import Expr, NIL, ZERO32, get_expr_tag, link, bytes_, str_, symbol
+from astreum.expression import Expr, NIL, ZERO32, link, bytes_, str_, symbol
 from astreum.machine import OpError
-from astreum.storage.exprs import get_expr
+from astreum.machine.operators.expression._scoped import (
+    check_block,
+    fetch,
+    follow_stored_ref,
+    pop_scoped_args,
+)
 
 
-def _ref_thunk(h: bytes) -> Expr:
-    return link(bytes_(h), symbol("ref"))
+def _ref_thunk(block_id: bytes, h: bytes) -> Expr:
+    """``(block_id h ref)``: evaluating it reads *h* from *block_id*."""
+    return link(bytes_(block_id), link(bytes_(h), symbol("ref")))
 
 
 def handle_stack_ref(machine, stack: List[Expr], env) -> None:
-    if not stack:
-        machine.meter.charge_bytes(1)
-        raise OpError("stack underflow")
+    """``(block_id expr_id ref)``: read one cell of *block_id*'s provider.
 
-    hash_expr = stack.pop()
+    A link comes back as thunks for its two children, which carry the same
+    block. If the cell is itself a stored ref it is followed one level, and the
+    thunks carry the block it names.
+    """
+    block_id, expr_id = pop_scoped_args(machine, stack, "ref")
 
-    hash_tag = get_expr_tag(hash_expr)
-    if hash_tag != "bytes":
-        raise OpError(f"ref requires 32-byte hash, got {hash_tag}")
-    if len(hash_expr.value) != 32:
-        raise OpError(f"ref requires 32-byte hash, got {len(hash_expr.value)} bytes")
-
-    if hash_expr.value == ZERO32:
+    if expr_id == ZERO32:
         machine.meter.charge_bytes(1)
         stack.append(NIL)
         return
@@ -30,14 +32,21 @@ def handle_stack_ref(machine, stack: List[Expr], env) -> None:
     if machine.node is None:
         raise OpError("ref requires a node connection")
 
-    resolved = get_expr(machine.node, hash_expr.value)
-    if resolved is None:
-        raise OpError("ref: expression not found")
+    check_block(machine, "ref", block_id)
+    resolved = fetch(machine, "ref", block_id, expr_id)
 
     if resolved._tag == "link":
         if (resolved._head is None and resolved._tail is None
                 and resolved._head_hash is None and resolved._tail_hash is None):
             raise OpError("ref: expression not found")
+
+        block_id, resolved = follow_stored_ref(machine, "ref", block_id, resolved)
+
+    if resolved._tag == "link":
+        if (resolved._head is None and resolved._tail is None
+                and resolved._head_hash is None and resolved._tail_hash is None):
+            stack.append(NIL)
+            return
 
         head_h = resolved._head_hash
         if head_h is None:
@@ -48,7 +57,7 @@ def handle_stack_ref(machine, stack: List[Expr], env) -> None:
             tail_h = resolved._tail.hash() if resolved._tail is not None else ZERO32
 
         machine.meter.charge_bytes(70)
-        stack.append(link(_ref_thunk(head_h), _ref_thunk(tail_h)))
+        stack.append(link(_ref_thunk(block_id, head_h), _ref_thunk(block_id, tail_h)))
     else:
         machine.meter.charge_bytes(resolved.size())
         stack.append(resolved)

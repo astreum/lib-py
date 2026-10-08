@@ -150,7 +150,7 @@ class TestCodec(unittest.TestCase):
             ).to_bytes()
 
     def test_get_roundtrip(self):
-        entries = [(b"\x07" * 32, 2), (b"\x08" * 32, 0)]
+        entries = [(b"\x07" * 32, 2, None), (b"\x08" * 32, 0, None)]
         req = StorageRequest(StorageRequestCode.STORAGE_GET, entries=entries)
         decoded = StorageRequest.from_bytes(req.to_bytes())
         self.assertEqual(decoded.code, StorageRequestCode.STORAGE_GET)
@@ -287,8 +287,8 @@ class TestReceivePath(unittest.TestCase):
             "astreum.storage.radix.get_from_radix_tree",
             side_effect=lambda tree, n, e: e,
         ), patch(
-            "astreum.storage.records.parse_record_new_count",
-            side_effect=lambda n, v: 1 if v in record_ids else None,
+            "astreum.storage.records.parse_record",
+            side_effect=lambda n, v: SimpleNamespace(new_count=1) if v in record_ids else None,
         ), patch.object(
             put_handle, "get_record_from_cold_storage", return_value=None
         ), patch(

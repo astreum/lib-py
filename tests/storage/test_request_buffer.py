@@ -71,8 +71,13 @@ def _drain(node, shared=SHARED):
         message = Message.from_bytes(payload[8:])
         message.decrypt(shared)
         assert message.topic == MessageTopic.STORAGE_REQUEST
-        out.append((address, StorageRequest.from_bytes(message.content).entries))
+        out.append((address, _plain(StorageRequest.from_bytes(message.content).entries)))
     return out
+
+
+def _plain(entries):
+    """``(expr_id, resolution)`` for unscoped entries; scoped ones keep their block."""
+    return [(e[0], e[1]) if e[2] is None else e for e in entries]
 
 
 class TestQueue(unittest.TestCase):
@@ -98,10 +103,10 @@ class TestQueue(unittest.TestCase):
         flush_storage_requests(node)
         self.assertEqual(_drain(node)[0][1], [(a, RESOLUTION_SINGLE), (b, RESOLUTION_LIST)])
 
-    def test_n_gets_produce_ceil_n_over_34_datagrams(self):
+    def test_n_gets_produce_ceil_n_over_17_datagrams(self):
         node = _node()
         per = max_get_entries(1232)
-        self.assertEqual(per, 34)
+        self.assertEqual(per, 17)  # sized for scoped entries, the worst case
         n = 2 * per + 5
         for h in _ids(n):
             queue_storage_get(node, h, RESOLUTION_SINGLE)
@@ -175,7 +180,106 @@ class TestQueue(unittest.TestCase):
         self.assertEqual(enq.call_args.kwargs["difficulty"], 1)
         message = enq.call_args.kwargs["message"]
         message.decrypt(shared)
-        self.assertEqual(StorageRequest.from_bytes(message.content).entries, [(h, RESOLUTION_SINGLE)])
+        self.assertEqual(_plain(StorageRequest.from_bytes(message.content).entries), [(h, RESOLUTION_SINGLE)])
+
+
+class TestScoped(unittest.TestCase):
+    """A GET scoped to a block is routed by the block, not by the expr id."""
+
+    BLOCK = b"\xb1" * 32
+
+    def _provider(self):
+        provider = X25519PrivateKey.generate()
+        relay = provider.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
+        return provider, relay
+
+    def test_routed_to_the_peer_nearest_the_block_not_the_expr(self):
+        near_expr = _peer(9001, key=b"\x21" * 32)
+        near_block = _peer(9002, key=b"\x22" * 32)
+        h = _ids(1)[0]
+        node = _node(peer_for=lambda x: near_block if x == self.BLOCK else near_expr)
+        queue_storage_get(node, h, RESOLUTION_SINGLE, block_hash=self.BLOCK)
+        flush_storage_requests(node)
+        (address, entries), = _drain(node)
+        self.assertEqual(address, ("127.0.0.1", 9002))
+        self.assertEqual(entries, [(h, RESOLUTION_SINGLE, self.BLOCK)])
+
+    def test_unscoped_get_is_still_routed_by_the_expr(self):
+        near_expr = _peer(9001, key=b"\x21" * 32)
+        near_block = _peer(9002, key=b"\x22" * 32)
+        h = _ids(1)[0]
+        node = _node(peer_for=lambda x: near_block if x == self.BLOCK else near_expr)
+        queue_storage_get(node, h, RESOLUTION_SINGLE)
+        flush_storage_requests(node)
+        (address, entries), = _drain(node)
+        self.assertEqual(address, ("127.0.0.1", 9001))
+        self.assertEqual(entries, [(h, RESOLUTION_SINGLE)])
+
+    def test_the_provider_indexed_for_the_block_wins(self):
+        provider, relay = self._provider()
+        node = _node()
+        node.storage_providers.append(
+            b"\x22" * 32 + relay + bytes([10, 0, 0, 7]) + (5000).to_bytes(2, "big")
+        )
+        node.storage_index[self.BLOCK] = 0
+        h = _ids(1)[0]
+        node.storage_index[h] = 99  # the expr's own index entry is not used
+        queue_storage_get(node, h, RESOLUTION_SINGLE, block_hash=self.BLOCK)
+        shared = provider.exchange(node.relay_secret_key.public_key())
+        with patch(ENQUEUE, return_value=True) as enq:
+            flush_storage_requests(node)
+        self.assertEqual(enq.call_args.args[1], ("10.0.0.7", 5000))
+        message = enq.call_args.kwargs["message"]
+        message.decrypt(shared)
+        self.assertEqual(
+            StorageRequest.from_bytes(message.content).entries,
+            [(h, RESOLUTION_SINGLE, self.BLOCK)],
+        )
+
+    def test_the_block_holder_is_asked_first(self):
+        from astreum.consensus.block.holders import init_block_holders, record_block_holder
+
+        provider, relay = self._provider()
+        node = _node()
+        init_block_holders(node)
+        record_block_holder(node, self.BLOCK, (relay, "10.9.9.9", 6100))
+        h = _ids(1)[0]
+        queue_storage_get(node, h, RESOLUTION_SINGLE, block_hash=self.BLOCK)
+        with patch(ENQUEUE, return_value=True) as enq:
+            flush_storage_requests(node)
+        self.assertEqual(enq.call_args.args[1], ("10.9.9.9", 6100))
+
+    def test_scoped_and_plain_entries_share_a_datagram(self):
+        node = _node()
+        a, b = _ids(2)
+        queue_storage_get(node, a, RESOLUTION_SINGLE, block_hash=self.BLOCK)
+        queue_storage_get(node, b, RESOLUTION_SINGLE)
+        flush_storage_requests(node)
+        self.assertEqual(
+            _drain(node)[0][1], [(a, RESOLUTION_SINGLE, self.BLOCK), (b, RESOLUTION_SINGLE)]
+        )
+
+    def test_a_redirect_retry_stays_scoped(self):
+        from astreum.communication.storage_response.retry import (
+            _retry_pending_storage_get_via_peer_contact,
+        )
+
+        provider, relay = self._provider()
+        node = _node()
+        h = _ids(1)[0]
+        claim_expr_req(node, h, RESOLUTION_SINGLE, self.BLOCK)
+        self.assertTrue(
+            _retry_pending_storage_get_via_peer_contact(
+                node, expr_id=h, peer_contact=(relay, "10.1.1.1", 6000)
+            )
+        )
+        shared = provider.exchange(node.relay_secret_key.public_key())
+        flush_storage_requests(node)
+        self.assertEqual(
+            _drain(node, shared)[0][1], [(h, RESOLUTION_SINGLE, self.BLOCK)]
+        )
 
 
 class TestPreclaimed(unittest.TestCase):

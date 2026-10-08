@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Optional, TYPE_CHECKING
 
 from astreum.expression import Expr, NIL, ZERO32, get_expr_tag, get_expr_value
-from astreum.storage.exprs import get_expr_list
+from astreum.storage.pointers import read_pointer
+from astreum.storage.exprs import get_expr, get_expr_list
 from astreum.storage.radix.node.model import RadixNode
 
 if TYPE_CHECKING:
@@ -11,7 +12,7 @@ if TYPE_CHECKING:
 
 
 def get_radix_node_from_storage(
-    astreum_node: "Node", head_hash: bytes, contact=None
+    astreum_node: "Node", head_hash: bytes, contact=None, block_hash=None
 ) -> RadixNode:
     """Deserialize a RadixNode from its S-expression stored at the given hash.
 
@@ -23,6 +24,10 @@ def get_radix_node_from_storage(
         astreum_node: A Node instance for fetching expressions from storage.
         head_hash: The content hash of the serialized node.
         contact: Optional ``(relay_key, address, port)`` for network fetches.
+        block_hash: The block whose record holds this node. Its cells are
+            fetched from that block's provider, and a child or value held by a
+            plain hash is in the same block. A child or value written as a
+            stored ref names its own block.
 
     Returns:
         The deserialized RadixNode.
@@ -35,11 +40,12 @@ def get_radix_node_from_storage(
     if head_hash == ZERO32:
         raise ValueError("empty expr chain for Radix node")
 
-    expr = get_expr_list(astreum_node, head_hash, contact=contact)
+    scope = {} if block_hash is None else {"block_hash": block_hash}
+    expr = get_expr_list(astreum_node, head_hash, contact=contact, **scope)
     if expr is None:
         raise ValueError("could not retrieve Radix node expr from storage")
 
-    elements, missed = resolve_list_exprs(astreum_node, expr, contact=contact)
+    elements, missed = resolve_list_exprs(astreum_node, expr, contact=contact, **scope)
     if missed:
         raise ValueError(
             f"unresolved hashes in Radix node expr (missed={[h.hex()[:8] for h in missed]})"
@@ -53,22 +59,46 @@ def get_radix_node_from_storage(
 
     if get_expr_tag(key_len_expr) != "int":
         raise ValueError("Radix node key_len must be Int")
-    key_len = get_expr_value(key_len_expr, astreum_node, contact=contact)
+    key_len = get_expr_value(key_len_expr, astreum_node, contact=contact, block_hash=block_hash)
 
     if get_expr_tag(key_expr) != "bytes":
         raise ValueError("Radix node key must be Bytes")
-    key = get_expr_value(key_expr, astreum_node, contact=contact)
+    key = get_expr_value(key_expr, astreum_node, contact=contact, block_hash=block_hash)
 
     child_0: Optional[bytes] = None
+    child_0_block: Optional[bytes] = None
     if child_0_expr is not NIL:
-        child_0 = child_0_expr.hash()
+        child_0, child_0_block = read_pointer(astreum_node, child_0_expr, block_hash, contact)
 
     child_1: Optional[bytes] = None
+    child_1_block: Optional[bytes] = None
     if child_1_expr is not NIL:
-        child_1 = child_1_expr.hash()
+        child_1, child_1_block = read_pointer(astreum_node, child_1_expr, block_hash, contact)
 
     value: Optional[Expr] = None
+    value_block: Optional[bytes] = None
     if value_expr is not NIL:
-        value = value_expr
+        value_id, value_block = read_pointer(astreum_node, value_expr, block_hash, contact)
+        if value_id == value_expr.hash():
+            value = value_expr
+        else:
+            value_scope = {} if value_block is None else {"block_hash": value_block}
+            value = get_expr(astreum_node, value_id, contact=contact, **value_scope)
+            if value is None:
+                raise ValueError("could not retrieve Radix node value from storage")
 
-    return RadixNode(key_len=key_len, key=key, value=value, child_0=child_0, child_1=child_1)
+    radix_node = RadixNode(
+        key_len=key_len,
+        key=key,
+        value=value,
+        child_0=child_0,
+        child_1=child_1,
+        child_0_block=child_0_block,
+        child_1_block=child_1_block,
+        value_block=value_block,
+    )
+    # As stored: writing the node again with refs for its pointers would give
+    # another cell until it is changed.
+    radix_node._hash = head_hash
+    radix_node._expr = expr
+    return radix_node

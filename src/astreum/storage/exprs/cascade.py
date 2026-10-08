@@ -8,7 +8,17 @@ from astreum.storage.exprs.hot import get_expr_from_hot_storage
 from astreum.storage.exprs.network import get_expr_from_network
 
 
-def get_expr(node, expr_id: bytes, contact=None) -> Optional[Expr]:
+def _builtin_type_symbol(expr_id: bytes) -> Optional[Expr]:
+    from astreum.expression.expr import _BUILTIN_TYPE_HASH
+
+    name = _BUILTIN_TYPE_HASH.get(expr_id)
+    if name is None:
+        return None
+    symbol = Expr("symbol", value=name)
+    return symbol if symbol.hash() == expr_id else None
+
+
+def get_expr(node, expr_id: bytes, contact=None, block_hash=None) -> Optional[Expr]:
     """Retrieve an Expr using cascading resolution (hot → cold → network).
 
     Tries the in-memory hot cache first, then cold storage on disk,
@@ -22,6 +32,9 @@ def get_expr(node, expr_id: bytes, contact=None) -> Optional[Expr]:
         contact: Optional ``(relay_key, address, port)``. Only the network
             step uses it: the GET goes straight to that peer instead of being
             routed. Hot and cold storage are still checked first.
+        block_hash: Optional block whose provider holds *expr_id*. Only the
+            network step uses it: the GET is routed by the block and asks for
+            *expr_id* there.
 
     Returns:
         The Expr if found, or None.
@@ -37,7 +50,16 @@ def get_expr(node, expr_id: bytes, contact=None) -> Optional[Expr]:
     if expr is not None:
         return expr
 
-    expr = get_expr_from_network(node, expr_id, RESOLUTION_SINGLE, contact=contact)
+    # The symbol of a builtin type is known, and no block holds it: an int or
+    # a float names it by hash, so it is never asked for.
+    known = _builtin_type_symbol(expr_id)
+    if known is not None:
+        return known
+
+    scope = {} if block_hash is None else {"block_hash": block_hash}
+    expr = get_expr_from_network(
+        node, expr_id, RESOLUTION_SINGLE, contact=contact, **scope
+    )
     if expr is not None:
         return expr
 

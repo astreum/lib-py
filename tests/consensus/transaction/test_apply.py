@@ -18,6 +18,10 @@ from astreum.consensus.transaction import apply_transaction
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.transaction.code import TransactionCode
 from astreum.consensus.transaction.storage.contract import calculate_transaction_costs
+from astreum.consensus.transaction.storage.initial import storage_walk_fee
+from astreum.consensus.block.rate import calculate_storage_fee
+from astreum.consensus.models.receipt import Receipt
+from astreum.crypto.bloom_search import make_search_variants
 from astreum.consensus.account import create_account
 from astreum.consensus.models.block import Block
 from astreum.consensus.block.create import create_block
@@ -385,6 +389,128 @@ class TestApplyTransactionFailureReceipt(unittest.TestCase):
             sender.balance,
             1_000_000 - receipt.transaction_fee - receipt.storage_fee,
         )
+
+
+class TestStorageFees(unittest.TestCase):
+    """Storage fees under one record per block: no record is written, the
+    sender pays for each thing by its walk size."""
+
+    def setUp(self):
+        self.node = _FakeNode()
+        self.prev_block = _make_previous_block()
+        self.block = _make_block(self.node, self.prev_block)
+        _seed_storage_account(self.block)
+
+    def _transfer(self, block, sender_pk, sender_key, recipient, amount=1000, node=None):
+        tx = _make_tx(
+            chain_id=1, sender_pk=sender_pk, recipient=recipient,
+            amount=amount, secret_key=sender_key,
+        )
+        node = node or self.node
+        apply_transaction(node, block, _store_tx(node, tx))
+        return tx, block.receipts[-1]
+
+    def _components(self, block, tx, receipt, recipient_is_new):
+        """Fees the receipt's storage_fee is made of, apart from its own."""
+        tx_fee = storage_walk_fee(self.node, block, tx.expr())
+        bloom = calculate_storage_fee(
+            block,
+            2 * len(make_search_variants(
+                tx_hash=tx.expr().hash(), sender=tx.sender, receiver=tx.recipient
+            )),
+        )
+        new_account = 0
+        if recipient_is_new:
+            new_account = storage_walk_fee(
+                self.node, block, create_account(balance=tx.amount).to_expr()
+            )
+        return tx_fee + bloom + new_account
+
+    def test_no_record_is_written(self):
+        sender_pk, sender_key = _seed_sender_account(self.block, balance=1_000_000)
+        self._transfer(self.block, sender_pk, sender_key, os.urandom(32))
+        storage_account = self.block.accounts.get_account(STORAGE_ADDRESS, self.node)
+        self.assertIsNone(storage_account.data.root_hash)
+
+    def test_receipt_storage_fee_is_a_fixed_point_that_includes_the_receipt(self):
+        sender_pk, sender_key = _seed_sender_account(self.block, balance=1_000_000)
+        tx, receipt = self._transfer(self.block, sender_pk, sender_key, os.urandom(32))
+
+        base = self._components(self.block, tx, receipt, recipient_is_new=True)
+        own = storage_walk_fee(
+            self.node, self.block, receipt.expr(),
+            exclude=(tx.expr().hash(), receipt.logs_hash),
+        )
+        self.assertGreater(own, 0)
+        self.assertEqual(receipt.storage_fee, base + own)
+
+    def test_new_account_is_charged_before_the_balance_is_deducted(self):
+        sender_pk, sender_key = _seed_sender_account(self.block, balance=1_000_000)
+        recipient = os.urandom(32)
+        tx, receipt = self._transfer(self.block, sender_pk, sender_key, recipient)
+        new_account_fee = storage_walk_fee(
+            self.node, self.block, create_account(balance=tx.amount).to_expr()
+        )
+        self.assertGreater(new_account_fee, 0)
+
+        # Same transfer to an account that already exists.
+        block2 = _make_block(self.node, self.prev_block)
+        _seed_storage_account(block2)
+        sender2, key2 = _seed_sender_account(block2, balance=1_000_000)
+        existing = os.urandom(32)
+        block2.accounts.set_account(existing, create_account(balance=5))
+        tx2, receipt2 = self._transfer(block2, sender2, key2, existing)
+        self.assertGreater(receipt.storage_fee, receipt2.storage_fee)
+
+        sender = self.block.accounts.get_account(sender_pk, self.node)
+        self.assertEqual(
+            sender.balance, 1_000_000 - tx.amount - receipt.total_fee
+        )
+        storage_account = self.block.accounts.get_account(STORAGE_ADDRESS, self.node)
+        self.assertEqual(storage_account.balance, receipt.storage_fee)
+
+    def test_sender_who_cannot_afford_the_new_account_fails_the_tx(self):
+        sender_pk, sender_key = _seed_sender_account(self.block, balance=1_000_000)
+        tx, receipt = self._transfer(self.block, sender_pk, sender_key, os.urandom(32))
+        needed = tx.amount + receipt.total_fee
+
+        for balance, status in ((needed, STATUS_SUCCESS), (needed - 1, STATUS_FAILED)):
+            block = _make_block(self.node, self.prev_block)
+            _seed_storage_account(block)
+            sender = create_account(balance=balance)
+            block.accounts.set_account(sender_pk, sender)
+            tx2 = _make_tx(
+                chain_id=1, sender_pk=sender_pk, recipient=tx.recipient,
+                amount=tx.amount, secret_key=sender_key,
+            )
+            apply_transaction(self.node, block, _store_tx(self.node, tx2))
+            self.assertEqual(block.receipts[-1].status, status, balance)
+
+    def test_failed_receipt_records_the_failed_status(self):
+        # The affordability check runs after the receipt is first built; the
+        # stored receipt must still say failed.
+        sender_pk, sender_key = _seed_sender_account(self.block, balance=1_000_000)
+        tx, receipt = self._transfer(self.block, sender_pk, sender_key, os.urandom(32))
+        block = _make_block(self.node, self.prev_block)
+        _seed_storage_account(block)
+        block.accounts.set_account(
+            sender_pk, create_account(balance=tx.amount + receipt.total_fee - 1)
+        )
+        tx2 = _make_tx(
+            chain_id=1, sender_pk=sender_pk, recipient=tx.recipient,
+            amount=tx.amount, secret_key=sender_key,
+        )
+        apply_transaction(self.node, block, _store_tx(self.node, tx2))
+        self.assertEqual(block.receipts[-1].status, STATUS_FAILED)
+        # The expr that goes into the receipts trie says the same.
+        r = block.receipts[-1]
+        failed = Receipt(
+            transaction_hash=r.transaction_hash, transaction_fee=r.transaction_fee,
+            storage_fee=r.storage_fee, data_fee=r.data_fee,
+            execution_fee=r.execution_fee, status=STATUS_FAILED,
+            logs_hash=r.logs_hash,
+        )
+        self.assertEqual(r.expr().hash(), failed.expr().hash())
 
 
 if __name__ == "__main__":

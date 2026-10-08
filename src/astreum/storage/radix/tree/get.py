@@ -4,12 +4,57 @@ from typing import Optional, TYPE_CHECKING
 
 from astreum.expression import Expr, ZERO32
 from astreum.storage.exprs import get_expr
+from astreum.storage.radix.node import RadixNode
 from astreum.storage.radix.tree.model import RadixTree
 from astreum.storage.radix.tree.bit import _bit, _match_prefix
 from astreum.storage.radix.tree.fetch import fetch_node_from_radix_tree
 
 if TYPE_CHECKING:
     from astreum._node import Node
+
+
+def _find_node(tree: RadixTree, astreum_node: "Node", key: bytes) -> Optional[RadixNode]:
+    """The node holding *key*, or None. Each node is fetched from the block
+    that holds it: the tree's root block for the root, then the block a child
+    pointer names (a plain hash is in the block of the node that holds it)."""
+    if tree.root_hash is None or tree.root_hash == ZERO32:
+        return None
+
+    current = fetch_node_from_radix_tree(
+        tree, astreum_node, tree.root_hash, tree.root_block
+    )
+    if current is None:
+        return None
+
+    key_pos = 0
+
+    while current is not None:
+        if not _match_prefix(current.key, current.key_len, key, key_pos):
+            return None
+        key_pos += current.key_len
+
+        if key_pos == len(key) * 8:
+            return current
+
+        try:
+            next_bit = _bit(key, key_pos)
+        except IndexError:
+            return None
+
+        if next_bit:
+            child_hash, child_block = current.child_1, current.child_1_block
+        else:
+            child_hash, child_block = current.child_0, current.child_0_block
+        if child_hash is None:
+            return None
+
+        current = fetch_node_from_radix_tree(tree, astreum_node, child_hash, child_block)
+        if current is None:
+            return None
+
+        key_pos += 1
+
+    return None
 
 
 def exists_in_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes) -> bool:
@@ -19,39 +64,24 @@ def exists_in_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes) -> b
     without materializing the stored value (no ``get_expr`` on the leaf), so
     checking existence does not trigger storage reads for the value.
     """
-    if tree.root_hash is None or tree.root_hash == ZERO32:
-        return False
+    found = _find_node(tree, astreum_node, key)
+    return found is not None and found.value is not None
 
-    current = fetch_node_from_radix_tree(tree, astreum_node, tree.root_hash)
-    if current is None:
-        return False
 
-    key_pos = 0
-
-    while current is not None:
-        if not _match_prefix(current.key, current.key_len, key, key_pos):
-            return False
-        key_pos += current.key_len
-
-        if key_pos == len(key) * 8:
-            return current.value is not None
-
-        try:
-            next_bit = _bit(key, key_pos)
-        except IndexError:
-            return False
-
-        child_hash = current.child_1 if next_bit else current.child_0
-        if child_hash is None:
-            return False
-
-        current = fetch_node_from_radix_tree(tree, astreum_node, child_hash)
-        if current is None:
-            return False
-
-        key_pos += 1
-
-    return False
+def get_from_radix_tree_with_block(
+    tree: RadixTree, astreum_node: "Node", key: bytes
+) -> tuple[Optional[Expr], Optional[bytes]]:
+    """``(value, block)`` for *key*: the value and the block whose record holds
+    it (None if the value is new, or the tree is not tied to a block). The
+    cells below a value held by a plain hash are in that block."""
+    found = _find_node(tree, astreum_node, key)
+    if found is None or found.value is None:
+        return None, None
+    val = found.value
+    if isinstance(val, bytes):
+        scope = {} if found.value_block is None else {"block_hash": found.value_block}
+        return get_expr(astreum_node, val, contact=tree.contact, **scope), found.value_block
+    return val, found.value_block
 
 
 def get_from_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes) -> Optional[Expr]:
@@ -69,41 +99,4 @@ def get_from_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes) -> Op
     Returns:
         The Expr if found, or None.
     """
-    if tree.root_hash is None or tree.root_hash == ZERO32:
-        return None
-
-    current = fetch_node_from_radix_tree(tree, astreum_node, tree.root_hash)
-    if current is None:
-        return None
-
-    key_pos = 0
-
-    while current is not None:
-        if not _match_prefix(current.key, current.key_len, key, key_pos):
-            return None
-        key_pos += current.key_len
-
-        if key_pos == len(key) * 8:
-            val = current.value
-            if val is None:
-                return None
-            if isinstance(val, bytes):
-                return get_expr(astreum_node, val, contact=tree.contact)
-            return val
-
-        try:
-            next_bit = _bit(key, key_pos)
-        except IndexError:
-            return None
-
-        child_hash = current.child_1 if next_bit else current.child_0
-        if child_hash is None:
-            return None
-
-        current = fetch_node_from_radix_tree(tree, astreum_node, child_hash)
-        if current is None:
-            return None
-
-        key_pos += 1
-
-    return None
+    return get_from_radix_tree_with_block(tree, astreum_node, key)[0]

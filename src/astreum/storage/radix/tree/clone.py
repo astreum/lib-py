@@ -8,6 +8,7 @@ def clone_radix_tree(tree: RadixTree) -> RadixTree:
     cloned = RadixTree(
         root_hash=None if tree.root_hash is None else tree.root_hash,
         contact=tree.contact,
+        root_block=tree.root_block,
     )
     cloned.nodes = {
         node_hash: clone_radix_node(node)

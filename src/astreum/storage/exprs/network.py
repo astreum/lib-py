@@ -9,6 +9,13 @@ from astreum.storage.exprs.local import get_expr_from_local_storage
 from astreum.expression import Expr, ZERO32, RESOLUTION_SINGLE, RESOLUTION_LIST, RESOLUTION_FULL
 
 
+def _is_builtin_type_hash(h: bytes) -> bool:
+    """The type symbol of an int, str or float: known, never fetched."""
+    from astreum.expression.expr import _BUILTIN_TYPE_HASH, BUILTIN_COMPOSITE_TYPE_NAMES
+
+    return _BUILTIN_TYPE_HASH.get(h) in BUILTIN_COMPOSITE_TYPE_NAMES
+
+
 def _collect_missing_hashes(expr: Expr, resolution: int) -> list[bytes]:
     """Return unresolved hashes from a partially-resolved expr."""
     missing: list[bytes] = []
@@ -31,7 +38,7 @@ def _collect_missing_hashes(expr: Expr, resolution: int) -> list[bytes]:
                 missing.append(e._head_hash)
             if e._tail is not None:
                 stack.append(e._tail)
-            elif e._tail_hash is not None:
+            elif e._tail_hash is not None and not _is_builtin_type_hash(e._tail_hash):
                 missing.append(e._tail_hash)
     return missing
 
@@ -67,12 +74,13 @@ def _poll_local(node, expr_ids: list[bytes]) -> dict[bytes, Optional[Expr]]:
 
 
 def _resolve_structured(
-    node, expr_id: bytes, resolution: int, contact=None
+    node, expr_id: bytes, resolution: int, contact=None, block_hash=None
 ) -> Optional[Expr]:
     """Poll for a LIST/FULL expr, fetching its missing inner hashes as one batch.
 
-    *contact* keeps the follow-up fetch of the missing inner hashes on the same
-    peer as the root fetch.
+    *contact* and *block_hash* keep the follow-up fetch of the missing inner
+    hashes on the same peer and block as the root fetch: a cell reached by
+    plain hash is in the block of the cell that holds it.
     """
     interval = node.config["storage_fetch_interval"]
     retries = node.config["storage_fetch_retries"]
@@ -89,7 +97,10 @@ def _resolve_structured(
             if not missing:
                 return raw
             get_exprs_from_network(
-                node, [(h, RESOLUTION_SINGLE) for h in missing], contact=contact
+                node,
+                [(h, RESOLUTION_SINGLE) for h in missing],
+                contact=contact,
+                **({} if block_hash is None else {"block_hash": block_hash}),
             )
         else:
             sleep(interval)
@@ -97,7 +108,7 @@ def _resolve_structured(
 
 
 def get_exprs_from_network(
-    node, entries: list[tuple[bytes, int]], contact=None
+    node, entries: list[tuple[bytes, int]], contact=None, block_hash=None
 ) -> dict[bytes, Optional[Expr]]:
     """Fetch many Exprs from the P2P network, batching the requests.
 
@@ -118,6 +129,9 @@ def get_exprs_from_network(
             of routing each hash by the index or xor distance. Used for data
             only its creator holds (an uncommitted block's exprs). Local
             storage is still checked first.
+        block_hash: Ask the provider of this block for every entry (scoped
+            GETs, routed by the block hash) instead of routing each by its own
+            hash. Only a miss in local storage is affected.
 
     Returns:
         ``{expr_id: Expr | None}`` for every requested hash. ``None`` means the
@@ -136,6 +150,10 @@ def get_exprs_from_network(
 
     from astreum.storage.workers.requests import queue_storage_get
 
+    # Only a scoped call passes block_hash on, so a GET by expr_id alone is
+    # queued exactly as before. A *contact* already names the peer to ask,
+    # which makes the block redundant.
+    scope = {} if block_hash is None or contact is not None else {"block_hash": block_hash}
     waiting_flat: list[bytes] = []
     waiting_structured: list[tuple[bytes, int]] = []
     for expr_id, resolution in requested.items():
@@ -145,7 +163,7 @@ def get_exprs_from_network(
                 results[expr_id] = local
                 continue
         node.logger.debug("Attempting network fetch for %s (resolution=%s)", expr_id.hex(), resolution)
-        if not queue_storage_get(node, expr_id, resolution, contact=contact):
+        if not queue_storage_get(node, expr_id, resolution, contact=contact, **scope):
             node.logger.debug("Network request failed for %s: nothing to send to", expr_id.hex())
             continue
         if resolution in (RESOLUTION_LIST, RESOLUTION_FULL):
@@ -156,12 +174,14 @@ def get_exprs_from_network(
     if waiting_flat:
         results.update(_poll_local(node, waiting_flat))
     for expr_id, resolution in waiting_structured:
-        results[expr_id] = _resolve_structured(node, expr_id, resolution, contact)
+        results[expr_id] = _resolve_structured(
+            node, expr_id, resolution, contact, block_hash
+        )
     return results
 
 
 def get_expr_from_network(
-    node, expr_id: bytes, resolution: int = RESOLUTION_SINGLE, contact=None
+    node, expr_id: bytes, resolution: int = RESOLUTION_SINGLE, contact=None, block_hash=None
 ) -> Optional[Expr]:
     """Fetch one Expr from the P2P network; a batch of one.
 
@@ -171,15 +191,18 @@ def get_expr_from_network(
         node: A Node instance providing config and storage access.
         expr_id: The content hash of the expression to fetch.
         contact: Optional ``(relay_key, address, port)`` to ask directly.
+        block_hash: Optional block whose provider holds *expr_id*.
         resolution: The resolution strategy — ``RESOLUTION_SINGLE``
-            (default), ``RESOLUTION_LIST``, ``RESOLUTION_FULL`` or
-            ``RESOLUTION_RECORD``.
+            (default), ``RESOLUTION_LIST`` or ``RESOLUTION_FULL``.
 
     Returns:
         The fetched Expr, or None if all retries are exhausted, nothing could
         be sent, or the node is disconnected.
     """
-    return get_exprs_from_network(node, [(expr_id, resolution)], contact=contact).get(expr_id)
+    scope = {} if block_hash is None else {"block_hash": block_hash}
+    return get_exprs_from_network(
+        node, [(expr_id, resolution)], contact=contact, **scope
+    ).get(expr_id)
 
 
 def _is_resolved_locally(node, expr_id: bytes, resolution: int) -> bool:
@@ -197,7 +220,7 @@ def _is_resolved_locally(node, expr_id: bytes, resolution: int) -> bool:
 
 
 def prefetch_exprs_from_network(
-    node, expr_ids, resolution: int = RESOLUTION_SINGLE, contact=None
+    node, expr_ids, resolution: int = RESOLUTION_SINGLE, contact=None, block_hash=None
 ) -> None:
     """Fetch, as one batch, the *expr_ids* that are not already fully local.
 
@@ -216,7 +239,8 @@ def prefetch_exprs_from_network(
             if h and h != ZERO32 and not _is_resolved_locally(node, h, resolution)
         ]
         if wanted:
-            get_exprs_from_network(node, wanted, contact=contact)
+            scope = {} if block_hash is None else {"block_hash": block_hash}
+            get_exprs_from_network(node, wanted, contact=contact, **scope)
     except Exception as exc:
         node.logger.debug("Prefetch of %d exprs failed: %s", len(list(expr_ids)), exc)
 

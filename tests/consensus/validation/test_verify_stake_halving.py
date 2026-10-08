@@ -33,7 +33,6 @@ if str(SRC_DIR) not in sys.path:
 from astreum.communication.disconnect import disconnect_node  # noqa: E402
 from astreum.communication.node import connect_node  # noqa: E402
 from astreum.consensus.account import create_account  # noqa: E402
-from astreum.consensus.account.model import generate_new_account_storage_contracts  # noqa: E402
 from astreum.consensus.block.create import create_block  # noqa: E402
 from astreum.consensus.block.encoding.decode import get_block_from_storage  # noqa: E402
 from astreum.consensus.block.verify import transactions as verify_transactions  # noqa: E402
@@ -46,6 +45,8 @@ from astreum.consensus.validation import node as validation_node  # noqa: E402
 from astreum.consensus.validation.node import validate_blockchain  # noqa: E402
 from astreum.expression import ZERO32, resolve_inner_exprs  # noqa: E402
 from astreum.expression.encoding import decode_expr_from_bytes, encode_expr_to_bytes  # noqa: E402
+from astreum.crypto.merkle import create_merkle_tree  # noqa: E402
+from astreum.storage.records import get_record_from_cold_storage  # noqa: E402
 from astreum.storage.exprs import get_expr_from_local_storage, put_expr_in_hot_storage  # noqa: E402
 from astreum.node import Node  # noqa: E402
 from astreum.storage.radix import RadixTree, put_in_radix_tree  # noqa: E402
@@ -95,14 +96,6 @@ def _genesis_with_stake(node, validator_public_key, chain_id=0):
         transactions=[],
         receipts=[],
     )
-    generate_new_account_storage_contracts(
-        node, block, storage_account, treasury_record_head, mint=True
-    )
-    generate_new_account_storage_contracts(
-        node, block, storage_account, validator_account.expr(), mint=True
-    )
-    accounts.update_trie(node)
-    block.accounts_hash = accounts._trie.root_hash or ZERO32
     return block
 
 
@@ -270,6 +263,49 @@ class TestVerifyStakeHalving(unittest.TestCase):
             ok, reason = verify_block_transactions(self.node, first)
         self.assertFalse(ok)
         self.assertEqual(reason, "accounts hash mismatch")
+
+    def test_a_different_slots_root_fails_the_block(self) -> None:
+        # The record carries slots_root, so a record built with another root
+        # gives another storage trie and the block's accounts hash no longer
+        # matches. The same walk, same root, is what lets the blocks above pass.
+        first = self.chain[0]
+        real = verify_transactions.generate_initial_storage_record
+
+        def tampered(*args, **kwargs):
+            result = real(*args, **kwargs)
+            if result is None:
+                return result
+            record, slots, found, fee = result
+            record.slots_root = bytes(32 - 1) + b"\x01"
+            record._expr = None
+            return record, slots, found, fee
+
+        with mock.patch.object(
+            verify_transactions, "generate_initial_storage_record", tampered
+        ):
+            ok, reason = verify_block_transactions(self.node, first)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "accounts hash mismatch")
+
+    def test_the_builder_and_verifier_derive_the_same_slots_root(self) -> None:
+        for block in self.chain:
+            record_id = block.previous_block_hash
+            blob = get_record_from_cold_storage(self.node, record_id)  # the builder's list
+            real = verify_transactions.generate_initial_storage_record
+            seen = {}
+
+            def spy(*args, **kwargs):
+                result = real(*args, **kwargs)
+                if result is not None:
+                    seen["slots"] = result[1]
+                    seen["root"] = result[0].slots_root
+                return result
+
+            with mock.patch.object(verify_transactions, "generate_initial_storage_record", spy):
+                ok, reason = verify_block_transactions(self.node, block)
+            self.assertTrue(ok, reason)
+            self.assertEqual(b"".join(seen["slots"]), blob, f"height {block.height}")
+            self.assertEqual(seen["root"], create_merkle_tree(seen["slots"]).root)
 
 
 if __name__ == "__main__":

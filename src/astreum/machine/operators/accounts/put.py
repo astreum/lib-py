@@ -2,7 +2,6 @@ from astreum.machine import OpError
 
 from astreum.consensus.block.rate import calculate_storage_fee
 from astreum.storage.radix import put_in_radix_tree
-from astreum.consensus.transaction.storage.pending import add_pending_storage_contract
 from astreum.expression import Expr, NIL, ZERO32, get_expr_tag, link, str_, symbol
 from astreum.consensus.constants import STORAGE_ADDRESS
 
@@ -33,10 +32,6 @@ def handle_stack_acc_put(machine, stack, env):
 
     put_in_radix_tree(expression_account.data, machine.node, key, value_expr)
     expression_account.data_hash = expression_account.data.root_hash or ZERO32
-
-    add_pending_storage_contract(
-        machine.node, machine.block, machine.tx.recipient, key, value_expr,
-    )
 
     machine.block.accounts.set_account(machine.tx.recipient, expression_account)
     machine.block.accounts.set_account(machine.tx.sender, sender_account)

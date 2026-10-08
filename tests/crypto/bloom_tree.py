@@ -133,5 +133,49 @@ class TestBloomTree(unittest.TestCase):
         self.assertEqual(bloom_search(tree.root, variants[0]), [h1])
 
 
+class TestBloomSearchScoped(unittest.TestCase):
+    """A sealed era's bloom nodes are asked from the block whose header holds
+    the root; a child by plain hash is in the same block."""
+
+    def test_nodes_are_fetched_scoped_by_the_block(self):
+        from unittest import mock
+
+        from astreum.crypto.bloom_tree.tree import bloom_search_storage
+
+        tree = BloomTree()
+        block_hash = os.urandom(32)
+        variants = make_search_variants(os.urandom(32), os.urandom(32), os.urandom(32))
+        tree.insert(0, variants)
+        tree.set_leaf_start_hash(0, block_hash)
+
+        stored = {}
+
+        def collect(node):
+            if node is None:
+                return
+            node._expr = None
+            collect(node.left)
+            collect(node.right)
+            expr = node.expr()
+            stored[expr.hash()] = expr
+
+        collect(tree.root)
+        header_block = os.urandom(32)
+        seen = []
+
+        def fake_get_expr(astreum_node, expr_id, contact=None, **kw):
+            seen.append(kw.get("block_hash"))
+            return stored.get(expr_id)
+
+        with mock.patch("astreum.crypto.bloom_tree.tree.get_expr", side_effect=fake_get_expr):
+            hits = bloom_search_storage(
+                tree.root.expr().hash(), variants[0], object(), block_hash=header_block
+            )
+
+        self.assertEqual(hits, [block_hash])
+        self.assertGreater(len(seen), 1)
+        self.assertEqual(set(seen), {header_block})
+
+
 if __name__ == "__main__":
     unittest.main()

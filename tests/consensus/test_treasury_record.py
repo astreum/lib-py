@@ -262,8 +262,9 @@ class TestTreasuryGuarantee(unittest.TestCase):
         self.assertEqual(nodes[1].value, 8)  # duration
         self.assertEqual(nodes[2].value, 50)  # price
         self.assertEqual(nodes[3].value, 100)  # expiry
-        self.assertEqual(nodes[4]._tag, "link")
-        self.assertEqual(nodes[4]._head_hash, ZERO32)  # claimed_by (unclaimed)
+        # claimed_by (unclaimed): an address, a bytes value, not a hash link
+        self.assertEqual(nodes[4]._tag, "bytes")
+        self.assertEqual(nodes[4].value, ZERO32)
 
     def test_round_trip_unclaimed(self):
         node = _FakeNode()

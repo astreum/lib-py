@@ -5,11 +5,7 @@ from typing import Any, Tuple
 from astreum.expression import Expr, NIL, ZERO32, link
 from astreum.machine.meter import MeterExceededError
 from astreum.machine.main import Machine
-from astreum.storage.exprs import get_expr
-from astreum.consensus.transaction.storage.pending import (
-    add_pending_storage_contract,
-    remove_pending_storage_contract,
-)
+from astreum.storage.exprs import get_expr_full
 
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 
@@ -35,7 +31,16 @@ def handle_expression_account_call(
     if expression_account is None or expression_account.code_hash == ZERO32:
         return STATUS_FAILED, machine.meter.eval, machine.meter.storage, []
 
-    program_expr = get_expr(node, expression_account.code_hash, contact=block.contact)
+    # The whole program, not its root cell: a node that fetched it holds cells
+    # with children by hash, and the machine runs only what is linked. The
+    # cells are in the block that holds the account's code root.
+    scope = (
+        {} if expression_account.code_block is None
+        else {"block_hash": expression_account.code_block}
+    )
+    program_expr = get_expr_full(
+        node, expression_account.code_hash, contact=block.contact, **scope
+    )
     if program_expr is None:
         return STATUS_FAILED, machine.meter.eval, machine.meter.storage, []
 
@@ -57,9 +62,6 @@ def handle_expression_account_call(
         logs = machine.logs
         return STATUS_FAILED, machine.meter.eval, machine.meter.storage, logs
 
-    # Success: snapshot is discarded — block already holds the live mutated
-    # state. Remove log storage contracts (finalised into the receipt).
+    # Success: snapshot is discarded — block already holds the live mutated state.
     logs = machine.logs
-    for entry in machine.log_contract_entries:
-        remove_pending_storage_contract(block, entry)
     return STATUS_SUCCESS, machine.meter.eval, machine.meter.storage, logs

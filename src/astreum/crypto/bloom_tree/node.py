@@ -22,6 +22,13 @@ class BloomNode:
         self.right: BloomNode | None = None
         self._left_hash: bytes | None = None
         self._right_hash: bytes | None = None
+        # The block whose record holds each child cell, when the cell is older
+        # than the block writing this node (the child is written as a ref).
+        self._left_block: bytes | None = None
+        self._right_block: bytes | None = None
+        # ``(expr_id, block)`` of the cell this node was loaded from, so an
+        # unchanged node is written as the same cell, by a ref to its block.
+        self._stored: tuple[bytes, bytes | None] | None = None
         self._expr = None  # cached expr
 
     @property

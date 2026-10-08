@@ -4,7 +4,7 @@ from dataclasses import replace
 
 from astreum.storage.radix import RadixTree, get_from_radix_tree, get_radix_node_expr, put_in_radix_tree
 from astreum.expression import Expr, ZERO32, resolve_inner_exprs
-from astreum.consensus.transaction.treasury.record import TreasuryLoanRecord, TreasuryUserRecord
+from astreum.consensus.transaction.treasury.record import TreasuryLoanRecord, TreasuryUserRecord, load_user_record
 
 
 def _collect_sub_exprs(expr: Expr) -> list:
@@ -111,8 +111,7 @@ def _release_guarantees(
     for guarantor_address, returned in returned_by_guarantor.items():
         if returned <= 0:
             continue
-        guarantor_record_head = get_from_radix_tree(treasury_account.data, node, guarantor_address)
-        guarantor_record = TreasuryUserRecord.from_storage(node, guarantor_record_head or ZERO32, contact=treasury_account.data.contact)
+        guarantor_record = load_user_record(node, treasury_account.data, guarantor_address, contact=treasury_account.data.contact)
         if guarantor_record is None:
             continue
         updated_guarantor_record = replace(

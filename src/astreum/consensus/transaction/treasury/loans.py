@@ -5,9 +5,10 @@ from typing import Any
 
 from astreum.expression import Expr, resolve_inner_exprs
 from astreum.expression import ZERO32
-from astreum.storage.radix import RadixTree, get_all_from_radix_tree, get_from_radix_tree, put_in_radix_tree
+from astreum.storage.radix import RadixTree, get_all_from_radix_tree_with_blocks, get_from_radix_tree, put_in_radix_tree
 from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.consensus.transaction.treasury.record import (
+    load_user_record,
     LoanType,
     TreasuryLoanRecord,
     TreasuryUserRecord,
@@ -104,6 +105,7 @@ def _apply_treasury_loan_payment(
     updated_user_record = replace(
         user_record,
         loans_root_hash=loans_trie.root_hash or ZERO32,
+        loans_root_block=loans_trie.root_block,
         total_interest_paid=user_record.total_interest_paid + interest_delta,
     )
     updated_user_record_head = updated_user_record.expr().hash()
@@ -132,17 +134,24 @@ def apply_treasury_loan_payments_from_stake_return(
     if treasury_account is None:
         return False
 
-    user_record_head = get_from_radix_tree(treasury_account.data, node, borrower)
-    user_record = TreasuryUserRecord.from_storage(node, user_record_head or ZERO32, contact=accounts.contact)
+    user_record = load_user_record(node, treasury_account.data, borrower, contact=accounts.contact)
     if user_record is None or user_record.balance < amount:
         return False
     if user_record.loans_root_hash == ZERO32:
         return True
 
-    loans_trie = RadixTree(root_hash=user_record.loans_root_hash, contact=accounts.contact)
+    loans_trie = RadixTree(
+        root_hash=user_record.loans_root_hash,
+        contact=accounts.contact,
+        root_block=user_record.loans_root_block,
+    )
     active_loans: list[tuple[int, bytes, TreasuryLoanRecord]] = []
-    for loan_transaction_id, loan_record_head in get_all_from_radix_tree(loans_trie, node).items():
-        loan = TreasuryLoanRecord.from_storage(node, loan_record_head, contact=accounts.contact)
+    for loan_transaction_id, (loan_record_head, loan_block) in get_all_from_radix_tree_with_blocks(
+        loans_trie, node
+    ).items():
+        loan = TreasuryLoanRecord.from_storage(
+            node, loan_record_head, contact=accounts.contact, block_hash=loan_block
+        )
         if (
             loan is None
             or loan.loan_type != LoanType.SECURED

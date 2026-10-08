@@ -172,7 +172,6 @@ class TestStorageIndexing(unittest.TestCase):
             last_payment_winner=ZERO32,
             new_size=0,
             new_count=0,
-            mint=True,
         ).expr()
         for key in keys:
             put_in_radix_tree(tree, node, key, record_expr)

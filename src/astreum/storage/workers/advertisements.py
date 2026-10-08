@@ -10,7 +10,7 @@ from astreum.storage.requests import prune_expired_expr_reqs
 from astreum.storage.records import (
     fetch_and_store_record,
     get_record_from_cold_storage,
-    parse_record_new_count,
+    parse_record,
 )
 
 if TYPE_CHECKING:
@@ -98,12 +98,14 @@ def _long_term_store_one(node: "Node") -> bool:
     if storage_account is None or storage_account.data.root_hash is None:
         return False
 
-    tree = RadixTree(root_hash=storage_account.data.root_hash)  # fresh per expr: bounded memory
-    new_count = parse_record_new_count(node, get_from_radix_tree(tree, node, storage_id))
-    if new_count is None:
+    tree = RadixTree(
+        root_hash=storage_account.data.root_hash, root_block=storage_account.data.root_block
+    )  # fresh per expr: bounded memory
+    record = parse_record(node, get_from_radix_tree(tree, node, storage_id))
+    if record is None:
         return False
 
-    return fetch_and_store_record(node, storage_id, tree, new_count)
+    return fetch_and_store_record(node, storage_id, record)
 
 
 def advertise_storage(astreum_node: "Node") -> None:

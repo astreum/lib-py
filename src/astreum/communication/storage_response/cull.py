@@ -1,9 +1,8 @@
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from astreum.expression import (
     RESOLUTION_FULL,
     RESOLUTION_LIST,
-    RESOLUTION_RECORD,
     ZERO32,
     Expr,
 )
@@ -30,20 +29,13 @@ def cull_to_resolution(
     root: Expr,
     exprs: List[Expr],
     resolution: Optional[int],
-    resolve_local: Optional[Callable[[bytes], Optional[Expr]]] = None,
 ) -> List[Expr]:
     """Keep only the delivered exprs within the requested ``resolution``.
 
-    SINGLE keeps the root; LIST the root and its tail chain; FULL and RECORD
-    everything reachable from the root through head and tail links. Only exprs
-    present in ``exprs`` can be kept, each at most once, root first. Anything
-    else in the reply is dropped.
-
-    ``resolve_local`` (used for RECORD) lets the walk step through nodes the
-    requester already holds but the reply did not carry: a record reply is the
-    root plus its slot exprs, and a slot may sit below such a node. Those nodes
-    are traversed, never returned. The walk stops once every delivered expr
-    has been placed.
+    SINGLE keeps the root; LIST the root and its tail chain; FULL everything
+    reachable from the root through head and tail links. Only exprs present in
+    ``exprs`` can be kept, each at most once, root first. Anything else in the
+    reply is dropped.
     """
     by_hash: Dict[bytes, Expr] = {}
     for expr in exprs:
@@ -72,7 +64,6 @@ def cull_to_resolution(
             current = nxt
         return kept
 
-    use_local = resolve_local is not None and resolution >= RESOLUTION_RECORD
     remaining = len(by_hash) - 1
     stack = [root]
     while stack and remaining > 0:
@@ -86,9 +77,4 @@ def cull_to_resolution(
                 kept.append(child)
                 remaining -= 1
                 stack.append(child)
-            elif use_local:
-                local = resolve_local(h)
-                if local is not None:
-                    seen.add(h)
-                    stack.append(local)
     return kept

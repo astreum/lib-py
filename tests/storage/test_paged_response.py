@@ -10,7 +10,6 @@ for p in (str(ROOT), str(ROOT / "src")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from astreum.communication.storage_request.handle import _collect_record_exprs
 from astreum.communication.storage_response import handle as resp_handle
 from astreum.communication.storage_response.code import StorageResponseCode
 from astreum.communication.storage_response.cull import cull_to_resolution
@@ -23,7 +22,6 @@ from astreum.expression import (
     NIL,
     RESOLUTION_FULL,
     RESOLUTION_LIST,
-    RESOLUTION_RECORD,
     RESOLUTION_SINGLE,
     ZERO32,
     bytes_,
@@ -302,50 +300,6 @@ class TestCull(unittest.TestCase):
         self.assertEqual(set(_hashes(kept)), _stored_set(partial))
 
 
-class TestCullRecord(unittest.TestCase):
-    """RECORD reply built through the real serve path (blob + collect)."""
-
-    def setUp(self):
-        self.slot_a = link(bytes_(b"slot-a"), NIL)
-        self.slot_b = link(bytes_(b"slot-b"), NIL)
-        # slot_b sits under `mid`, a node the requester already holds.
-        self.mid = link(self.slot_b, NIL)
-        self.root = link(self.slot_a, self.mid)
-        self.blob = self.slot_a.hash() + ZERO32 + self.slot_b.hash()
-        self.junk = bytes_(b"junk")
-
-    def _served(self):
-        held = {self.slot_a.hash(): self.slot_a, self.slot_b.hash(): self.slot_b}
-        with patch(
-            "astreum.communication.storage_request.handle.get_record_from_cold_storage",
-            return_value=self.blob,
-        ), patch(
-            "astreum.communication.storage_request.handle.get_expr_from_local_storage",
-            side_effect=lambda _n, h: held.get(h),
-        ):
-            return _collect_record_exprs(None, self.root, self.root.hash())
-
-    def test_every_nonzero_slot_survives(self):
-        wire = _wire(self._served()) + [self.junk]
-        root = wire[0]
-        local = {self.mid.hash(): self.mid}
-        kept = cull_to_resolution(root, wire, RESOLUTION_RECORD, resolve_local=local.get)
-        got = set(_hashes(kept))
-        for offset in range(0, len(self.blob), 32):
-            slot_id = self.blob[offset : offset + 32]
-            if slot_id != ZERO32:
-                self.assertIn(slot_id, got)
-        self.assertNotIn(self.junk.hash(), got)
-        self.assertNotIn(self.mid.hash(), got)  # traversed, not re-stored
-
-    def test_unreachable_slot_dropped_without_local_path(self):
-        wire = _wire(self._served())
-        kept = cull_to_resolution(wire[0], wire, RESOLUTION_RECORD, resolve_local=lambda h: None)
-        got = set(_hashes(kept))
-        self.assertIn(self.slot_a.hash(), got)
-        self.assertNotIn(self.slot_b.hash(), got)
-
-
 class TestReceiver(unittest.TestCase):
     def _peer(self, key=PEER_A):
         return SimpleNamespace(address=("127.0.0.1", 1), public_key_bytes=key, metrics={})
@@ -357,7 +311,6 @@ class TestReceiver(unittest.TestCase):
         if put is None:
             put = lambda n, e: stored.append(e.hash()) or True
         with patch.object(resp_handle, "put_expr_in_hot_storage", side_effect=put), \
-             patch.object(resp_handle, "get_expr_from_local_storage", return_value=None), \
              patch.object(resp_handle, "increment_peer_metric") as metric:
             self.metric = metric
             return resp_handle.handle_storage_response(node, peer or self._peer(), msg)

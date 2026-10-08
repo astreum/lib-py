@@ -11,7 +11,7 @@ from astreum.communication.storage_response.storage_provider import decode_stora
 from astreum.communication.storage_response.retry import _retry_pending_storage_get_via_peer_contact
 from astreum.expression import Expr
 from astreum.expression.encoding import encode_expr_to_bytes
-from astreum.storage.exprs import get_expr_from_local_storage, put_expr_in_hot_storage
+from astreum.storage.exprs import put_expr_in_hot_storage
 from astreum.storage.requests import (
     StageResult,
     has_expr_req,
@@ -88,12 +88,7 @@ def handle_storage_response(node: "Node", peer: "Peer", message: Message) -> tup
                 )
                 return False, "STORAGE_FOUND root ID mismatch"
 
-            kept = cull_to_resolution(
-                root,
-                exprs,
-                request.payload_type,
-                resolve_local=lambda h: get_expr_from_local_storage(node, h),
-            )
+            kept = cull_to_resolution(root, exprs, request.payload_type)
             if len(kept) < len(exprs):
                 node.logger.debug(
                     "STORAGE_FOUND for %s: dropped %d of %d exprs outside resolution %s",

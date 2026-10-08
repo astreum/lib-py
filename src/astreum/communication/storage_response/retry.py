@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Tuple
 
 from astreum.expression import RESOLUTION_SINGLE
-from astreum.storage.requests import get_expr_req_payload
+from astreum.storage.requests import get_expr_req_block, get_expr_req_payload
 from astreum.storage.workers.requests import queue_storage_get
 
 if TYPE_CHECKING:
@@ -24,6 +24,13 @@ def _retry_pending_storage_get_via_peer_contact(
     if payload_type is None:
         payload_type = RESOLUTION_SINGLE
 
+    # A scoped request stays scoped: the provider it is redirected to answers a
+    # miss by routing on the block again.
+    scope = {}
+    block_hash = get_expr_req_block(node, expr_id)
+    if block_hash is not None:
+        scope["block_hash"] = block_hash
+
     try:
         return queue_storage_get(
             node,
@@ -31,6 +38,7 @@ def _retry_pending_storage_get_via_peer_contact(
             payload_type,
             contact=peer_contact,
             preclaimed=True,
+            **scope,
         )
     except Exception as exc:
         provider_address, provider_port = peer_contact[1], peer_contact[2]

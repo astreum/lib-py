@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import random
 from dataclasses import replace
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from astreum.expression import resolve_inner_exprs
-from astreum.storage.radix import get_all_from_radix_tree, get_from_radix_tree, put_in_radix_tree
+from astreum.storage.radix import get_all_from_radix_tree_with_blocks, put_in_radix_tree
 from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.consensus.account import create_account
 from astreum.consensus.transaction.treasury.loans import (
@@ -13,6 +13,7 @@ from astreum.consensus.transaction.treasury.loans import (
 )
 from astreum.consensus.transaction.treasury.record import (
     TreasuryUserRecord,
+    load_user_record,
 )
 from astreum.consensus.models.accounts import Accounts
 from astreum.consensus.block.encoding.decode import get_block_from_storage
@@ -48,7 +49,7 @@ def current_validator(
     accounts_hash = getattr(block, "accounts_hash", None)
     if not accounts_hash:
         raise ValueError("block missing accounts hash")
-    accounts = Accounts(root_hash=accounts_hash, contact=contact)
+    accounts = Accounts(root_hash=accounts_hash, contact=contact, block_hash=block_hash)
 
     treasury_account = accounts.get_account(TREASURY_ADDRESS, node)
     if treasury_account is None:
@@ -58,24 +59,29 @@ def current_validator(
 
     stakes: Dict[bytes, int] = {}
     treasury_user_records: Dict[bytes, TreasuryUserRecord] = {}
-    stake_entries = get_all_from_radix_tree(stake_trie, node)
-    # Fetch the missing stake records in one batch, not one request per account.
-    prefetch_exprs_from_network(
-        node,
-        [
-            record_head.hash()
-            for account_key, record_head in stake_entries.items()
-            if account_key and record_head and record_head != ZERO32
-        ],
-        RESOLUTION_FULL,
-        contact=contact,
-    )
-    for account_key, record_head in stake_entries.items():
+    stake_entries = get_all_from_radix_tree_with_blocks(stake_trie, node)
+    # Fetch the missing stake records in one batch per block, not one request
+    # per account.
+    by_block: Dict[Optional[bytes], List[bytes]] = {}
+    for account_key, (record_head, record_block) in stake_entries.items():
+        if account_key and record_head and record_head != ZERO32:
+            by_block.setdefault(record_block, []).append(record_head.hash())
+    for record_block, record_hashes in by_block.items():
+        prefetch_exprs_from_network(
+            node,
+            record_hashes,
+            RESOLUTION_FULL,
+            contact=contact,
+            **({} if record_block is None else {"block_hash": record_block}),
+        )
+    for account_key, (record_head, record_block) in stake_entries.items():
         if not account_key:
             continue
         if not record_head or record_head == ZERO32:
             continue
-        record = TreasuryUserRecord.from_storage(node, record_head.hash(), contact=contact)
+        record = TreasuryUserRecord.from_storage(
+            node, record_head.hash(), contact=contact, block_hash=record_block
+        )
         if record is None:
             continue
         stakes[account_key] = record.balance
@@ -137,11 +143,8 @@ def current_validator(
             ):
                 raise ValueError("failed applying treasury loan payment from stake return")
 
-            updated_record_head = get_from_radix_tree(treasury_account.data, node, validator_key)
-            updated_record = TreasuryUserRecord.from_storage(
-                node,
-                updated_record_head or ZERO32,
-                contact=contact,
+            updated_record = load_user_record(
+                node, treasury_account.data, validator_key, contact=contact
             )
             if updated_record is None:
                 raise ValueError("validator treasury record missing after loan payment")

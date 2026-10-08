@@ -10,6 +10,8 @@ from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.transaction.treasury.record import (
+    load_from_tree,
+    load_user_record,
     TreasuryGuarantee,
     TreasuryUserRecord,
 )
@@ -142,8 +144,7 @@ def handle_treasury_guarantee(
     if expiry <= current_height:
         return STATUS_FAILED
 
-    user_record_head = get_from_radix_tree(treasury_account.data, node, transaction.sender)
-    user_record = TreasuryUserRecord.from_storage(node, user_record_head or ZERO32, contact=block.contact)
+    user_record = load_user_record(node, treasury_account.data, transaction.sender, contact=block.contact)
     if user_record is None:
         user_record = TreasuryUserRecord()
 
@@ -160,6 +161,7 @@ def handle_treasury_guarantee(
     guarantees_trie = RadixTree(
         root_hash=None if guarantees_root_hash == ZERO32 else guarantees_root_hash,
         contact=block.contact,
+        root_block=user_record.guarantees_root_block,
     )
     if get_from_radix_tree(guarantees_trie, node, transaction_hash) is not None:
         return STATUS_FAILED
@@ -170,6 +172,7 @@ def handle_treasury_guarantee(
     updated_user_record = replace(
         user_record,
         guarantees_root_hash=guarantees_trie.root_hash or ZERO32,
+        guarantees_root_block=guarantees_trie.root_block,
     )
     updated_user_record_head = updated_user_record.expr().hash()
     put_in_radix_tree(
@@ -226,9 +229,12 @@ def claim_guarantee(
         (``guarantee.claimed_by != ZERO32``), or is expired
         (``current_height >= guarantee.expiry``).
     """
-    guarantee_head = get_from_radix_tree(guarantees_trie, node, guarantee_transaction_id)
-    guarantee = TreasuryGuarantee.from_storage(
-        node, guarantee_head or ZERO32, contact=guarantees_trie.contact
+    guarantee = load_from_tree(
+        TreasuryGuarantee,
+        node,
+        guarantees_trie,
+        guarantee_transaction_id,
+        contact=guarantees_trie.contact,
     )
     if guarantee is None:
         return None

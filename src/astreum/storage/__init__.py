@@ -20,12 +20,11 @@ from astreum.storage.exprs import (
     put_exprs_in_network,
 )
 from astreum.storage.records import (
-    collect_record_slots,
     fetch_and_store_record,
     get_record_from_cold_storage,
     iter_records_in_cold_storage,
+    parse_record,
     parse_record_new_count,
-    parse_slot,
     put_record_in_cold_storage,
 )
 from astreum.storage.setup import setup_storage
@@ -33,7 +32,6 @@ from astreum.storage.setup import setup_storage
 
 __all__ = [
     "collate_exprs",
-    "collect_record_slots",
     "fetch_and_store_record",
     "find_expr_in_index",
     "get_expr",
@@ -49,8 +47,8 @@ __all__ = [
     "iter_exprs_in_cold_storage",
     "iter_records_in_cold_storage",
     "merge_exprs",
+    "parse_record",
     "parse_record_new_count",
-    "parse_slot",
     "put_expr_in_cold_storage",
     "put_expr_in_hot_storage",
     "put_exprs_in_network",

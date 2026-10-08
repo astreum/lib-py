@@ -2,231 +2,100 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from astreum.expression import get_expr_tag, get_expr_value, resolve_list_exprs
+from astreum.crypto.merkle import create_merkle_tree
 from astreum.storage.cold.insert import put_expr_in_cold_storage
-from astreum.storage.exprs.local import get_expr_from_local_storage
-from astreum.storage.radix import RadixTree, get_from_radix_tree
+from astreum.storage.exprs import get_expr
+from astreum.storage.radix import RadixTree
 from astreum.storage.records.table import put_record_in_cold_storage
 
 if TYPE_CHECKING:
+    from astreum.consensus.transaction.storage.model import StorageRecord
     from astreum.node import Node
 
 
-def parse_slot(node: "Node", value: Any, contact=None) -> tuple[bytes, int] | None:
-    """Classify a storage-trie value as a ``StorageSlot``.
+def parse_record(node: "Node", value: Any) -> "StorageRecord | None":
+    """Parse a storage-trie value as a ``StorageRecord``, or None if it is not one.
 
-    A slot is ``Link(head_hash=storage_id, tail=Int(sequence))``.  Anything
-    else (a record header, malformed data, an unresolved hash) is not a slot.
-
-    Args:
-        node: A Node instance providing config and storage access.
-        value: The storage-trie value to classify.
-        contact: Optional ``(relay_key, address, port)`` for the fetch that
-            resolves the slot's head hash.
-
-    Returns:
-        A ``(storage_id, sequence)`` tuple, or ``None`` if the value
-        is not a slot.
+    The value is the header stored in the storage trie at a record's key (the
+    block's expr hash). The layout lives in ``StorageRecord``.
     """
     if value is None or getattr(value, "_tag", None) != "link":
         return None
-    if value._head_hash is None:
-        return None
-    tail = value._tail
-    if tail is None and value._tail_hash is not None:
-        tail = get_expr_from_local_storage(node, value._tail_hash)
-    if tail is None:
-        return None
+    from astreum.consensus.transaction.storage.model import StorageRecord
+
     try:
-        if get_expr_tag(tail, node, contact) != "int":
-            return None
-        return value._head_hash, get_expr_value(tail, node, contact)
+        return StorageRecord.from_expr(node, value)
     except (AttributeError, TypeError, ValueError):
         return None
 
 
 def parse_record_new_count(node: "Node", value: Any) -> int | None:
-    """Extract ``new_count`` from a ``StorageRecord`` header expr.
-
-    The header is the value stored in the storage trie at the record's key
-    (the block's expr hash).  Mirrors ``StorageRecord.from_storage`` layout:
-    6 or 7 elements with ``new_count`` at index 4 or 5.
-
-    Args:
-        node: A Node instance providing config and storage access.
-        value: The storage-trie value holding the record header.
-
-    Returns:
-        The record's ``new_count``, or ``None`` if the value is not a
-        well-formed record header.
-    """
-    if value is None or getattr(value, "_tag", None) != "link":
-        return None
-    nodes, missed = resolve_list_exprs(node, value)
-    if missed or len(nodes) not in (6, 7):
-        return None
-    mint_idx = 3
-    count_idx = 5 if len(nodes) == 7 else 4
-    try:
-        if get_expr_tag(nodes[mint_idx], node) != "int":
-            return None
-        if get_expr_tag(nodes[count_idx], node) != "int":
-            return None
-        return get_expr_value(nodes[count_idx], node)
-    except (AttributeError, TypeError, ValueError):
-        return None
-
-
-def collect_record_slots(
-    node: "Node",
-    tree: RadixTree,
-    block_expr: Any,
-    storage_id: bytes,
-    new_count: int,
-) -> list[bytes]:
-    """Walk a block expr, deriving its record's slot list.
-
-    For each descendant link-node hash the storage trie is consulted:
-
-    * a ``StorageSlot`` whose ``storage_id`` matches *storage_id* fills
-      its position (``sequence``) in a ``new_count * 32`` zero-filled concat
-      and its subtree is still walked (descendants are also this record's
-      slots);
-    * a slot or record belonging to a different record short-circuits the
-      subtree;
-    * unregistered exprs are walked through.
-
-    Returns the concat as 32-byte slot ids, zeros marking released or
-    unavailable positions (the claim worker treats ``ZERO32`` as unclaimable).
-
-    Args:
-        node: A Node instance providing config and storage access.
-        tree: The storage-account radix trie to consult.
-        block_expr: The block expr whose descendants are walked.
-        storage_id: The 32-byte key identifying this record.
-        new_count: The record's slot count; sizes the returned concat.
-
-    Returns:
-        A list of ``new_count`` 32-byte slot ids in sequence order; zero
-        entries mark released or unavailable positions.
-    """
-    concat = bytearray(new_count * 32)
-    seen: set[bytes] = set()
-    stack: list[Any] = [block_expr]
-
-    while stack:
-        expr = stack.pop()
-        if expr is None or getattr(expr, "_tag", None) != "link":
-            continue
-        h = expr.hash()
-        if h in seen:
-            continue
-        seen.add(h)
-
-        if h != storage_id:
-            value = get_from_radix_tree(tree, node, h)
-            if value is not None:
-                slot = parse_slot(node, value)
-                if slot is None:
-                    continue
-                slot_storage_id, sequence = slot
-                if slot_storage_id != storage_id:
-                    continue
-                if 0 <= sequence < new_count:
-                    offset = sequence * 32
-                    concat[offset : offset + 32] = h
-
-        if expr._head is not None:
-            stack.append(expr._head)
-        if expr._tail is not None:
-            stack.append(expr._tail)
-
-    return [bytes(concat[i : i + 32]) for i in range(0, len(concat), 32)]
+    """``new_count`` of the record in a storage-trie value, or None."""
+    record = parse_record(node, value)
+    return None if record is None else record.new_count
 
 
 def fetch_and_store_record(
     node: "Node",
     storage_id: bytes,
-    tree: RadixTree,
-    new_count: int,
+    record: "StorageRecord",
+    contact=None,
 ) -> bool:
-    """Fetch a record's data expr (lazily, one sub-expr at a time), write every
-    expr to cold storage, and write its records-table entry.
+    """Replay a block's record walk, cold-write its cells and index its slots.
 
-    Trie semantics mirror :func:`collect_record_slots` exactly: slot for this
-    record fills its position and the subtree is still walked; slot for
-    another record or a non-slot trie value skips the subtree; no trie value
-    walks through.  The root is fetched with ``RESOLUTION_RECORD`` so the
-    provider returns the record's own slot exprs alongside it; children are
-    then resolved from local storage only, and each resolved expr is
-    cold-written immediately (which also sidesteps hot-storage LRU eviction
-    between fetch and write).  The records-table entry is written only once
-    the walk completes, so a failed walk leaves the records table untouched.
+    *storage_id* is the block's expr hash and *record* the record the chain
+    holds for it. The walk is the one the validators ran,
+    ``walk_record_slots`` with ``follow_refs``, against the storage trie of the
+    block itself (the trie its record was built against). Cells are fetched one
+    by one, scoped to the block, from *contact* (default: the block's known
+    holder), so the record is not bounded by one response page, and each is
+    cold-written as it arrives.
 
-    Args:
-        node: A Node instance providing config and storage access.
-        storage_id: The 32-byte key identifying this record.
-        tree: The storage-account radix trie to consult.
-        new_count: The record's slot count.
+    The records-table entry is written only if the replay gives the record's
+    ``new_count``, ``new_size`` and ``slots_root``. A missing, extra, altered or
+    reordered cell gives a different root and the record is rejected. The slot
+    list is never re-derived from the current storage trie.
 
-    Returns:
-        True on success, False if the record data could not be fetched
-        or the records-table write failed.
+    Returns True on success, False if a cell could not be fetched, the replay
+    does not match the record, or the table write failed.
     """
-    from astreum.storage.exprs.network import get_expr_from_network
-    from astreum.expression import RESOLUTION_RECORD
+    from astreum.consensus.block.encoding.decode import get_block_from_storage
+    from astreum.consensus.block.holders import block_holder
+    from astreum.consensus.constants import STORAGE_ADDRESS
+    from astreum.consensus.transaction.storage.initial import (
+        UnresolvedRecordExpr,
+        walk_record_slots,
+    )
 
-    root = get_expr_from_local_storage(node, storage_id)
-    if root is None:
-        root = get_expr_from_network(node, storage_id, RESOLUTION_RECORD)
-    if root is None:
+    if contact is None:
+        contact = block_holder(node, storage_id)
+    try:
+        block = get_block_from_storage(node, storage_id, contact=contact, load_bloom=False)
+        storage_account = block.accounts.get_account(STORAGE_ADDRESS, node)
+        if storage_account is None:
+            return False
+        root = get_expr(node, storage_id, contact=contact, block_hash=storage_id)
+        if root is None:
+            return False
+        lookup = RadixTree(
+            root_hash=storage_account.data.root_hash,
+            contact=contact,
+            root_block=storage_account.data.root_block,
+        )
+        slot_hashes, _, size = walk_record_slots(
+            node,
+            root,
+            lookup,
+            contact=contact,
+            follow_refs=True,
+            on_cell=lambda _h, cell: put_expr_in_cold_storage(node, cell),
+        )
+    except (UnresolvedRecordExpr, ValueError):
+        return False
+
+    if len(slot_hashes) != record.new_count or size != record.new_size:
+        return False
+    if create_merkle_tree(slot_hashes).root != record.slots_root:
         return False
     put_expr_in_cold_storage(node, root)
-
-    concat = bytearray(new_count * 32)
-    seen: set[bytes] = set()
-    stack: list[Any] = [root]
-
-    while stack:
-        expr = stack.pop()
-        if expr is None or getattr(expr, "_tag", None) != "link":
-            continue
-        h = expr.hash()
-        if h in seen:
-            continue
-        seen.add(h)
-
-        if h != storage_id:
-            value = get_from_radix_tree(tree, node, h)
-            if value is not None:
-                slot = parse_slot(node, value)
-                if slot is None:
-                    continue
-                slot_storage_id, sequence = slot
-                if slot_storage_id != storage_id:
-                    continue
-                if 0 <= sequence < new_count:
-                    concat[sequence * 32 : sequence * 32 + 32] = h
-
-        put_expr_in_cold_storage(node, expr)
-
-        # Children resolve from local storage only: the record-aware response
-        # already delivered this record's slots.  References into other records
-        # are left unresolved as hash references.
-        if expr._head is None and expr._head_hash is not None:
-            resolved = get_expr_from_local_storage(node, expr._head_hash)
-            if resolved is not None:
-                expr._head = resolved
-                expr._head_hash = None
-        if expr._tail is None and expr._tail_hash is not None:
-            resolved = get_expr_from_local_storage(node, expr._tail_hash)
-            if resolved is not None:
-                expr._tail = resolved
-                expr._tail_hash = None
-        if expr._head is not None:
-            stack.append(expr._head)
-        if expr._tail is not None:
-            stack.append(expr._tail)
-
-    slot_ids = [bytes(concat[i : i + 32]) for i in range(0, len(concat), 32)]
-    return put_record_in_cold_storage(node, storage_id, slot_ids)
+    return put_record_in_cold_storage(node, storage_id, slot_hashes)

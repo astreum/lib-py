@@ -11,6 +11,8 @@ from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.transaction.from_storage import get_transaction_from_storage
 from astreum.consensus.transaction.treasury.record import (
+    load_loan_record,
+    load_user_record,
     LoanType,
     TreasuryLoanRecord,
     TreasuryUserRecord,
@@ -51,9 +53,9 @@ def handle_treasury_claim(
     if transaction.data._tag != "link" or transaction.data._head is None:
         return STATUS_FAILED
     data_head = transaction.data._head
-    if data_head._tag != "link" or data_head._head_hash is None:
+    if data_head._tag != "bytes":
         return STATUS_FAILED
-    loan_transaction_id = data_head._head_hash
+    loan_transaction_id = data_head.value
     if len(loan_transaction_id) != LOAN_TRANSACTION_ID_SIZE:
         return STATUS_FAILED
 
@@ -66,14 +68,16 @@ def handle_treasury_claim(
     if treasury_account is None:
         return STATUS_FAILED
 
-    borrower_record_head = get_from_radix_tree(treasury_account.data, node, borrower)
-    borrower_record = TreasuryUserRecord.from_storage(node, borrower_record_head or ZERO32, contact=block.contact)
+    borrower_record = load_user_record(node, treasury_account.data, borrower, contact=block.contact)
     if borrower_record is None or borrower_record.loans_root_hash == ZERO32:
         return STATUS_FAILED
 
-    loans_trie = RadixTree(root_hash=borrower_record.loans_root_hash, contact=block.contact)
-    loan_record_head = get_from_radix_tree(loans_trie, node, loan_transaction_id)
-    loan = TreasuryLoanRecord.from_storage(node, loan_record_head or ZERO32, contact=block.contact)
+    loans_trie = RadixTree(
+        root_hash=borrower_record.loans_root_hash,
+        contact=block.contact,
+        root_block=borrower_record.loans_root_block,
+    )
+    loan = load_loan_record(node, loans_trie, loan_transaction_id, contact=block.contact)
     if loan is None or loan.next_payment_block_number == 0:
         return STATUS_FAILED
 
@@ -142,6 +146,7 @@ def handle_treasury_claim(
     updated_borrower_record = replace(
         borrower_record,
         loans_root_hash=loans_trie.root_hash or ZERO32,
+        loans_root_block=loans_trie.root_block,
     )
 
     if loan.loan_type == LoanType.UNSECURED:

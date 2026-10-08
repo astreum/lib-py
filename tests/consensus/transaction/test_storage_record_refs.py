@@ -83,30 +83,28 @@ class TestFollowRefs(unittest.TestCase):
 
     def test_references_are_not_followed_by_default(self):
         inner, root = self._tries()
-        _, slot_map, _, _ = generate_initial_storage_record(self.node, self.block, root)
-        self.assertNotIn(inner.hash(), slot_map)
+        _, slots, _, _ = generate_initial_storage_record(self.node, self.block, root)
+        self.assertNotIn(inner.hash(), slots)
 
     def test_references_are_followed_and_slotted(self):
         inner, root = self._tries()
-        _, slot_map, _, _ = generate_initial_storage_record(
+        _, slots, _, _ = generate_initial_storage_record(
             self.node, self.block, root, follow_refs=True
         )
-        self.assertIn(inner.hash(), slot_map)
-        self.assertIn(inner._tail.hash(), slot_map)
-        self.assertIn(int_(255).hash(), slot_map)
-        self.assertEqual(
-            sorted(s.sequence for s in slot_map.values()), list(range(len(slot_map)))
-        )
+        self.assertIn(inner.hash(), slots)
+        self.assertIn(inner._tail.hash(), slots)
+        self.assertIn(int_(255).hash(), slots)
+        self.assertEqual(len(set(slots)), len(slots))
 
     def test_a_registered_reference_is_not_fetched(self):
         inner, root = self._tries()
         self._register(inner.hash())
         del self.node.hot_storage[inner.hash()]  # would raise if it were fetched
-        _, slot_map, found, _ = generate_initial_storage_record(
+        _, slots, found, _ = generate_initial_storage_record(
             self.node, self.block, root, follow_refs=True
         )
         self.assertIn(inner.hash(), found)
-        self.assertNotIn(inner.hash(), slot_map)
+        self.assertNotIn(inner.hash(), slots)
 
     def test_an_unavailable_reference_raises(self):
         inner, root = self._tries()
@@ -119,10 +117,10 @@ class TestFollowRefs(unittest.TestCase):
         target = link(int_(1), NIL)
         store_flat(self.node, target)
         root = points_to(target)
-        _, slot_map, _, _ = generate_initial_storage_record(
+        _, slots, _, _ = generate_initial_storage_record(
             self.node, self.block, root, follow_refs=True
         )
-        self.assertNotIn(ZERO32, slot_map)
+        self.assertNotIn(ZERO32, slots)
 
     def test_the_storage_trie_is_followed_like_any_other(self):
         self._register(b"\x33" * 32)
@@ -130,10 +128,42 @@ class TestFollowRefs(unittest.TestCase):
         self.assertIsNotNone(storage_root)
         root = points_to(Expr("link", head_hash=storage_root, tail=NIL))
         store_flat(self.node, Expr("link", head_hash=storage_root, tail=NIL))
-        _, slot_map, _, _ = generate_initial_storage_record(
+        _, slots, _, _ = generate_initial_storage_record(
             self.node, self.block, root, follow_refs=True
         )
-        self.assertIn(storage_root, slot_map)
+        self.assertIn(storage_root, slots)
+
+    def test_a_trie_holding_a_paid_record_can_be_walked(self):
+        """A record rewritten by a claim names a winner and a root: both bytes
+        values, so the next block's walk does not look for them."""
+        from astreum.consensus.transaction.storage.model import StorageRecord
+
+        block_a, block_b = b"\x41" * 32, b"\x42" * 32
+        record = StorageRecord(
+            creation_block_hash=block_a,
+            last_payment_block_hash=block_b,
+            last_payment_height=3,
+            last_payment_winner=b"\x99" * 32,  # an address: no stored expr has this hash
+            new_size=10,
+            new_count=2,
+            slots_root=b"\x77" * 32,  # nor has this
+        )
+        for key in (block_a, block_b):  # the blocks it names are keys of the trie
+            self._register(key)
+        put_in_radix_tree(self.storage_account.data, self.node, block_a, record.expr())
+        for trie_node in self.storage_account.data.nodes.values():
+            self.node.hot_storage[radix_node_hash(trie_node)] = get_radix_node_expr(trie_node)
+        self.storage_account.data_hash = self.storage_account.data.root_hash
+        storage_root = self.storage_account.data.root_hash
+        store_flat(self.node, Expr("link", head_hash=storage_root, tail=NIL))
+
+        _, slots, found, _ = generate_initial_storage_record(
+            self.node, self.block, points_to(Expr("link", head_hash=storage_root, tail=NIL)),
+            follow_refs=True,
+        )
+        # The walk got through the record: its bytes values are cells, not fetches.
+        self.assertIn(bytes_(b"\x99" * 32).hash(), slots)
+        self.assertIn(bytes_(b"\x77" * 32).hash(), slots)
 
     def test_the_storage_trie_is_unavailable_raises(self):
         self._register(b"\x33" * 32)
@@ -167,15 +197,43 @@ class TestFollowRefs(unittest.TestCase):
     def test_collected_exprs_are_single_cells_with_the_same_hash(self):
         inner, root = self._tries()
         collected = {}
-        _, slot_map, _, _ = generate_initial_storage_record(
+        _, slots, _, _ = generate_initial_storage_record(
             self.node, self.block, root, follow_refs=True, collected=collected
         )
-        self.assertEqual(set(collected), set(slot_map))
+        self.assertEqual(set(collected), set(slots))
         for expr_id, expr in collected.items():
             self.assertEqual(expr.hash(), expr_id)
             # No loaded subtree (a number's payload is part of its own cell).
             for child in (expr._head, expr._tail):
                 self.assertTrue(child is None or child.base != "link")
+
+    def test_the_record_commits_to_the_walk_order(self):
+        from astreum.crypto.merkle import create_merkle_tree
+
+        inner, root = self._tries()
+        record, slots, _, _ = generate_initial_storage_record(
+            self.node, self.block, root, follow_refs=True
+        )
+        self.assertEqual(record.new_count, len(slots))
+        self.assertEqual(record.slots_root, create_merkle_tree(slots).root)
+        # Depth first, head before tail: the referenced list comes first.
+        self.assertEqual(slots[0], inner.hash())
+        self.assertEqual(slots[1], int_(255).hash())
+
+    def test_the_root_is_the_same_held_whole_or_fetched_by_cell(self):
+        inner = link(int_(255), link(bytes_(b"\x01\x02"), link(int_(7), NIL)))
+        whole = link(link(inner, NIL), link(int_(9), NIL))
+        roots = []
+        for root in (whole, flat(whole)):
+            node = _FakeNode()
+            block = make_block(node, self.prev_block)
+            seed_storage_account(block)
+            store_flat(node, whole)
+            record, slots, _, _ = generate_initial_storage_record(
+                node, block, root, follow_refs=True
+            )
+            roots.append((record.slots_root, slots))
+        self.assertEqual(roots[0], roots[1])
 
     def test_a_number_resolved_after_its_size_was_read_keeps_its_payload_size(self):
         # Fetched as hashes only (size() reads 64 and caches it), then resolved
@@ -201,10 +259,10 @@ class TestFollowRefs(unittest.TestCase):
             self.node.hot_storage[cell.hash()] = cell
             tail_hash = cell.hash()
         root = Expr("link", head_hash=tail_hash, tail=NIL)
-        _, slot_map, _, _ = generate_initial_storage_record(
+        _, slots, _, _ = generate_initial_storage_record(
             self.node, self.block, root, follow_refs=True
         )
-        self.assertGreaterEqual(len(slot_map), 1500)
+        self.assertGreaterEqual(len(slots), 1500)
 
 
 if __name__ == "__main__":

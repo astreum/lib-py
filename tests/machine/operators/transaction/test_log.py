@@ -15,28 +15,22 @@ from astreum.expression import NIL
 
 class TestTxLogOperator(unittest.TestCase):
     def setUp(self):
-        self.block = type('Block', (), {'pending_storage_contracts': []})()
+        self.block = type('Block', (), {})()
         self.machine = Machine(node=None, meter_limit=10_000)
         self.machine.block = self.block
-        self.add_count = 0
+        self.fee_calls = []
 
         self._patcher = mock.patch(
-            'astreum.machine.operators.transaction.log.add_pending_storage_contract',
-            side_effect=self._fake_add,
+            'astreum.machine.operators.transaction.log.storage_walk_fee',
+            side_effect=self._fake_fee,
         )
         self._patcher.start()
 
     def tearDown(self):
         self._patcher.stop()
 
-    def _fake_add(self, node, block, dst, key, value):
-        entry = type('Entry', (), {
-            'storage_id': value.hash() if hasattr(value, 'hash') else b'',
-            'slot_entries': [],
-            'locked': [],
-        })()
-        block.pending_storage_contracts.append(entry)
-        self.add_count += 1
+    def _fake_fee(self, node, block, value):
+        self.fee_calls.append(value)
         return value.size() if hasattr(value, 'size') else 1
 
     def test_bare_pushes_nil(self):
@@ -78,12 +72,21 @@ class TestTxLogOperator(unittest.TestCase):
         large = self.machine.meter.storage
         self.assertLess(small, large)
 
-    def test_contract_persists_and_tracked(self):
+    def test_fee_is_computed_once_per_log_and_nothing_is_registered(self):
         expr, _ = parse(tokenize("('value tx.log)"))
         self.machine.run(expr=expr)
-        self.assertEqual(self.add_count, 1)
-        self.assertEqual(len(self.machine.log_contract_entries), 1)
-        self.assertEqual(len(self.block.pending_storage_contracts), 1)
+        self.assertEqual(len(self.fee_calls), 1)
+        self.assertFalse(hasattr(self.block, 'pending_storage_contracts'))
+
+    def test_unsizable_log_fails_the_operator(self):
+        with mock.patch(
+            'astreum.machine.operators.transaction.log.storage_walk_fee',
+            return_value=None,
+        ):
+            expr, _ = parse(tokenize("('value tx.log)"))
+            with self.assertRaises(RuntimeError):
+                self.machine.run(expr=expr)
+        self.assertEqual(self.machine.logs, [])
 
     def test_meter_total_reflects_eval_plus_storage(self):
         expr, _ = parse(tokenize("('value tx.log)"))

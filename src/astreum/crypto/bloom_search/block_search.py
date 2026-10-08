@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from astreum.expression import ZERO32
-from astreum.storage.exprs import get_expr
 from astreum.consensus.block.encoding.decode import get_block_from_storage
 from astreum.crypto.bloom_search.search import ERA_SIZE
 
@@ -61,7 +60,9 @@ def find_block_by_height(astreum_node: Any, *,
         return target
 
     # Binary-descent by offset to locate the leaf's start_hash.
-    leaf_hash = _storage_find_leaf(astreum_node, current.bloom_hash, target_offset)
+    leaf_hash = _storage_find_leaf(
+        astreum_node, current.bloom_hash, target_offset, block_hash=current.expr_id
+    )
     if leaf_hash is not None:
         return get_block_from_storage(astreum_node=astreum_node, block_hash=leaf_hash)
 
@@ -81,31 +82,37 @@ def find_block_by_height(astreum_node: Any, *,
 
 
 def _storage_find_leaf(astreum_node: Any, root_hash: bytes,
-                       offset: int) -> Optional[bytes]:
+                       offset: int, block_hash: Optional[bytes] = None) -> Optional[bytes]:
     """Binary-descent by *position* (not bloom test) in the bloom tree.
 
     Fetches nodes on demand from storage.  Returns the leaf's ``start_hash``
     (the block's expr hash), or ``None`` if the path doesn't exist (block not
     mined) or the leaf's start_hash hasn't been set yet (deferred).
-    """
-    from astreum.crypto.bloom_tree.expr import bloom_node_from_expr
 
-    root_expr = get_expr(astreum_node, root_hash)
-    if root_expr is None:
+    *block_hash* is the block whose header holds *root_hash*: its provider is
+    asked for the nodes (a child by plain hash is in the same block).
+    """
+    from astreum.crypto.bloom_tree.tree import read_bloom_node
+
+    node = read_bloom_node(astreum_node, root_hash, block=block_hash or None, level=0)
+    if node is None:
         return None
-    node = bloom_node_from_expr(root_expr)
 
     lo, hi = 0, ERA_SIZE
 
     while not node.is_leaf:
         mid = (lo + hi) // 2
-        child_hash = node._left_hash if offset < mid else node._right_hash
+        if offset < mid:
+            child_hash, child_block = node._left_hash, node._left_block
+        else:
+            child_hash, child_block = node._right_hash, node._right_block
         if child_hash is None:
             return None  # path doesn't exist — block at this offset not mined
-        child_expr = get_expr(astreum_node, child_hash)
-        if child_expr is None:
+        node = read_bloom_node(
+            astreum_node, child_hash, block=child_block, level=node.level + 1
+        )
+        if node is None:
             return None
-        node = bloom_node_from_expr(child_expr)
         lo, hi = (lo, mid) if offset < mid else (mid, hi)
 
     return node.start_hash

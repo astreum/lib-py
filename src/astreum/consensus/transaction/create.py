@@ -226,8 +226,8 @@ def _guarantee_refs_to_expr(guarantee_refs: Optional[Sequence[Tuple[bytes, bytes
     """Encode a borrow's claimed-guarantee refs as a nested `Expr` link-list.
 
     Each entry is a 2-field sub-list: ``[guarantor_address,
-    guarantee_transaction_id]``, both stored as bare hash-carrying `link` nodes
-    (the same convention used elsewhere in this module for 32-byte ids).
+    guarantee_transaction_id]``, both `bytes` values: they are ids, not exprs
+    the block record could follow.
 
     Args:
         guarantee_refs: The `(guarantor_address, guarantee_transaction_id)` pairs to
@@ -242,8 +242,8 @@ def _guarantee_refs_to_expr(guarantee_refs: Optional[Sequence[Tuple[bytes, bytes
     result: Expr = NIL
     for guarantor, guarantee_transaction_id in reversed(list(guarantee_refs)):
         entry: Expr = link(
-            Expr("link", head_hash=guarantor),
-            link(Expr("link", head_hash=guarantee_transaction_id), NIL),
+            bytes_(guarantor),
+            link(bytes_(guarantee_transaction_id), NIL),
         )
         result = link(entry, result)
     return result
@@ -303,7 +303,7 @@ def _build_data_expr(
             )
 
         case TransactionCode.TREASURY_REPAY | TransactionCode.TREASURY_CLOSE:
-            return link(Expr("link", head_hash=loan_transaction_id), NIL)
+            return link(bytes_(loan_transaction_id), NIL)
 
         case TransactionCode.TREASURY_GUARANTEE:
             return link(

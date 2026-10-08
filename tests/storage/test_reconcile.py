@@ -7,7 +7,6 @@ from types import SimpleNamespace
 sys.path.insert(0, "src")
 
 from astreum.expression import Expr, NIL, ZERO32, bytes_, int_
-from astreum.consensus.transaction.storage.model import StorageRecord, StorageSlot
 from astreum.storage.cold import iter_exprs_in_cold_storage
 from astreum.storage.cold import put_expr_in_cold_storage
 from astreum.storage.cold import collate_exprs

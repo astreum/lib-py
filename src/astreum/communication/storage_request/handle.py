@@ -20,8 +20,6 @@ from astreum.expression import (
     RESOLUTION_SINGLE,
     RESOLUTION_LIST,
     RESOLUTION_FULL,
-    RESOLUTION_RECORD,
-    ZERO32,
     collect_list,
     collect_full,
 )
@@ -46,28 +44,6 @@ def _collect_for_resolution(expr, desired: int) -> list:
     return [expr]
 
 
-def _collect_record_exprs(node: "Node", root, storage_id: bytes) -> list | None:
-    """Assemble a record response: root plus locally-held slot data exprs.
-
-    Returns ``None`` when the records table has no entry for *storage_id*.
-    ``ZERO32`` slot positions are skipped; other records are left as hash
-    references.
-    """
-    blob = get_record_from_cold_storage(node, storage_id)
-    if blob is None:
-        return None
-    exprs = [root]
-    usable = len(blob) - (len(blob) % 32)
-    for offset in range(0, usable, 32):
-        slot_id = blob[offset : offset + 32]
-        if slot_id == ZERO32:
-            continue
-        slot_expr = get_expr_from_local_storage(node, slot_id)
-        if slot_expr is not None:
-            exprs.append(slot_expr)
-    return exprs
-
-
 # Max records fetched inline (in the message-handling thread) per received
 # STORAGE_PUT; the rest drain through the long-term store loop.
 BATCH_INLINE_FETCH_LIMIT = 8
@@ -79,7 +55,7 @@ def _handle_put(
     from astreum.storage.admission import get_latest_storage_account, is_expr_in_latest_block
     from astreum.storage.exprs.network import destination_peer, send_put_entries
     from astreum.storage.radix import RadixTree, get_from_radix_tree
-    from astreum.storage.records import fetch_and_store_record, parse_record_new_count
+    from astreum.storage.records import fetch_and_store_record, parse_record
 
     entries = storage_request.entries or []
     survivors = [
@@ -124,17 +100,16 @@ def _handle_put(
             stored_value = None
             if storage_account is not None:
                 stored_value = get_from_radix_tree(storage_account.data, node, expr_id)
-            new_count = parse_record_new_count(node, stored_value)
-            if new_count is None:
+            record = parse_record(node, stored_value)
+            if record is None:
                 continue
             node.storage_index[expr_id] = provider_id
             indexed += 1
             if fetch_budget <= 0 or get_record_from_cold_storage(node, expr_id) is not None:
                 continue
             fetch_budget -= 1
-            tree = RadixTree(root_hash=storage_account.data.root_hash)
             try:
-                fetch_and_store_record(node, expr_id, tree, new_count)
+                fetch_and_store_record(node, expr_id, record)
             except Exception as exc:
                 node.logger.debug("Inline record fetch failed for %s: %s", expr_id.hex(), exc)
         node.logger.debug(
@@ -159,22 +134,22 @@ def _handle_put(
 
 
 def _serve_get(
-    node: "Node", peer: "Peer", expr_id: bytes, desired: int
+    node: "Node",
+    peer: "Peer",
+    expr_id: bytes,
+    desired: int,
+    block_hash: bytes | None = None,
 ) -> tuple[bool, str | None]:
     """Serve one STORAGE_GET entry: paged ``STORAGE_FOUND``, a provider
-    redirect, or a payment-required reply."""
+    redirect, or a payment-required reply.
+
+    A scoped entry (*block_hash* given) is served the same way, by a local get
+    of *expr_id*: the block only decides who is asked. A miss is redirected by
+    the block's provider or nearest peer instead of by *expr_id*'s.
+    """
     local_atom = get_expr_from_local_storage(node, expr_id)
     if local_atom is not None:
-        if desired == RESOLUTION_RECORD:
-            exprs = _collect_record_exprs(node, local_atom, expr_id)
-            if exprs is None:
-                node.logger.debug(
-                    "STORAGE_GET %s requested as record but no records-table entry",
-                    expr_id.hex(),
-                )
-                return False, "not a record"
-        else:
-            exprs = _collect_for_resolution(local_atom, desired)
+        exprs = _collect_for_resolution(local_atom, desired)
         shared_storage_size = sum(len(encode_expr_to_bytes(e)) for e in exprs)
         if _requires_storage_channel(node, peer, shared_storage_size):
             node.logger.info(
@@ -251,11 +226,12 @@ def _serve_get(
                 increment_peer_metric(peer, "shared_storage_upload", payload_size)
         return True, None
 
-    if expr_id in node.storage_index:
-        provider_id = node.storage_index[expr_id]
+    route_id = block_hash if block_hash is not None else expr_id
+    if route_id in node.storage_index:
+        provider_id = node.storage_index[route_id]
         provider_bytes = provider_payload_for_id(node, provider_id)
         if provider_bytes is not None:
-            node.logger.debug("Known provider for %s; informing %s", expr_id.hex(), peer.address)
+            node.logger.debug("Known provider for %s; informing %s", route_id.hex(), peer.address)
             resp = StorageResponse(
                 code=StorageResponseCode.STORAGE_PROVIDER,
                 data=provider_bytes,
@@ -277,12 +253,12 @@ def _serve_get(
         node.logger.debug(
             "Unknown provider id %s for %s",
             provider_id,
-            expr_id.hex(),
+            route_id.hex(),
         )
 
-    nearest_peer = node.peer_route.closest_peer_for_hash(expr_id)
+    nearest_peer = node.peer_route.closest_peer_for_hash(route_id)
     if nearest_peer:
-        node.logger.debug("Forwarding requester %s to nearest peer for %s", peer.address, expr_id.hex())
+        node.logger.debug("Forwarding requester %s to nearest peer for %s", peer.address, route_id.hex())
         peer_info = encode_peer_contact_bytes(nearest_peer)
         resp = StorageResponse(
             code=StorageResponseCode.STORAGE_PROVIDER,
@@ -303,8 +279,8 @@ def _serve_get(
         )
         return True, None
 
-    if expr_id in node.storage_index:
-        return False, f"unknown provider id {node.storage_index[expr_id]} for {expr_id.hex()}"
+    if route_id in node.storage_index:
+        return False, f"unknown provider id {node.storage_index[route_id]} for {route_id.hex()}"
     return True, None
 
 
@@ -325,15 +301,15 @@ def handle_storage_request(node: "Node", peer: "Peer", message: Message) -> tupl
             node.logger.debug(
                 "Handling STORAGE_GET of %d exprs from %s", len(entries), peer.address
             )
-            seen: set[bytes] = set()
+            seen: set[tuple[bytes, bytes | None]] = set()
             served = 0
             failures: list[str] = []
-            for expr_id, desired in entries:
-                if expr_id in seen:
+            for expr_id, desired, block_hash in entries:
+                if (expr_id, block_hash) in seen:
                     continue
-                seen.add(expr_id)
+                seen.add((expr_id, block_hash))
                 try:
-                    ok, reason = _serve_get(node, peer, expr_id, desired)
+                    ok, reason = _serve_get(node, peer, expr_id, desired, block_hash)
                 except Exception as exc:
                     node.logger.debug(
                         "STORAGE_GET entry %s from %s failed: %s",

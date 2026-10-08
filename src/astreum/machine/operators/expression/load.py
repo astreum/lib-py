@@ -1,24 +1,59 @@
 from typing import List
 
-from astreum.expression import Expr, NIL, ZERO32, get_expr_tag, link, str_, symbol
+from astreum.expression import Expr, NIL, ZERO32, link, str_, symbol
 from astreum.machine import OpError
-from astreum.storage.exprs import get_expr_full
+from astreum.machine.operators.expression._scoped import (
+    check_block,
+    fetch,
+    follow_stored_ref,
+    pop_scoped_args,
+    stored_ref_target,
+)
+from astreum.storage.exprs import get_expr
+
+
+def _child(machine, block_id: bytes, cell: Expr, side: str):
+    """The resolved head or tail of *cell* (None for nothing): a loaded child,
+    or one fetched from *block_id*, then loaded in turn."""
+    child = cell._head if side == "head" else cell._tail
+    h = cell._head_hash if side == "head" else cell._tail_hash
+    if child is None:
+        if h is None or h == ZERO32:
+            return None
+        child = get_expr(machine.node, h, block_hash=block_id)
+        if child is None:
+            raise OpError("load: expression not found")
+    return _resolve(machine, block_id, child)
+
+
+def _resolve(machine, block_id: bytes, cell: Expr, follow: bool = True) -> Expr:
+    """*cell* with everything below it loaded and every stored ref followed.
+
+    Built as a new expr: the cell may be a shared one in storage, and following
+    a ref gives it a different hash.
+    """
+    if cell._tag != "link":
+        return cell
+    head = _child(machine, block_id, cell, "head")
+    tail = _child(machine, block_id, cell, "tail")
+    rebuilt = cell
+    if head is not None or tail is not None:
+        rebuilt = Expr("link", head=head, tail=tail)
+    if follow and stored_ref_target(machine, block_id, rebuilt) is not None:
+        next_block, target = follow_stored_ref(machine, "load", block_id, rebuilt)
+        # One level: the target is loaded but not itself taken for a ref.
+        if target._tag == "link":
+            return _resolve(machine, next_block, target, follow=False)
+        return target
+    return rebuilt
 
 
 def handle_stack_load(machine, stack: List[Expr], env) -> None:
-    if not stack:
-        machine.meter.charge_bytes(1)
-        raise OpError("stack underflow")
+    """``(block_id expr_id load)``: the whole expr, with all refs below it
+    followed, read from *block_id*'s provider."""
+    block_id, expr_id = pop_scoped_args(machine, stack, "load")
 
-    hash_expr = stack.pop()
-
-    hash_tag = get_expr_tag(hash_expr)
-    if hash_tag != "bytes":
-        raise OpError(f"load requires 32-byte hash, got {hash_tag.lower()}")
-    if len(hash_expr.value) != 32:
-        raise OpError(f"load requires 32-byte hash, got {len(hash_expr.value)} bytes")
-
-    if hash_expr.value == ZERO32:
+    if expr_id == ZERO32:
         machine.meter.charge_bytes(1)
         stack.append(NIL)
         return
@@ -26,9 +61,9 @@ def handle_stack_load(machine, stack: List[Expr], env) -> None:
     if machine.node is None:
         raise OpError("load requires a node connection")
 
-    resolved = get_expr_full(machine.node, hash_expr.value)
-    if resolved is None:
-        raise OpError("load: expression not found")
+    check_block(machine, "load", block_id)
+    root = fetch(machine, "load", block_id, expr_id)
+    resolved = _resolve(machine, block_id, root)
 
     machine.meter.charge_bytes(resolved.size() * 2)
     stack.append(resolved)

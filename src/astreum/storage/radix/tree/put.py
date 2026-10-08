@@ -13,7 +13,20 @@ if TYPE_CHECKING:
     from astreum._node import Node
 
 
+def _value_hash(value: Union[Expr, bytes, None]) -> bytes | None:
+    if value is None or isinstance(value, bytes):
+        return value
+    return value.hash()
+
+
 def put_in_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes, value: Union[Expr, bytes]) -> None:
+    """Write *value* at *key*, rewriting the path from the root to it.
+
+    Every node written is new. A pointer from a written node to one that is
+    not written keeps the block that holds it (``child_*_block``,
+    ``value_block``), and is encoded as a stored ref to that block. A write
+    that does not change the value leaves the tree as it is.
+    """
     total_bits = len(key) * 8
 
     if tree.root_hash is None or tree.root_hash == ZERO32:
@@ -21,10 +34,13 @@ def put_in_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes, value: 
         leaf_hash = radix_node_hash(leaf)
         tree.nodes[leaf_hash] = leaf
         tree.root_hash = leaf_hash
+        tree.root_block = None
         return
 
     stack: List[Tuple[RadixNode, bytes, int]] = []
-    current = fetch_node_from_radix_tree(tree, astreum_node, tree.root_hash)
+    current = fetch_node_from_radix_tree(
+        tree, astreum_node, tree.root_hash, tree.root_block
+    )
     assert current is not None
     key_pos = 0
 
@@ -36,8 +52,11 @@ def put_in_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes, value: 
         key_pos += current.key_len
 
         if key_pos == total_bits:
+            if current.value is not None and _value_hash(current.value) == _value_hash(value):
+                return  # the same value: nothing is written
             old_hash = radix_node_hash(current)
             current.value = value
+            current.value_block = None
             invalidate_radix_node_cache(current)
             new_hash = radix_node_hash(current)
             if new_hash != old_hash:
@@ -47,7 +66,10 @@ def put_in_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes, value: 
             return
 
         next_bit = _bit(key, key_pos)
-        child_hash = current.child_1 if next_bit else current.child_0
+        if next_bit:
+            child_hash, child_block = current.child_1, current.child_1_block
+        else:
+            child_hash, child_block = current.child_0, current.child_0_block
 
         if child_hash is None:
             _append_leaf(tree, current, next_bit, key, key_pos, value, stack)
@@ -55,7 +77,7 @@ def put_in_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes, value: 
 
         stack.append((current, radix_node_hash(current), int(next_bit)))
 
-        child = fetch_node_from_radix_tree(tree, astreum_node, child_hash)
+        child = fetch_node_from_radix_tree(tree, astreum_node, child_hash, child_block)
         if child is None:
             parent, _, _ = stack[-1]
             _append_leaf(tree, parent, next_bit, key, key_pos, value, stack[:-1])
@@ -84,8 +106,10 @@ def _append_leaf(
 
     if dir_bit:
         parent.child_1 = leaf_hash
+        parent.child_1_block = None
     else:
         parent.child_0 = leaf_hash
+        parent.child_0_block = None
 
     invalidate_radix_node_cache(parent)
     new_parent_hash = radix_node_hash(parent)
@@ -135,6 +159,7 @@ def _split_and_insert(
     leaf_hash = radix_node_hash(leaf)
     tree.nodes[leaf_hash] = leaf
 
+    # The re-keyed node is a new cell, so both pointers are plain hashes.
     if old_div_bit:
         internal.child_1 = new_node_hash
         internal.child_0 = leaf_hash
@@ -148,13 +173,16 @@ def _split_and_insert(
 
     if not stack:
         tree.root_hash = internal_hash
+        tree.root_block = None
         return
 
     parent, old_hash, dir_bit = stack.pop()
     if dir_bit == 0:
         parent.child_0 = internal_hash
+        parent.child_0_block = None
     else:
         parent.child_1 = internal_hash
+        parent.child_1_block = None
     invalidate_radix_node_cache(parent)
     new_parent_hash = radix_node_hash(parent)
     if new_parent_hash != old_hash:
@@ -173,8 +201,10 @@ def _bubble(
 
         if dir_bit == 0:
             parent.child_0 = new_hash
+            parent.child_0_block = None
         else:
             parent.child_1 = new_hash
+            parent.child_1_block = None
 
         invalidate_radix_node_cache(parent)
         new_hash = radix_node_hash(parent)
@@ -183,3 +213,4 @@ def _bubble(
         tree.nodes[new_hash] = parent
 
     tree.root_hash = new_hash
+    tree.root_block = None

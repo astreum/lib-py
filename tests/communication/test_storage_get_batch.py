@@ -17,7 +17,7 @@ from astreum.communication.storage_response.code import StorageResponseCode
 from astreum.communication.storage_response.model import StorageResponse
 from astreum.expression import (
     RESOLUTION_FULL,
-    RESOLUTION_RECORD,
+    RESOLUTION_LIST,
     RESOLUTION_SINGLE,
     bytes_,
 )
@@ -38,12 +38,16 @@ class TestGetCodec(unittest.TestCase):
         )
 
     def test_round_trip(self):
-        entries = [(e, i % 4) for i, e in enumerate(_ids(5))]
+        entries = [(e, i % 4, None) for i, e in enumerate(_ids(5))]
         decoded = StorageRequest.from_bytes(
             StorageRequest(StorageRequestCode.STORAGE_GET, entries=entries).to_bytes()
         )
         self.assertEqual(decoded.code, StorageRequestCode.STORAGE_GET)
         self.assertEqual(decoded.entries, entries)
+
+    def test_two_tuple_entries_are_unscoped(self):
+        req = StorageRequest(StorageRequestCode.STORAGE_GET, entries=[(_ids(1)[0], 1)])
+        self.assertEqual(req.entries, [(_ids(1)[0], 1, None)])
 
     def test_single_entry_is_three_bytes_plus_entry(self):
         self.assertEqual(len(self._req(1).to_bytes()), 3 + 33)
@@ -84,14 +88,58 @@ class TestGetCodec(unittest.TestCase):
         with self.assertRaises(ValueError):
             StorageRequest.from_bytes(b"")
 
-    def test_default_budget_gives_34_entries(self):
+    def test_default_budget_gives_17_entries(self):
+        # Counted at the scoped size (65 bytes), the worst case.
         self.assertEqual(DEFAULT_STORAGE_GET_BATCH_MAX_BYTES, 1232)
-        self.assertEqual(max_get_entries(1232), 34)
+        self.assertEqual(max_get_entries(1232), 17)
 
     def test_full_batch_fits_budget(self):
-        body = self._req(34).to_bytes()
+        body = self._scoped_req(17).to_bytes()
         self.assertLessEqual(len(body) + MESSAGE_FRAMING_BYTES, 1232)
-        self.assertGreater(len(self._req(35).to_bytes()) + MESSAGE_FRAMING_BYTES, 1232)
+        self.assertGreater(len(self._scoped_req(18).to_bytes()) + MESSAGE_FRAMING_BYTES, 1232)
+
+    def _scoped_req(self, n):
+        return StorageRequest(
+            StorageRequestCode.STORAGE_GET,
+            entries=[(e, RESOLUTION_SINGLE, b"\xb1" * 32) for e in _ids(n)],
+        )
+
+    def test_scoped_entry_is_65_bytes_with_the_flag_on_the_resolution(self):
+        block = b"\xb1" * 32
+        eid = _ids(1)[0]
+        body = StorageRequest(
+            StorageRequestCode.STORAGE_GET, entries=[(eid, RESOLUTION_FULL, block)]
+        ).to_bytes()
+        self.assertEqual(len(body), 3 + 65)
+        self.assertEqual(body[3 : 3 + 32], eid)
+        self.assertEqual(body[3 + 32], RESOLUTION_FULL | 0x80)
+        self.assertEqual(body[3 + 33 :], block)
+
+    def test_mixed_scoped_and_plain_entries_round_trip(self):
+        ids = _ids(4)
+        block = b"\xb2" * 32
+        entries = [
+            (ids[0], RESOLUTION_SINGLE, None),
+            (ids[1], RESOLUTION_FULL, block),
+            (ids[2], RESOLUTION_SINGLE, block),
+            (ids[3], RESOLUTION_LIST, None),
+        ]
+        decoded = StorageRequest.from_bytes(
+            StorageRequest(StorageRequestCode.STORAGE_GET, entries=entries).to_bytes()
+        )
+        self.assertEqual(decoded.entries, entries)
+
+    def test_truncated_scoped_entry_is_rejected(self):
+        good = self._scoped_req(2).to_bytes()
+        for cut in (1, 16, 32):
+            with self.assertRaises(ValueError):
+                StorageRequest.from_bytes(good[:-cut])
+
+    def test_scoped_entry_needs_a_32_byte_block(self):
+        with self.assertRaises(ValueError):
+            StorageRequest(
+                StorageRequestCode.STORAGE_GET, entries=[(_ids(1)[0], 1, b"short")]
+            ).to_bytes()
 
 
 class TestGetConfig(unittest.TestCase):
@@ -188,6 +236,40 @@ class TestGetServer(unittest.TestCase):
         self.assertNotIn(self.unknown_id, by_id)
         self.assertEqual(len(responses), 2)
 
+    def test_scoped_entry_is_served_by_local_get_of_the_expr(self):
+        block = b"\xb1" * 32  # not indexed here: the block plays no part in a hit
+        result, responses, _ = self._serve([(self.found.hash(), RESOLUTION_SINGLE, block)])
+        self.assertEqual(result, (True, None))
+        self.assertEqual(
+            [(r.expr_id, r.code) for r in responses],
+            [(self.found.hash(), StorageResponseCode.STORAGE_FOUND)],
+        )
+
+    def test_scoped_miss_is_redirected_by_the_blocks_provider(self):
+        # The expr itself has no provider; its block does.
+        block = self.redirect_id
+        result, responses, _ = self._serve([(self.unknown_id, RESOLUTION_SINGLE, block)])
+        self.assertEqual(result, (True, None))
+        self.assertEqual(
+            [(r.expr_id, r.code) for r in responses],
+            [(self.unknown_id, StorageResponseCode.STORAGE_PROVIDER)],
+        )
+
+    def test_scoped_miss_ignores_the_exprs_own_provider(self):
+        # expr is indexed, its block is not: a scoped miss follows the block.
+        result, responses, _ = self._serve(
+            [(self.redirect_id, RESOLUTION_SINGLE, self.unknown_id)]
+        )
+        self.assertEqual(result, (True, None))
+        self.assertEqual(responses, [])
+
+    def test_same_expr_scoped_to_two_blocks_is_served_for_each(self):
+        h = self.found.hash()
+        result, responses, _ = self._serve(
+            [(h, RESOLUTION_SINGLE, b"\x01" * 32), (h, RESOLUTION_SINGLE, b"\x02" * 32)]
+        )
+        self.assertEqual(len(responses), 2)
+
     def test_duplicate_entries_served_once(self):
         h = self.found.hash()
         result, responses, _ = self._serve(
@@ -219,16 +301,19 @@ class TestGetServer(unittest.TestCase):
         self.assertEqual([r.expr_id for r in responses], [self.found_b.hash()])
 
     def test_failing_entry_does_not_affect_the_others(self):
-        # found_b is requested as a record but has no records-table entry
-        entries = [(self.found_b.hash(), RESOLUTION_RECORD), (self.found.hash(), RESOLUTION_SINGLE)]
-        result, responses, _ = self._serve(entries, record_blob=None)
+        # `big` is too large for one response page: that entry fails alone
+        big = bytes_(b"x" * 70_000)
+        local = dict(self.local)
+        local[big.hash()] = big
+        entries = [(big.hash(), RESOLUTION_SINGLE), (self.found.hash(), RESOLUTION_SINGLE)]
+        result, responses, _ = self._serve(entries, local=local)
         self.assertEqual(result, (True, None))
         self.assertEqual([r.expr_id for r in responses], [self.found.hash()])
 
     def test_every_entry_failing_reports_failure(self):
-        entries = [(self.found_b.hash(), RESOLUTION_RECORD)]
-        result, responses, _ = self._serve(entries, record_blob=None)
-        self.assertEqual(result, (False, "not a record"))
+        big = bytes_(b"x" * 70_000)
+        result, responses, _ = self._serve([(big.hash(), RESOLUTION_SINGLE)], local={big.hash(): big})
+        self.assertEqual(result, (False, "root expr too large"))
         self.assertEqual(responses, [])
 
     def test_each_entry_uses_its_own_resolution(self):

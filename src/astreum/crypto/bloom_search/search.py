@@ -50,7 +50,9 @@ def bloom_search_tx(astreum_node: Any, *,
                 current_block = current_block.previous_block
                 continue
 
-            era_results = bloom_search_storage(bloom_hash, element, astreum_node)
+            era_results = bloom_search_storage(
+                bloom_hash, element, astreum_node, block_hash=current_block.expr_id
+            )
             for leaf_hit in era_results:
                 if leaf_hit is not None:
                     try:
@@ -84,25 +86,28 @@ def _load_block_txs(node: Any, block) -> list["Transaction"]:
     if not block.transactions_hash or block.transactions_hash == ZERO32:
         return []
 
-    expr = get_expr_list(node, block.transactions_hash)
+    # The tx trie is all new in its block: its provider holds every tx.
+    block_id = getattr(block, "expr_id", None)
+    scope = {} if not block_id else {"block_hash": block_id}
+    expr = get_expr_list(node, block.transactions_hash, **scope)
     if expr is None:
         return []
 
     tx_hashes: list[bytes] = []
     current = expr
-    while current._tag == "link":
+    while current is not None and current._tag == "link":
         if current._head_hash is None:
             break
         tx_hashes.append(current._head_hash)
         current = current._tail
 
     # Fetch the missing tx trees in one batch, not one request per transaction.
-    prefetch_exprs_from_network(node, tx_hashes, RESOLUTION_FULL)
+    prefetch_exprs_from_network(node, tx_hashes, RESOLUTION_FULL, **scope)
 
     txs: list["Transaction"] = []
     for tx_hash in tx_hashes:
         try:
-            tx = get_transaction_from_storage(node, tx_hash)
+            tx = get_transaction_from_storage(node, tx_hash, **scope)
             txs.append(tx)
         except Exception:
             continue

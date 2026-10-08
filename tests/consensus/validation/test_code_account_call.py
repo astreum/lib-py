@@ -77,6 +77,29 @@ class TestCodeAccountCall(unittest.TestCase):
         acct = self.block.accounts.get_account(recipient, self.node)
         self.assertEqual(acct.balance, 6000)
 
+    def test_execution_is_charged_once_and_counted_once(self):
+        sender_pk, sender_key = seed_sender_account(self.block, balance=1_000_000)
+        prog = _parse("(drop acc.balance)")
+        recipient, _ = self._seed_expression_account(prog, balance=0)
+        tx = create_transaction(
+            chain_id=1, counter=0, sender=sender_pk, recipient=recipient,
+            amount=1000, code=TransactionCode.CODE_ACCOUNT_CALL,
+            data=NIL, secret_key=sender_key, cost_limit=100,
+        )
+        before = self.block.accounts.get_account(sender_pk, self.node).balance
+        apply_transaction(self.node, self.block, store_tx(self.node, tx))
+        receipt = self.block.receipts[-1]
+        self.assertGreater(receipt.execution_fee, 0)
+
+        # The execution is inside transaction_fee: the sender pays it once,
+        # and the block's fee totals (transaction + storage) hold it once.
+        after = self.block.accounts.get_account(sender_pk, self.node).balance
+        self.assertEqual(before - after, 1000 + receipt.total_fee)
+        self.assertEqual(
+            receipt.total_fee, receipt.transaction_fee + receipt.storage_fee + receipt.data_fee
+        )
+        self.assertGreaterEqual(receipt.transaction_fee, 1 + receipt.execution_fee)
+
     def test_tx_new_transfers_to_sender(self):
         sender_pk, sender_key = seed_sender_account(self.block, balance=1_000_000)
         prog = _parse("(0 tx.sender 1000 '() tx.new drop)")
@@ -107,7 +130,7 @@ class TestCodeAccountCall(unittest.TestCase):
         tx = create_transaction(
             chain_id=1, counter=0, sender=sender_pk, recipient=recipient,
             amount=0, code=TransactionCode.CODE_ACCOUNT_CALL,
-            data=NIL, secret_key=sender_key, cost_limit=500,
+            data=NIL, secret_key=sender_key, cost_limit=1500,
         )
         tx_hash = store_tx(self.node, tx)
 
