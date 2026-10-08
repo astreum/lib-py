@@ -48,6 +48,8 @@ def process_outgoing_messages(node: "Node") -> None:
 
     Args:
         node (Node): The node instance sending the packets.
+
+    Returns: None
     """
     stop = node.communication_stop_event
     while not stop.is_set():

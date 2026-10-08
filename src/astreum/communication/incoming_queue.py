@@ -30,6 +30,9 @@ def enqueue_incoming(
         node (Node): The node instance that owns the incoming queue.
         address (Tuple[str, int]): The source address as (host, port).
         payload (bytes): The raw UDP payload to enqueue.
+
+    Returns:
+        tuple[bool, str | None]: A tuple of (success, error_reason).
     """
     required_difficulty = message_difficulty(node)
     if len(payload) <= NONCE_SIZE:

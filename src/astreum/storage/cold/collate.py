@@ -10,6 +10,8 @@ def _cleanup_temp(*paths: Path) -> None:
 
     Args:
         *paths: Paths to temporary files to remove.
+
+    Returns: None
     """
     for path in paths:
         try:
@@ -24,6 +26,8 @@ def _fsync_dir(path: Path) -> None:
 
     Args:
         path: Path to the directory.
+
+    Returns: None
     """
     try:
         dir_fd = os.open(path, os.O_RDONLY)

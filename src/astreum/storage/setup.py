@@ -42,6 +42,8 @@ def setup_storage(node: Any, config: dict) -> None:
             ``hot_storage_limit``, ``cold_storage_path``,
             ``cold_storage_limit``, ``storage_fetch_interval``,
             and ``storage_fetch_retries``.
+
+    Returns: None
     """
 
     node.logger.info("Setting up node storage")

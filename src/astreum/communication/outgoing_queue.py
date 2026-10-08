@@ -26,6 +26,9 @@ def enqueue_outgoing(
         address (Tuple[str, int]): The destination address as (host, port).
         message (Message): The message object to send.
         difficulty (int): The proof-of-work difficulty for the nonce. Defaults to 1.
+
+    Returns:
+        bool: True if the message was successfully enqueued, False otherwise.
     """
     # if not node.is_connected:
     #     raise RuntimeError("node is not connected; call node.connect() (communication_setup) first")

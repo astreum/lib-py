@@ -10,6 +10,8 @@ def required_fields(instance: object, field_names: Iterable[str]) -> None:
         instance: Object instance to check.
         field_names: Iterable of attribute names to validate.
 
+    Returns: None
+
     Raises:
         ValueError: If any fields are missing or None.
     """

@@ -40,6 +40,8 @@ def put_in_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes, value: 
         astreum_node: A Node instance for fetching nodes.
         key: The key to write at.
         value: The value to write (Expr or bytes hash).
+
+    Returns: None
     """
     total_bits = len(key) * 8
 
@@ -120,6 +122,9 @@ def _append_leaf(
         key_pos: Current bit position in the key.
         value: The value to store.
         stack: Ancestor stack for bubbling updates.
+
+    Returns:
+        None
     """
     tail_len = len(key) * 8 - (key_pos + 1)
     tail_bits, tail_len = _bit_slice(key, key_pos + 1, tail_len)
@@ -161,6 +166,9 @@ def _split_and_insert(
         key: The full key being inserted.
         key_pos: Current bit position in the key.
         value: The value to store.
+
+    Returns:
+        None
     """
     max_lcp = min(node.key_len, len(key) * 8 - key_pos)
     lcp = 0
@@ -237,6 +245,9 @@ def _bubble(
         tree: The radix tree to update.
         stack: Ancestor stack (parent, old_hash, dir_bit).
         new_hash: The new hash to propagate.
+
+    Returns:
+        None
     """
     while stack:
         parent, old_hash, dir_bit = stack.pop()

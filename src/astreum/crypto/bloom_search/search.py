@@ -32,6 +32,9 @@ def bloom_search_tx(astreum_node: Any, *,
         starting_block: Block to start search from.
         end_block_height: Minimum block height.
         limit: Maximum results.
+
+    Returns:
+        list["Transaction"]: List of matching transactions.
     """
     from astreum.consensus.transaction.from_storage import get_transaction_from_storage
     from astreum.consensus.block.encoding.decode import get_block_from_storage
@@ -87,12 +90,14 @@ def bloom_search_tx(astreum_node: Any, *,
 
 
 def _load_block_txs(node: Any, block) -> list["Transaction"]:
-    """
-    Load all Transaction objects from a block's transactions_hash.
+    """Load all Transaction objects from a block's transactions_hash.
 
     Args:
         node: Astreum node.
         block: Block to load from.
+
+    Returns:
+        list['Transaction']: Description of the return value.
     """
     from astreum.consensus.transaction.from_storage import get_transaction_from_storage
 
@@ -142,6 +147,9 @@ def _tx_matches(tx: "Transaction", *,
         sender: Sender address filter.
         receiver: Receiver address filter.
         key: Data key filter.
+
+    Returns:
+        bool: True if the transaction matches the filters, False otherwise.
     """
     if tx_hash != ZERO32 and tx.hash != tx_hash:
         return False

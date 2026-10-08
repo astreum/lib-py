@@ -9,11 +9,13 @@ from astreum.storage.exprs import get_expr
 
 
 def _scope(block_hash) -> dict:
-    """
-    Get scope dict for get_expr keyword.
+    """Get scope dict for get_expr keyword.
 
     Args:
         block_hash: Block hash for scope.
+
+    Returns:
+        dict: Description of the return value.
     """
     return {} if block_hash is None else {"block_hash": block_hash}
 
@@ -35,6 +37,9 @@ def read_bloom_node(
         block: Block holding the expression.
         contact: Peer contact.
         level: Node level in tree.
+
+    Returns:
+        BloomNode | None: The bloom node, or None if not found.
     """
     from astreum.crypto.bloom_tree.expr import bloom_node_from_expr
 
@@ -53,14 +58,15 @@ class BloomTree:
     """Binary bloom tree for a 1024-block chunk."""
 
     def __init__(self, root_hash=None, astreum_node=None, contact=None, block_hash=None):
-        """
-        Initialize bloom tree.
+        """Initialize bloom tree.
 
         Args:
             root_hash: Hash of root node.
             astreum_node: Astreum node.
             contact: Peer contact.
             block_hash: Block holding the tree.
+
+        Returns: None
         """
         self.root: BloomNode | None = None
         # Nodes written by this tree (new or changed), by identity.
@@ -76,13 +82,14 @@ class BloomTree:
             )
 
     def insert(self, offset: int, variants: list[bytes], node=None) -> None:
-        """
-        Insert variants at offset.
+        """Insert variants at offset.
 
         Args:
             offset: Target offset in tree.
             variants: List of variant elements.
             node: Astreum node.
+
+        Returns: None
         """
         """Create leaf at offset with start_hash=None, insert variants along path."""
         if self.root is None:
@@ -92,8 +99,7 @@ class BloomTree:
 
     def _walk(self, node: BloomNode, offset: int, lo: int, hi: int,
               variants: list[bytes], astreum_node, level: int) -> None:
-        """
-        Walk tree and insert variants.
+        """Walk tree and insert variants.
 
         Args:
             node: Current bloom node.
@@ -103,6 +109,8 @@ class BloomTree:
             variants: Variant elements.
             astreum_node: Astreum node.
             level: Current level.
+
+        Returns: None
         """
         node._expr = None
         for v in variants:
@@ -124,13 +132,15 @@ class BloomTree:
             self._walk(node.right, offset, mid, hi, variants, astreum_node, child_level)
 
     def _resolve_child(self, parent: BloomNode, is_left: bool, astreum_node) -> BloomNode:
-        """
-        Resolve child node from storage or create new.
+        """Resolve child node from storage or create new.
 
         Args:
             parent: Parent bloom node.
             is_left: True for left child.
             astreum_node: Astreum node.
+
+        Returns:
+            BloomNode: Description of the return value.
         """
         """Resolve a child — create new or fetch from storage."""
         level = parent.level + 1
@@ -145,13 +155,14 @@ class BloomTree:
         return BloomNode(level=level)
 
     def set_leaf_start_hash(self, offset: int, block_hash: bytes, astreum_node=None) -> None:
-        """
-        Set start_hash on leaf at offset.
+        """Set start_hash on leaf at offset.
 
         Args:
             offset: Target offset.
             block_hash: Block hash to set.
             astreum_node: Astreum node.
+
+        Returns: None
         """
         """Set start_hash on an existing leaf at offset.
 
@@ -164,8 +175,7 @@ class BloomTree:
 
     def _set_leaf(self, node: BloomNode, offset: int, lo: int, hi: int,
                   block_hash: bytes, astreum_node=None) -> bool:
-        """
-        Recursively set leaf start_hash.
+        """Recursively set leaf start_hash.
 
         Args:
             node: Current bloom node.
@@ -174,6 +184,9 @@ class BloomTree:
             hi: Upper bound.
             block_hash: Block hash to set.
             astreum_node: Astreum node.
+
+        Returns:
+            bool: Description of the return value.
         """
         """True if the leaf exists (the path is then rewritten)."""
         if node.is_leaf:
@@ -222,12 +235,14 @@ class BloomTree:
 
 
 def bloom_search(node: BloomNode | None, element: bytes) -> list[bytes]:
-    """
-    Search the bloom tree for element.
+    """Search the bloom tree for element.
 
     Args:
         node: Root bloom node.
         element: Element to search.
+
+    Returns:
+        list[bytes]: Description of the return value.
     """
     if node is None:
         return []
@@ -247,14 +262,16 @@ def bloom_search(node: BloomNode | None, element: bytes) -> list[bytes]:
 def bloom_search_storage(
     root_hash: bytes, element: bytes, astreum_node, block_hash: bytes | None = None
 ) -> list[bytes | None]:
-    """
-    Search a sealed era's bloom tree from storage.
+    """Search a sealed era's bloom tree from storage.
 
     Args:
         root_hash: Era root BloomNode expr hash.
         element: Element to search.
         astreum_node: Astreum P2P/storage Node.
         block_hash: Block holding the root.
+
+    Returns:
+        list[bytes | None]: Description of the return value.
     """
     root = read_bloom_node(astreum_node, root_hash, block=block_hash, level=0)
     if root is None:
@@ -266,13 +283,15 @@ def bloom_search_storage(
 def _search_storage(
     bloom_node: BloomNode, element: bytes, astreum_node
 ) -> list[bytes | None]:
-    """
-    Recursively search bloom tree from storage.
+    """Recursively search bloom tree from storage.
 
     Args:
         bloom_node: Current bloom node.
         element: Element to search.
         astreum_node: Astreum node.
+
+    Returns:
+        list[bytes | None]: Description of the return value.
     """
     if not bloom_test(bloom_node.filter, element):
         return []

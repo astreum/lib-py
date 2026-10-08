@@ -26,11 +26,13 @@ def _node(left: bytes, right: bytes) -> bytes:
 
 
 def create_merkle_tree(values: List[bytes]) -> MerkleTree:
-    """
-    Build a Merkle tree over an ordered list of 32-byte values.
+    """Build a Merkle tree over an ordered list of 32-byte values.
 
     Args:
         values: List of 32-byte values.
+
+    Returns:
+        MerkleTree: Description of the return value.
     """
     for v in values:
         if not isinstance(v, (bytes, bytearray)) or len(v) != HASH_LEN:
@@ -52,12 +54,14 @@ def create_merkle_tree(values: List[bytes]) -> MerkleTree:
 
 
 def generate_merkle_tree_proof(merkle_tree: MerkleTree, index: int) -> List[bytes]:
-    """
-    Generate sibling hashes for index, leaf to root.
+    """Generate sibling hashes for index, leaf to root.
 
     Args:
         merkle_tree: Merkle tree.
         index: Index of the leaf.
+
+    Returns:
+        List[bytes]: Description of the return value.
     """
     if merkle_tree.levels is None:
         raise ValueError("merkle tree has no levels")
@@ -87,6 +91,9 @@ def verify_merkle_tree_proof(
         index: Index of the leaf.
         value: Value to verify.
         proof: List of sibling hashes.
+
+    Returns:
+        bool: True if the proof is valid, False otherwise.
     """
     n = merkle_tree.count
     if not isinstance(index, int) or not 0 <= index < n:

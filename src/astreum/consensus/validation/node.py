@@ -26,6 +26,8 @@ def validate_blockchain(self, validation_secret_key: Ed25519PrivateKey):
 
     Args:
         validation_secret_key: The validator's secret key.
+
+    Returns: None
     """
     connect_node(self)
     fork_setup(self)
@@ -72,6 +74,8 @@ def validate_blockchain(self, validation_secret_key: Ed25519PrivateKey):
 
         Args:
             tx_hash: The transaction hash bytes.
+
+        Returns: None
         """
         if not isinstance(tx_hash, (bytes, bytearray)):
             raise TypeError("transaction hash must be bytes-like")

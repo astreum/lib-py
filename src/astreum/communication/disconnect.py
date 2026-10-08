@@ -28,6 +28,8 @@ def _set_event(node: "Node", attr_name: str) -> None:
     Args:
         node (Node): The node with event attributes.
         attr_name (str): The name of the event attribute to set.
+
+    Returns: None
     """
     event = getattr(node, attr_name, None)
     if event is not None:
@@ -40,6 +42,8 @@ def _close_socket(node: "Node", attr_name: str) -> None:
     Args:
         node (Node): The node with socket attributes.
         attr_name (str): The name of the socket attribute to close.
+
+    Returns: None
     """
     sock = getattr(node, attr_name, None)
     if sock is None:
@@ -55,6 +59,8 @@ def disconnect_node(node: "Node") -> None:
 
     Args:
         node (Node): The node to disconnect.
+
+    Returns: None
     """
     node.logger.info("Disconnecting Astreum Node")
 

@@ -151,6 +151,8 @@ class Block:
 
         Args:
             snapshot: The snapshot tuple to restore from.
+
+        Returns: None
         """
         (
             saved_cache,

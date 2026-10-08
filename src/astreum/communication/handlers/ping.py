@@ -17,6 +17,8 @@ def handle_ping(node: "Node", peer: Peer, payload: bytes) -> None:
         node (Node): The node receiving the ping.
         peer (Peer): The peer that sent the ping.
         payload (bytes): The ping message payload.
+
+    Returns: None
     """
     try:
         ping = Ping.from_bytes(payload)

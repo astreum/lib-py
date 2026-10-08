@@ -10,6 +10,9 @@ def address_str_to_host_and_port(address: str) -> Tuple[str, int]:
 
     Args:
         address (str): The address string to parse.
+
+    Returns:
+        Tuple[str, int]: Description of the return value.
     """
     addr = address.strip()
     if not addr:
@@ -56,6 +59,9 @@ def xor_distance(a: bytes, b: bytes) -> int:
     Args:
         a (bytes): The first identifier.
         b (bytes): The second identifier.
+
+    Returns:
+        int: Description of the return value.
     """
     if len(a) != len(b):
         raise ValueError("xor distance requires operands of equal length")

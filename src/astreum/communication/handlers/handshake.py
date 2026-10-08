@@ -23,6 +23,9 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
         node (Node): The node handling the handshake.
         addr (Sequence[object]): The address tuple (host, port).
         message (Message): The handshake message.
+
+    Returns:
+        bool: Description of the return value.
     """
     def _queue_handshake_ping(peer: Peer, peer_address: tuple[str, int]) -> None:
         with node.latest_block_lock:

@@ -26,6 +26,9 @@ def get_block(node, *, height: int) -> Optional["Block"]:
     Args:
         node: Node instance to query.
         height: Chain height of the target block.
+
+    Returns:
+        Optional['Block']: Description of the return value.
     """
     from astreum.crypto.bloom_search.block_search import find_block_by_height
 
@@ -72,6 +75,9 @@ def find_transactions(
         start_height: Height to start searching backward from.
         end_height: Height to stop searching at.
         limit: Maximum number of transactions to return.
+
+    Returns:
+        List["Transaction"]: List of matching transactions.
     """
     from astreum.crypto.bloom_search import bloom_search_tx
     from astreum.crypto.bloom_search.block_search import find_block_by_height

@@ -55,6 +55,9 @@ def encode_found_pages(
     Args:
         exprs (List[Expr]): The list of expressions to encode (root first).
         on_skip (Optional[Callable[[Expr, int], None]]): Callback for skipped exprs.
+
+    Returns:
+        List[bytes]: Description of the return value.
     """
     if not exprs:
         raise ValueError("no exprs to page")
@@ -89,6 +92,9 @@ def decode_found_page(payload: bytes) -> Tuple[int, int, List[Expr]]:
 
     Args:
         payload (bytes): The page payload including the type byte.
+
+    Returns:
+        Tuple[int, int, List[Expr]]: Description of the return value.
     """
     if len(payload) < _PAGE_HEADER_BYTES:
         raise ValueError("truncated page header")
@@ -128,6 +134,9 @@ def found_page_expr_bytes(payload: bytes) -> int:
 
     Args:
         payload (bytes): The page payload to measure.
+
+    Returns:
+        int: Description of the return value.
     """
     count = int.from_bytes(payload[5:7], "big", signed=False)
     return len(payload) - _PAGE_HEADER_BYTES - 4 * count

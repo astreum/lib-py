@@ -29,6 +29,9 @@ def max_get_entries(budget_bytes: int) -> int:
 
     Args:
         budget_bytes (int): The maximum byte budget for the datagram.
+
+    Returns:
+        int: Description of the return value.
     """
     return (budget_bytes - MESSAGE_FRAMING_BYTES - 1 - GET_HEADER_BYTES) // SCOPED_GET_ENTRY_BYTES
 
@@ -38,6 +41,9 @@ def max_batch_entries(budget_bytes: int) -> int:
 
     Args:
         budget_bytes (int): The maximum byte budget for the datagram.
+
+    Returns:
+        int: Description of the return value.
     """
     return (budget_bytes - MESSAGE_FRAMING_BYTES - 1 - BATCH_HEADER_BYTES) // BATCH_ENTRY_BYTES
 
@@ -69,6 +75,9 @@ class StorageRequest:
             expr_id (bytes): The expression ID. Defaults to None.
             payload_type (int | None): The payload type. Defaults to None.
             entries (list[tuple] | None): The entry list. Defaults to None.
+
+        Returns:
+            None
         """
         self.code = code
         self.data = data

@@ -7,18 +7,20 @@ from astreum.machine import OpError
 
 def handle_stack_e5m2(machine, stack: List[Expr], env) -> None:
     """Convert value to e5m2 (8-bit float with 5-bit exponent, 2-bit mantissa).
-    
+
     Input types:
     - bytes (1 byte): decode via LUT
     - str/symbol: parse as float then encode
     - int: convert to float then encode
     - e5m2: passthrough
     - other float types: error (strict)
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     v = stack.pop()
     tag = get_expr_tag(v)
@@ -62,11 +64,13 @@ def handle_stack_e5m2(machine, stack: List[Expr], env) -> None:
 
 def handle_stack_e5m2_with_result(machine, stack, env):
     """Convert value to e5m2 with result wrapping.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     try:
         handle_stack_e5m2(machine, stack, env)

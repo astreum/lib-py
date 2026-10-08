@@ -188,7 +188,7 @@ class Expr:
 
     def __init__(self, base, value=None, head=None, tail=None, head_hash=None, tail_hash=None):
         """Initialize an expression.
-        
+
         Args:
             base: The base type ("link", "symbol", or "bytes").
             value: Optional value for terminal expressions.
@@ -196,6 +196,8 @@ class Expr:
             tail: Optional tail expression for links.
             head_hash: Optional hash of the head expression.
             tail_hash: Optional hash of the tail expression.
+
+        Returns: None
         """
         self.base = base
         self.value = value

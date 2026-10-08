@@ -34,6 +34,8 @@ def _extend_pending_exprs(block: object, exprs: list[Expr]) -> None:
     Args:
         block: The block.
         exprs: The expressions to add.
+
+    Returns: None
     """
     block.pending_exprs.extend(exprs)
 

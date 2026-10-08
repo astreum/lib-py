@@ -633,6 +633,8 @@ def apply_transaction(node: Any, block: object, transaction_hash: bytes) -> None
         node: The node.
         block: The block to apply to.
         transaction_hash: The transaction hash.
+
+    Returns: None
     """
     # A verified block's transactions are asked from its provider.
     block_hash = getattr(block, "expr_id", None)
@@ -651,5 +653,7 @@ def apply_transaction_obj(node: Any, block: object, transaction: Any) -> None:
         node: The node.
         block: The block to apply to.
         transaction: The transaction object.
+
+    Returns: None
     """
     _apply_tx_effects(node, block, transaction, transaction.hash)

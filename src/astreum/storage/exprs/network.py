@@ -277,6 +277,8 @@ def prefetch_exprs_from_network(
         resolution: Resolution strategy (default SINGLE).
         contact: Optional contact for network fetches.
         block_hash: Optional block hash for scoped fetches.
+
+    Returns: None
     """
     try:
         if not getattr(node, "is_connected", False):

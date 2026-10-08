@@ -119,6 +119,8 @@ def current_validator(
 
         Args:
             validator_key: The validator's public key.
+
+        Returns: None
         """
         current_amount = stakes.get(validator_key, 0)
         if current_amount <= 0:

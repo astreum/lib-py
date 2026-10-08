@@ -33,6 +33,8 @@ def init_pending_ads(node: Any) -> None:
 
     Args:
         node: The node to initialize.
+
+    Returns: None
     """
     node.pending_ads = deque(maxlen=MAX_PENDING_ADS)
 
@@ -45,6 +47,8 @@ def queue_ads(node: Any, height: int, block_hash: bytes, ids: list[bytes]) -> No
         height: The block height.
         block_hash: The block hash.
         ids: List of expression identifiers.
+
+    Returns: None
     """
     if not ids:
         return

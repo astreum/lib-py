@@ -72,6 +72,8 @@ def manage_peer(node: "Node") -> None:
 
     Args:
         node (Node): The node instance managing peers.
+
+    Returns: None
     """
     node.logger.info(
         "Peer manager started (timeout=%3ds, interval=%3ds)",

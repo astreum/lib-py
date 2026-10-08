@@ -9,11 +9,13 @@ if TYPE_CHECKING:
 
 def handle_stack_closure(machine: "Machine", stack: List[Expr], env) -> None:
     """Create a closure from parameters and body.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     if not stack:
         raise OpError("stack underflow")
@@ -36,11 +38,13 @@ def handle_stack_closure(machine: "Machine", stack: List[Expr], env) -> None:
 
 def handle_stack_closure_with_result(machine, stack, env):
     """Create a closure with result wrapping.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     try:
         handle_stack_closure(machine, stack, env)

@@ -170,6 +170,9 @@ def _serve_get(
         expr_id (bytes): The expression ID to retrieve.
         desired (int): The desired resolution level.
         block_hash (bytes | None): Optional block hash for scoped requests.
+
+    Returns:
+        tuple[bool, str | None]: A tuple of (success, error_reason).
     """
     local_atom = get_expr_from_local_storage(node, expr_id)
     if local_atom is not None:

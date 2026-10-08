@@ -332,6 +332,8 @@ def _submit_claims(node: Node, entries: list[tuple]) -> None:
     Args:
         node: A Node instance for sending transactions.
         entries: List of claim tuples with payouts.
+
+    Returns: None
     """
     if not entries:
         return

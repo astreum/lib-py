@@ -23,6 +23,8 @@ def invalidate_radix_node_cache(node: RadixNode) -> None:
 
     Args:
         node: The radix node to invalidate.
+
+    Returns: None
     """
     node._hash = None
     node._expr = None

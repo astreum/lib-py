@@ -12,6 +12,8 @@ class Meter:
 
         Args:
             limit: Optional limit for total meter usage.
+
+        Returns: None
         """
         self.limit: Optional[int] = limit
         self.eval: int = 0

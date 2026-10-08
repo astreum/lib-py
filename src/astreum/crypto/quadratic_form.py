@@ -2,12 +2,14 @@ import math
 
 
 def extended_gcd(a: int, b: int) -> tuple[int, int, int]:
-    """
-    Return (g, x, y) such that a*x + b*y = g = gcd(a, b).
+    """Return (g, x, y) such that a*x + b*y = g = gcd(a, b).
 
     Args:
         a: First integer.
         b: Second integer.
+
+    Returns:
+        tuple[int, int, int]: Description of the return value.
     """
     if b == 0:
         return (a, 1, 0)
@@ -16,12 +18,14 @@ def extended_gcd(a: int, b: int) -> tuple[int, int, int]:
 
 
 def modinv(a: int, m: int) -> int:
-    """
-    Return modular inverse of a mod m.
+    """Return modular inverse of a mod m.
 
     Args:
         a: Integer to find inverse for.
         m: Modulus.
+
+    Returns:
+        int: Description of the return value.
     """
     g, x, _ = extended_gcd(a, m)
     if g != 1:
@@ -30,23 +34,27 @@ def modinv(a: int, m: int) -> int:
 
 
 def is_reduced(q: 'QuadraticForm') -> bool:
-    """
-    Check if the form q is in reduced Gauss form.
+    """Check if the form q is in reduced Gauss form.
 
     Args:
         q: Quadratic form to check.
+
+    Returns:
+        bool: Description of the return value.
     """
     return abs(q.b) <= q.a <= q.c and not (q.a == q.c and q.b < 0)
 
 
 def is_primitive(a: int, b: int, c: int) -> bool:
-    """
-    Check if the form coefficients are coprime.
+    """Check if the form coefficients are coprime.
 
     Args:
         a: First coefficient.
         b: Second coefficient.
         c: Third coefficient.
+
+    Returns:
+        bool: Description of the return value.
     """
     return math.gcd(math.gcd(a, b), c) == 1
 

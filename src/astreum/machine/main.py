@@ -15,6 +15,8 @@ class Machine():
             node: The Astreum Node instance.
             meter_limit: Optional metering limit for resource tracking.
             mode: Execution mode - 'dynamic' or 'deterministic'.
+
+        Returns: None
         """
         if mode not in ("dynamic", "deterministic"):
             raise ValueError(f"Invalid mode: {mode!r}. Must be 'dynamic' or 'deterministic'.")
@@ -100,6 +102,8 @@ class Machine():
             body: The expression to evaluate.
             actor_name: The actor's identifier.
             parent_env: The parent environment for the actor.
+
+        Returns: None
         """
         env = Env(parent=parent_env)
         stack = []

@@ -5,11 +5,13 @@ from astreum.storage.radix import get_from_radix_tree
 
 def handle_stack_acc_get(machine, stack, env):
     """Get a value from account storage by key.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     key_expr = stack.pop()
     if get_expr_tag(key_expr) != "bytes":
@@ -31,11 +33,13 @@ def handle_stack_acc_get(machine, stack, env):
 
 def handle_stack_acc_get_with_result(machine, stack, env):
     """Get a value from account storage with result wrapping.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     try:
         handle_stack_acc_get(machine, stack, env)

@@ -6,12 +6,14 @@ from astreum.machine import OpError
 
 def _compare_numbers(machine, stack: List[Expr], predicate, verb: str) -> None:
     """Compare two numbers using a predicate.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         predicate: Comparison function.
         verb: Description of comparison for error messages.
+
+    Returns: None
     """
     b = stack.pop()
     a = stack.pop()
@@ -39,55 +41,65 @@ def _compare_numbers(machine, stack: List[Expr], predicate, verb: str) -> None:
 
 def handle_stack_less_than(machine, stack: List[Expr], env) -> None:
     """Compare if a < b.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     _compare_numbers(machine, stack, lambda a, b: a < b, "less than")
 
 
 def handle_stack_greater_than(machine, stack: List[Expr], env) -> None:
     """Compare if a > b.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     _compare_numbers(machine, stack, lambda a, b: a > b, "greater than")
 
 
 def handle_stack_less_than_or_equal(machine, stack: List[Expr], env) -> None:
     """Compare if a <= b.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     _compare_numbers(machine, stack, lambda a, b: a <= b, "less than or equal")
 
 
 def handle_stack_greater_than_or_equal(machine, stack: List[Expr], env) -> None:
     """Compare if a >= b.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     _compare_numbers(machine, stack, lambda a, b: a >= b, "greater than or equal")
 
 
 def handle_stack_less_than_with_result(machine, stack, env):
     """Compare if a < b with result wrapping.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     try:
         handle_stack_less_than(machine, stack, env)
@@ -101,11 +113,13 @@ def handle_stack_less_than_with_result(machine, stack, env):
 
 def handle_stack_greater_than_with_result(machine, stack, env):
     """Compare if a > b with result wrapping.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     try:
         handle_stack_greater_than(machine, stack, env)
@@ -119,11 +133,13 @@ def handle_stack_greater_than_with_result(machine, stack, env):
 
 def handle_stack_less_than_or_equal_with_result(machine, stack, env):
     """Compare if a <= b with result wrapping.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     try:
         handle_stack_less_than_or_equal(machine, stack, env)
@@ -137,11 +153,13 @@ def handle_stack_less_than_or_equal_with_result(machine, stack, env):
 
 def handle_stack_greater_than_or_equal_with_result(machine, stack, env):
     """Compare if a >= b with result wrapping.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     try:
         handle_stack_greater_than_or_equal(machine, stack, env)

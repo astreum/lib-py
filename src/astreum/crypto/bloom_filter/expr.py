@@ -5,11 +5,13 @@ from astreum.crypto.bloom_filter.main import BloomFilter
 
 
 def bloom_to_expr(bf: BloomFilter) -> Expr:
-    """
-    Serialize a BloomFilter to an Expr.
+    """Serialize a BloomFilter to an Expr.
 
     Args:
         bf: Bloom filter to serialize.
+
+    Returns:
+        Expr: Description of the return value.
     """
     tiers: Expr = NIL
     for tier in reversed(bf.tiers):
@@ -34,11 +36,13 @@ def bloom_to_expr(bf: BloomFilter) -> Expr:
 
 
 def bloom_from_expr(expr: Expr) -> BloomFilter:
-    """
-    Deserialize a BloomFilter from an Expr.
+    """Deserialize a BloomFilter from an Expr.
 
     Args:
         expr: Expression to deserialize.
+
+    Returns:
+        BloomFilter: Description of the return value.
     """
     head = expr._head
     if head is None or head is NIL:

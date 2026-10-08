@@ -26,6 +26,8 @@ def process_incoming_messages(node: "Node") -> None:
 
     Args:
         node (Node): The node instance processing the messages.
+
+    Returns: None
     """
     stop = node.communication_stop_event
     while not stop.is_set():
@@ -226,6 +228,8 @@ def populate_incoming_messages(node: "Node") -> None:
 
     Args:
         node (Node): The node instance receiving UDP packets.
+
+    Returns: None
     """
     stop = node.communication_stop_event
     while not stop.is_set():

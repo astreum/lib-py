@@ -25,6 +25,9 @@ def encode_storage_payment_required(
         storage_size_estimate (int): The estimated storage size.
         base_storage_fee (int): The base storage fee.
         hint_peer (Optional[Tuple[bytes, str, int]]): Optional hint peer tuple.
+
+    Returns:
+        bytes: The encoded payment-required payload.
     """
     payment_key = payment_public_key
     if len(payment_key) != 32:

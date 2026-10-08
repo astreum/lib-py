@@ -7,18 +7,20 @@ from astreum.machine import OpError
 
 def handle_stack_e4m3(machine, stack: List[Expr], env) -> None:
     """Convert value to e4m3 (8-bit float with 4-bit exponent, 3-bit mantissa).
-    
+
     Input types:
     - bytes (1 byte): decode via LUT
     - str/symbol: parse as float then encode
     - int: convert to float then encode
     - e4m3: passthrough
     - other float types: error (strict)
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     v = stack.pop()
     tag = get_expr_tag(v)
@@ -62,11 +64,13 @@ def handle_stack_e4m3(machine, stack: List[Expr], env) -> None:
 
 def handle_stack_e4m3_with_result(machine, stack, env):
     """Convert value to e4m3 with result wrapping.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     try:
         handle_stack_e4m3(machine, stack, env)

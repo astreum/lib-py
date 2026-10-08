@@ -86,6 +86,8 @@ def _update_storage_request_price(node: "Node") -> None:
 
     Args:
         node: A Node instance with storage request pricing state.
+
+    Returns: None
     """
     pressure = _incoming_queue_pressure(node)
     factor = _price_movement_factor_for_pressure(pressure)

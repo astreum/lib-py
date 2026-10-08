@@ -11,6 +11,9 @@ def message_difficulty(node: "Node") -> int:
 
     Args:
         node (Node): The node with an incoming queue to measure.
+
+    Returns:
+        int: Description of the return value.
     """
     size = node.incoming_queue_size
     limit = node.incoming_queue_size_limit

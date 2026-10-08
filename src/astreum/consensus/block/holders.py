@@ -21,6 +21,8 @@ def init_block_holders(node: Any) -> None:
 
     Args:
         node: The node to initialize.
+
+    Returns: None
     """
     node.block_holders = OrderedDict()
     node.block_holders_lock = threading.Lock()

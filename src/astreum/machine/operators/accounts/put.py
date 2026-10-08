@@ -8,11 +8,13 @@ from astreum.consensus.constants import STORAGE_ADDRESS
 
 def handle_stack_acc_put(machine, stack, env):
     """Put a key-value pair into account storage.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     value_expr = stack.pop()
     key_expr = stack.pop()
@@ -49,11 +51,13 @@ def handle_stack_acc_put(machine, stack, env):
 
 def handle_stack_acc_put_with_result(machine, stack, env):
     """Put a key-value pair into account storage with result wrapping.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     try:
         handle_stack_acc_put(machine, stack, env)

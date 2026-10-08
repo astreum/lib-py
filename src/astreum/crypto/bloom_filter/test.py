@@ -5,12 +5,14 @@ from astreum.crypto.bloom_filter.main import BloomFilter
 
 
 def bloom_test(bf: BloomFilter, element: bytes) -> bool:
-    """
-    Test if an element may be present.
+    """Test if an element may be present.
 
     Args:
         bf: Bloom filter.
         element: Element to test.
+
+    Returns:
+        bool: Description of the return value.
     """
     for tier in bf.tiers:
         bits = len(tier) * 8

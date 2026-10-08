@@ -13,12 +13,13 @@ class BloomNode:
     start_hash is only set for leaves (the block hash returned by search)."""
 
     def __init__(self, level: int, start_hash: bytes | None = None):
-        """
-        Initialize bloom node.
+        """Initialize bloom node.
 
         Args:
             level: Node level in tree.
             start_hash: Block hash for leaf nodes.
+
+        Returns: None
         """
         self.level = level
         self.start_hash = start_hash
@@ -58,12 +59,13 @@ class BloomNode:
 
     @classmethod
     def from_expr(cls, expr, *, node_get=None):
-        """
-        Deserialize from expression.
+        """Deserialize from expression.
 
         Args:
             expr: Expression to deserialize.
             node_get: Node getter function.
+
+        Returns: None
         """
         from astreum.crypto.bloom_tree.expr import bloom_node_from_expr
         return bloom_node_from_expr(expr)

@@ -43,6 +43,8 @@ def init_request_buffer(node: "Node") -> None:
 
     Args:
         node: A Node instance to attach the buffer to.
+
+    Returns: None
     """
     node.storage_request_buffer = {}
     node.storage_request_buffered = set()
@@ -164,6 +166,9 @@ def queue_storage_get(
             so the flush must not claim it again.
         block_hash: Ask the provider of this block for *expr_id* (a scoped
             entry) instead of routing by *expr_id*.
+
+    Returns:
+        bool: True if the GET was buffered or already exists, False if nowhere to send.
     """
     with node.storage_request_buffer_lock:
         if expr_id in node.storage_request_buffered:

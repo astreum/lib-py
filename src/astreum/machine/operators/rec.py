@@ -11,12 +11,14 @@ if TYPE_CHECKING:
 
 def _evaluation(machine, expr, stack, env):
     """Lazy import to break circular dependency.
-    
+
     Args:
         machine: The machine instance.
         expr: The expression to evaluate.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     from astreum.machine.evaluator import evaluation
 

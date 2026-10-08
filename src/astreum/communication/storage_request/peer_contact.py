@@ -12,6 +12,9 @@ def encode_peer_contact_bytes(peer: "Peer") -> bytes:
 
     Args:
         peer (Peer): The peer to encode contact information for.
+
+    Returns:
+        bytes: Description of the return value.
     """
     host, port = peer.address
     storage_key_bytes = peer.public_key_bytes

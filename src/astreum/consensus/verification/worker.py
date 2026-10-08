@@ -85,6 +85,8 @@ def _scan_peer_heads(node: Any) -> None:
 
     Args:
         node: The node to scan.
+
+    Returns: None
     """
     grouped: dict[bytes, set[Any]] = {}
     with node.peers_lock:
@@ -115,6 +117,8 @@ def _select_latest_block(node: Any) -> None:
 
     Args:
         node: The node.
+
+    Returns: None
     """
     config = node.config or {}
     try:
@@ -198,6 +202,8 @@ def make_verify_worker(node: Any):
 
         Args:
             None.
+
+        Returns: None
         """
         stop = node._verify_stop_event
         while not stop.is_set():

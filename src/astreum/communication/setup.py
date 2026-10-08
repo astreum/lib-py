@@ -65,6 +65,8 @@ def make_maps():
 
     Args:
         None
+
+    Returns: None
     """
     return
 
@@ -131,6 +133,8 @@ def communication_setup(node: "Node", config: dict):
     Args:
         node (Node): The node instance to configure.
         config (dict): Configuration dictionary with keys for ports, keys, etc.
+
+    Returns: None
     """
     node.logger.info("Setting up node communication")
     node.use_ipv6              = config.get('use_ipv6', False)

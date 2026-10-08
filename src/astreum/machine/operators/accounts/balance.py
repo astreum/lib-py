@@ -4,11 +4,13 @@ from astreum.machine import OpError
 
 def handle_stack_acc_balance(machine, stack, env):
     """Get the balance of the expression account.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     expression_account = machine.block.accounts.get_account(machine.tx.recipient, machine.node)
     if expression_account is None:
@@ -19,11 +21,13 @@ def handle_stack_acc_balance(machine, stack, env):
 
 def handle_stack_acc_balance_with_result(machine, stack, env):
     """Get account balance with result wrapping.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     try:
         handle_stack_acc_balance(machine, stack, env)

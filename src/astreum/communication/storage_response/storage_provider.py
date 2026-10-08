@@ -11,6 +11,9 @@ def decode_storage_provider(payload: bytes) -> Tuple[bytes, bytes, str, int]:
 
     Args:
         payload (bytes): The 70-byte provider payload to decode.
+
+    Returns:
+        Tuple[bytes, bytes, str, int]: Description of the return value.
     """
     expected_len = 32 + 32 + 4 + 2
     if len(payload) < expected_len:

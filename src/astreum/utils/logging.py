@@ -173,6 +173,8 @@ def _gzip_rotator(src: str, dst: str) -> None:
     Args:
         src: Path to the source log file.
         dst: Destination path for the gzipped file.
+
+    Returns: None
     """
     with open(src, "rb") as source, gzip.open(f"{dst}.gz", "wb") as target:
         shutil.copyfileobj(source, target)
@@ -239,6 +241,8 @@ def _shutdown_listener(listener: logging.handlers.QueueListener, handlers: list[
     Args:
         listener: QueueListener to stop.
         handlers: List of handlers to close.
+
+    Returns: None
     """
     try:
         listener.stop()

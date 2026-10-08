@@ -102,6 +102,8 @@ def encode_block_message(provider_payload: bytes, block_expr: Expr) -> bytes:
             expr: The expression.
             size: The size.
 
+        Returns: None
+
         Raises:
             ValueError: Always, to reject oversized headers.
         """

@@ -9,6 +9,8 @@ class Env:
         Args:
             data: Initial variable bindings.
             parent: Parent environment for lexical scoping.
+
+        Returns: None
         """
         self.data: Dict[str, Expr] = {} if data is None else data
         self.parent = parent
@@ -34,6 +36,8 @@ class Env:
         Args:
             key: The variable name.
             value: The expression to bind.
+
+        Returns: None
         """
         self.data[key] = value
 

@@ -10,23 +10,27 @@ from astreum.storage.pointers import cell_reader, read_field
 
 
 def _ref(value: bytes | None) -> Expr:
-    """
-    Create reference expression.
+    """Create reference expression.
 
     Args:
         value: Hash value or None.
+
+    Returns:
+        Expr: Description of the return value.
     """
     return NIL if value is None else Expr("link", head_hash=value)
 
 
 def _child_item(child: BloomNode | None, h: bytes | None, block: bytes | None) -> Expr:
-    """
-    Create cell for child pointer.
+    """Create cell for child pointer.
 
     Args:
         child: Child bloom node.
         h: Hash value.
         block: Block reference.
+
+    Returns:
+        Expr: Description of the return value.
     """
     if child is not None:
         h = child.expr().hash()
@@ -38,11 +42,13 @@ def _child_item(child: BloomNode | None, h: bytes | None, block: bytes | None) -
 
 
 def bloom_node_to_expr(node: BloomNode) -> Expr:
-    """
-    Serialize a BloomNode to an Expr.
+    """Serialize a BloomNode to an Expr.
 
     Args:
         node: Bloom node to serialize.
+
+    Returns:
+        Expr: Description of the return value.
     """
     block_ref = _ref(node.start_hash)
     left_ref = _child_item(node.left, node._left_hash, node._left_block)
@@ -102,6 +108,9 @@ def bloom_node_from_expr(
         block: Block holding the expression.
         contact: Peer contact.
         level: Node level in tree.
+
+    Returns:
+        BloomNode: The deserialized bloom node.
     """
     part = cell_reader(astreum_node, block, contact)
 

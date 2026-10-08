@@ -16,6 +16,8 @@ class Node:
 
         Args:
             config: Configuration dictionary for node settings.
+
+        Returns: None
         """
         self.config = config_setup(config=config)
         self.bootstrap_peers = get_bootstrap_peers(self)

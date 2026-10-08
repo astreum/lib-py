@@ -13,6 +13,8 @@ def verify_blockchain(node: Any):
 
     Args:
         node: The node to verify.
+
+    Returns: None
     """
     connect_node(node)
 

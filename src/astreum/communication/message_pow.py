@@ -20,6 +20,9 @@ def _leading_zero_bits(buf: bytes) -> int:
 
     Args:
         buf (bytes): The buffer to count leading zero bits in.
+
+    Returns:
+        int: Description of the return value.
     """
     zeros = 0
     for byte in buf:
@@ -39,6 +42,9 @@ def calculate_message_nonce(message_bytes: bytes, difficulty: int) -> int:
     Args:
         message_bytes (bytes): The message content excluding the nonce prefix.
         difficulty (int): The required number of leading zero bits.
+
+    Returns:
+        int: Description of the return value.
     """
     target = max(1, difficulty)
     nonce = 0

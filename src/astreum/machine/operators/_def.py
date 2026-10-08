@@ -7,11 +7,13 @@ from astreum.machine import OpError
 
 def handle_stack_def(machine, stack: List[Expr], env: Env) -> None:
     """Define a new variable in the environment.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     if len(stack) < 2:
         raise OpError("stack underflow")
@@ -36,11 +38,13 @@ def handle_stack_def(machine, stack: List[Expr], env: Env) -> None:
 
 def handle_stack_def_with_result(machine, stack, env):
     """Define a new variable with result wrapping.
-    
+
     Args:
         machine: The machine instance.
         stack: The evaluation stack.
         env: The environment.
+
+    Returns: None
     """
     try:
         handle_stack_def(machine, stack, env)

@@ -264,6 +264,9 @@ def _resolve_def(
         env_data: Dictionary to store resolved definitions.
         visited: Set of visited (module, name, chain) tuples.
         cache: Module parse cache.
+
+    Returns:
+        None
     """
     vkey = (module_id, name, prefix_chain)
     if vkey in visited:
@@ -311,6 +314,9 @@ def _resolve_name_chain(
         env_data: Dictionary to store resolved definitions.
         visited: Set of visited (module, name, chain) tuples.
         cache: Module parse cache.
+
+    Returns:
+        None
     """
     first, *rest = name_parts
     defs, imports = _parse_module(module_id, cache)
@@ -356,6 +362,9 @@ def _walk_body(
         visited: Set of visited (module, name, chain) tuples.
         cache: Module parse cache.
         node: The Astreum Node instance.
+
+    Returns:
+        None
     """
     if get_expr_tag(expr) == "symbol":
         sym = expr.value

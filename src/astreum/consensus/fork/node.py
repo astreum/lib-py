@@ -14,6 +14,8 @@ def fork_setup(node: Any) -> None:
 
     Args:
         node: The node to initialize.
+
+    Returns: None
     """
     if hasattr(node, 'forks'):
         return
@@ -28,6 +30,8 @@ def update_fork(node: Any, head_id: bytes, updates: Mapping[str, Any]) -> None:
         node: The node containing the fork.
         head_id: The fork head identifier.
         updates: Mapping of field names to new values.
+
+    Returns: None
 
     Raises:
         KeyError: If fork head not found.

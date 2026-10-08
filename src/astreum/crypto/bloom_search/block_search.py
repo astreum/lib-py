@@ -10,13 +10,15 @@ from astreum.crypto.bloom_search.search import ERA_SIZE
 def find_block_by_height(astreum_node: Any, *,
                          starting_block=None,
                          target_height: int) -> Optional[Block]:
-    """
-    Find a block by height using the bloom tree's binary structure.
+    """Find a block by height using the bloom tree's binary structure.
 
     Args:
         astreum_node: Astreum node.
         starting_block: Block to start search from.
         target_height: Target block height.
+
+    Returns:
+        Optional[Block]: Description of the return value.
     """
     if starting_block is None:
         return None
@@ -82,14 +84,16 @@ def find_block_by_height(astreum_node: Any, *,
 
 def _storage_find_leaf(astreum_node: Any, root_hash: bytes,
                        offset: int, block_hash: Optional[bytes] = None) -> Optional[bytes]:
-    """
-    Binary-descent by position in the bloom tree.
+    """Binary-descent by position in the bloom tree.
 
     Args:
         astreum_node: Astreum node.
         root_hash: Root node hash.
         offset: Target offset in the tree.
         block_hash: Block holding the root.
+
+    Returns:
+        Optional[bytes]: Description of the return value.
     """
     from astreum.crypto.bloom_tree.tree import read_bloom_node
 

@@ -13,6 +13,9 @@ def _child_hashes(expr: Expr) -> List[bytes]:
 
     Args:
         expr (Expr): The expression to extract child hashes from.
+
+    Returns:
+        List[bytes]: Description of the return value.
     """
     if expr.base != "link":
         return []
@@ -45,6 +48,9 @@ def cull_to_resolution(
         root (Expr): The root expression.
         exprs (List[Expr]): The list of delivered expressions.
         resolution (Optional[int]): The requested resolution level.
+
+    Returns:
+        List[Expr]: The filtered list of expressions within the requested resolution.
     """
     by_hash: Dict[bytes, Expr] = {}
     for expr in exprs:

@@ -27,6 +27,9 @@ def _scratch_node(node: "Node", limit_bytes: int = 4 * 1024 * 1024) -> SimpleNam
     Args:
         node (Node): The node instance.
         limit_bytes (int, optional): Storage limit in bytes. Defaults to 4MB.
+
+    Returns:
+        SimpleNamespace: Description of the return value.
     """
     return SimpleNamespace(
         hot_storage={},
@@ -51,6 +54,8 @@ def handle_block(node: "Node", peer: Peer, content: bytes) -> None:
         node (Node): The node receiving the announcement.
         peer (Peer): The peer that sent the announcement.
         content (bytes): The block message content.
+
+    Returns: None
     """
     decoded = decode_block_message(content)
     if decoded is None:
@@ -112,6 +117,8 @@ def _relay(node: "Node", sender: Peer, content: bytes) -> None:
         node (Node): The node forwarding the announcement.
         sender (Peer): The original sender peer.
         content (bytes): The block message content to relay.
+
+    Returns: None
     """
     for key, validator in validator_peers(node).items():
         if key == sender.public_key_bytes:

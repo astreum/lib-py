@@ -86,6 +86,8 @@ def _announce_block(node: Any, block: Block) -> None:
     Args:
         node: The node announcing.
         block: The block to announce.
+
+    Returns: None
     """
     try:
         from astreum.consensus.block.encoding.expr import get_block_expr
@@ -127,6 +129,8 @@ def make_validation_worker(
 
         Args:
             None.
+
+        Returns: None
         """
         node.logger.info("Validation worker started")
         stop = node._validation_stop_event
@@ -137,6 +141,8 @@ def make_validation_worker(
             Args:
                 block: The block.
                 reward_amount: The reward amount.
+
+            Returns: None
             """
             if reward_amount <= 0:
                 return

@@ -110,6 +110,8 @@ class Fork:
 
         Args:
             peer_id: The peer identifier.
+
+        Returns: None
         """
         self.peers.add(peer_id)
 
@@ -118,6 +120,8 @@ class Fork:
 
         Args:
             peer_id: The peer identifier.
+
+        Returns: None
         """
         self.peers.discard(peer_id)
 
