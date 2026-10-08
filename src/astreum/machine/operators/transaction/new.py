@@ -12,7 +12,9 @@ if TYPE_CHECKING:
     from astreum.machine.main import Machine
 
 def handle_stack_tx_new(machine: "Machine", stack: List[Expr], env) -> None:
-    """``(code recipient amount data -- hash|nil)``
+    """Construct an internal (unsigned) transaction and apply its effects inline.
+
+    Stack effect: ``(code recipient amount data -- hash|nil)``.
 
     Construct an internal (unsigned) transaction and apply its effects inline as
     part of the current contract call. The contract appears as the nested tx's
