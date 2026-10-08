@@ -163,8 +163,9 @@ def _claim_expr(claim: Claim) -> Expr:
 
 
 def _tree_bytes(expr: Expr) -> int:
-    """Encoded size of every distinct cell of a loaded expr: what a peer fetching
-    the whole tree receives.
+    """Return the encoded size of every distinct cell of a loaded expr.
+
+    This is what a peer fetching the whole tree receives.
 
     Args:
         expr: The expression to measure.
@@ -325,9 +326,10 @@ _RECEIPT_OVERHEAD_BYTES = 720
 
 
 def _submit_claims(node: Node, entries: list[tuple]) -> None:
-    """Send the given claims (``(*claim, payout)`` entries) as STORAGE_PAYMENT
-    transactions of about ``MAX_CLAIM_TX_BYTES`` each, every one only if its
-    own payout covers its protocol cost.
+    """Send the given claims as STORAGE_PAYMENT transactions.
+
+    Each claim is a ``(*claim, payout)`` entry. Transactions are about
+    ``MAX_CLAIM_TX_BYTES`` each, sent only if the payout covers protocol cost.
 
     Args:
         node: A Node instance for sending transactions.
@@ -346,9 +348,10 @@ def _submit_claims(node: Node, entries: list[tuple]) -> None:
 
 
 def _submit_claim_group(node: Node, latest_block, entries: list[tuple]) -> bool:
-    """Build and send one claim transaction. Returns False to stop submitting
-    (the cost cannot be computed yet); an unprofitable or failed group is
-    dropped and the next one still goes.
+    """Build and send one claim transaction.
+
+    Returns False to stop submitting (the cost cannot be computed yet);
+    an unprofitable or failed group is dropped and the next one still goes.
 
     Args:
         node: A Node instance for sending transactions.

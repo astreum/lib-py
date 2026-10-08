@@ -626,8 +626,9 @@ def _apply_tx_effects(
 
 
 def apply_transaction(node: Any, block: object, transaction_hash: bytes) -> None:
-    """Apply a transaction, collecting results on *block* (top-level entry
-    point used by block verification / production).
+    """Apply a transaction, collecting results on *block*.
+
+    This is the top-level entry point used by block verification / production.
 
     Args:
         node: The node.
@@ -646,8 +647,9 @@ def apply_transaction(node: Any, block: object, transaction_hash: bytes) -> None
 
 
 def apply_transaction_obj(node: Any, block: object, transaction: Any) -> None:
-    """Apply an already-decoded Transaction (whole-message path) without
-    re-parsing or fetching from storage.
+    """Apply an already-decoded Transaction.
+
+    This is the whole-message path without re-parsing or fetching from storage.
 
     Args:
         node: The node.

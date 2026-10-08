@@ -13,8 +13,11 @@ from astreum.storage.exprs import get_expr
 
 
 def _child(machine, block_id: bytes, cell: Expr, side: str):
-    """The resolved head or tail of *cell* (None for nothing): a loaded child,
-    or one fetched from *block_id*, then loaded in turn."""
+    """Return the resolved head or tail of *cell*.
+
+    Returns None for nothing. Either a loaded child, or one fetched from
+    *block_id*, then loaded in turn.
+    """
     child = cell._head if side == "head" else cell._tail
     h = cell._head_hash if side == "head" else cell._tail_hash
     if child is None:
@@ -49,8 +52,10 @@ def _resolve(machine, block_id: bytes, cell: Expr, follow: bool = True) -> Expr:
 
 
 def handle_stack_load(machine, stack: List[Expr], env) -> None:
-    """``(block_id expr_id load)``: the whole expr, with all refs below it
-    followed, read from *block_id*'s provider."""
+    """Load the whole expr, following all refs below it.
+
+    ``(block_id expr_id load)``: read from *block_id*'s provider.
+    """
     block_id, expr_id = pop_scoped_args(machine, stack, "load")
 
     if expr_id == ZERO32:

@@ -30,9 +30,9 @@ def current_validator(
     target_time: Optional[int] = None,
     contact=None,
 ) -> Tuple[bytes, Accounts]:
-    """Return the scheduled validator for the block after *block_hash* and the
-    accounts to build it on (that validator's stake halved).
+    """Return the scheduled validator for the block after *block_hash*.
 
+    Also returns the accounts to build it on (that validator's stake halved).
     *contact* is the ``(relay_key, address, port)`` of the peer holding
     *block_hash*'s uncommitted state; every fetch made here goes to it.
     """

@@ -296,8 +296,10 @@ def prefetch_exprs_from_network(
 
 
 def build_provider_payload(node) -> bytes:
-    """Encode this node's provider contact (70 bytes):
-    storage key + relay key + ipv4 + port.  Raises on missing/invalid config.
+    """Encode this node's provider contact as a 70-byte payload.
+
+    The payload contains storage key, relay key, ipv4, and port.
+    Raises on missing/invalid config.
 
     Args:
         node: A Node instance with provider network config.
@@ -319,8 +321,10 @@ def build_provider_payload(node) -> bytes:
 
 
 def destination_peer(node, expr_id: bytes):
-    """Return the peer *expr_id*'s ad should be sent to, or ``None`` when this
-    node is itself the closest (same xor comparison used for all STORAGE_PUT routing).
+    """Return the peer *expr_id*'s ad should be sent to, or ``None``.
+
+    Returns ``None`` when this node is itself the closest (same xor
+    comparison used for all STORAGE_PUT routing).
 
     Args:
         node: A Node instance with peer routing.
@@ -386,9 +390,11 @@ def send_put_entries(
     provider_payload: bytes,
     entries: list[tuple[bytes, int]],
 ) -> list[tuple[list[tuple[bytes, int]], bool, str | None]]:
-    """Send *entries* (``(expr_id, payload_type)``) to *peer*, chunked so every
-    ``STORAGE_PUT`` datagram fits ``storage_put_batch_max_bytes``.  Returns one
-    ``(chunk_entries, ok, reason)`` tuple per datagram sent.
+    """Send *entries* to *peer*, chunked to fit the byte limit.
+
+    Each entry is ``(expr_id, payload_type)``. Chunks fit
+    ``storage_put_batch_max_bytes``. Returns one ``(chunk_entries, ok, reason)``
+    tuple per datagram sent.
 
     Args:
         node: A Node instance with outgoing queue.

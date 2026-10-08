@@ -28,8 +28,9 @@ class UnresolvedRecordExpr(Exception):
 
 
 def block_scope(block: object) -> bytes | None:
-    """The block whose record holds the cells a transaction of *block* carries:
-    its id once it has one (a verified block), else None (one being built).
+    """Return the block whose record holds the transaction's cells.
+
+    Returns its id once it has one (a verified block), else None (one being built).
 
     Args:
         block: The block.
@@ -168,16 +169,14 @@ def storage_walk_size(
     *,
     exclude: Iterable[bytes] = (),
 ) -> int | None:
-    """Bytes a block record counts for *expr*: the sum of ``_flat_size`` over
-    its distinct cells, the root included, following hash references.
+    """Return bytes a block record counts for *expr*.
 
-    This is the size a sender is charged for what they store. It is the same
-    number on a node that holds *expr* whole and on one that fetches it cell
-    by cell. Cells whose hash is in *exclude* (and everything below them) are
-    not counted nor fetched: they are charged elsewhere, such as the
-    transaction a receipt names.
+    Sums ``_flat_size`` over distinct cells (root included), following hash
+    references. This is the size a sender is charged. It is the same number
+    on a node that holds *expr* whole and on one that fetches it cell by cell.
 
-    Returns None if a referenced cell cannot be fetched.
+    Cells whose hash is in *exclude* (and everything below them) are not
+    counted nor fetched. Returns None if a referenced cell cannot be fetched.
     """
     contact = getattr(block, "contact", None)
     # A block being built has no id yet; a verified one does, and the cells of

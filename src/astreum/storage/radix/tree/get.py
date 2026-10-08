@@ -14,9 +14,11 @@ if TYPE_CHECKING:
 
 
 def _find_node(tree: RadixTree, astreum_node: "Node", key: bytes) -> Optional[RadixNode]:
-    """The node holding *key*, or None. Each node is fetched from the block
-    that holds it: the tree's root block for the root, then the block a child
-    pointer names (a plain hash is in the block of the node that holds it).
+    """Return the node holding *key*, or None.
+
+    Each node is fetched from the block that holds it: the tree's root
+    block for the root, then the block a child pointer names (a plain
+    hash is in the block of the node that holds it).
 
     Args:
         tree: The radix tree to search.
@@ -88,9 +90,11 @@ def exists_in_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes) -> b
 def get_from_radix_tree_with_block(
     tree: RadixTree, astreum_node: "Node", key: bytes
 ) -> tuple[Optional[Expr], Optional[bytes]]:
-    """``(value, block)`` for *key*: the value and the block whose record holds
-    it (None if the value is new, or the tree is not tied to a block). The
-    cells below a value held by a plain hash are in that block.
+    """Return ``(value, block)`` for *key*.
+
+    Returns the value and the block whose record holds it (None if the
+    value is new, or the tree is not tied to a block). The cells below
+    a value held by a plain hash are in that block.
 
     Args:
         tree: The radix tree to search.

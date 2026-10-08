@@ -41,8 +41,9 @@ def _root_item(root_hash: bytes, block: Optional[bytes]) -> Expr:
 
 @dataclass
 class TreasuryUserRecord:
-    """Per-account state stored in the treasury account's data trie, keyed
-    by the account's own address.
+    """Per-account state stored in the treasury account's data trie.
+
+    Keyed by the account's own address.
 
     Attributes:
         balance: Staked ASTR balance backing this account's secured loans.
@@ -197,8 +198,10 @@ def load_from_tree(cls: Any, node: Any, tree: Any, key: bytes, contact=None):
 def load_user_record(
     node: Any, tree: Any, key: bytes, contact=None
 ) -> TreasuryUserRecord | None:
-    """The `TreasuryUserRecord` stored at *key* in *tree* (the treasury
-    account's data trie), read from the block that holds it."""
+    """Return the `TreasuryUserRecord` stored at *key* in *tree*.
+
+    The tree is the treasury account's data trie; read from the block that holds it.
+    """
     return load_from_tree(TreasuryUserRecord, node, tree, key, contact)
 
 
@@ -286,7 +289,9 @@ def _claimed_guarantees_from_expr(
 
 @dataclass
 class TreasuryLoanRecord:
-    """Attributes:
+    """A treasury loan record.
+
+    Attributes:
         claimed_guarantees: `(guarantor_address, guarantee_transaction_id, guarantee_amount)`
             triples this loan claimed at origination, needed at loan-end to
             credit each backing guarantor's `guaranteed` back

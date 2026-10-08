@@ -120,8 +120,11 @@ def decode_transaction_message(content: bytes) -> Optional["Transaction"]:
 
 
 def _reconstruct_builtin_composites(root: Expr) -> None:
-    """Turn decoded ``head=bytes + tail=type-symbol`` links back into builtin
-    composites with the raw ``value`` inline (the canonical ``int_()`` form)."""
+    """Reconstruct builtin composites from decoded bytes+symbol links.
+
+    Turns ``head=bytes + tail=type-symbol`` links back into builtin composites
+    with the raw ``value`` inline (the canonical ``int_()`` form).
+    """
     visited = set()
 
     def _rec(e: Expr) -> None:
@@ -150,8 +153,10 @@ def _reconstruct_builtin_composites(root: Expr) -> None:
 
 
 def _link_tree(root: Expr, expr_map: dict[bytes, Expr]) -> None:
-    """Back-fill every ``head_hash``/``tail_hash`` from the decoded set so the
-    tree is fully linked in-memory and resolution never touches storage."""
+    """Back-fill ``head_hash``/``tail_hash`` pointers from the decoded set.
+
+    Makes the tree fully linked in-memory so resolution never touches storage.
+    """
     visited = set()
 
     def _link(e: Expr) -> None:
@@ -185,8 +190,10 @@ def _link_tree(root: Expr, expr_map: dict[bytes, Expr]) -> None:
 
 
 def _list_items(head: Expr) -> List[Expr]:
-    """Storage-free analogue of resolve_list_exprs: return the head of each
-    link in the chain (works only on a fully-linked tree)."""
+    """Return the head of each link in the chain.
+
+    Storage-free analogue of resolve_list_exprs; works only on a fully-linked tree.
+    """
     result: List[Expr] = []
     current = head
     while current is not None and current.base == "link":
@@ -197,8 +204,11 @@ def _list_items(head: Expr) -> List[Expr]:
 
 
 def _parse_transaction(root: Expr) -> "Transaction":
-    """Storage-free analogue of get_transaction_from_storage. The tree is fully
-    linked, so only structural/type validation happens here."""
+    """Parse a transaction from a fully-linked tree.
+
+    Storage-free analogue of get_transaction_from_storage; only structural/type
+    validation happens here.
+    """
     from astreum.consensus.transaction.code import TransactionCode
     from astreum.consensus.transaction.model import Transaction
 

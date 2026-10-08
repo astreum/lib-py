@@ -7,12 +7,11 @@ def calculate_block_difficulty(
     previous_difficulty: Optional[int],
     target_spacing: int = 2,
 ) -> int:
-    """Calculate the difficulty for a new block based on the previous block's
-    timestamp, current timestamp, and previous difficulty.
+    """Calculate the difficulty for a new block.
 
-    If spacing between blocks is very short (<= 1s), difficulty increases by 1.
+    Based on the previous block's timestamp, current timestamp, and previous
+    difficulty. If spacing is very short (<= 1s), difficulty increases by 1.
     If spacing exceeds the target, difficulty decreases by 1 (floor 1).
-    Otherwise difficulty stays the same.
 
     Args:
         previous_timestamp: Timestamp of the previous block, or None for genesis.

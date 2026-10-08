@@ -17,9 +17,10 @@ from astreum.storage.exprs import get_expr
 
 
 def cell_reader(node: Any, block_hash: Optional[bytes], contact: Any = None):
-    """``part(cell, "head" | "tail")``: the head or tail of *cell* as loaded, or
-    fetched from the provider of *block_hash*; None for nil. With no *node*
-    nothing is fetched.
+    """Return a ``part(cell, side)`` function for reading cell heads/tails.
+
+    The function returns the head or tail of *cell* as loaded, or fetched from
+    the provider of *block_hash*; None for nil.
 
     Args:
         node: A Node instance for fetching expressions from storage.
@@ -49,9 +50,10 @@ _reader = cell_reader
 def read_pointer(
     node: Any, cell: Expr, block_hash: Optional[bytes], contact: Any = None
 ) -> tuple[bytes, Optional[bytes]]:
-    """``(expr_id, block_id)`` for an item that is the pointed-to cell itself
-    (a child of a radix node): a stored ref names its target and block, any
-    other cell is the target, in *block_hash*, the block that holds the item.
+    """Return ``(expr_id, block_id)`` for a pointed-to cell.
+
+    For a child of a radix node: a stored ref names its target and block, any
+    other cell is the target, in *block_hash*.
 
     Args:
         node: A Node instance for fetching expressions from storage.
@@ -72,9 +74,10 @@ def read_pointer(
 def read_field(
     node: Any, cell: Expr, block_hash: Optional[bytes], contact: Any = None
 ) -> Optional[tuple[bytes, Optional[bytes]]]:
-    """``(expr_id, block_id)`` for a field of a record: a stored ref, or a
-    wrapper ``Link(head_hash=expr_id)`` whose cell is in *block_hash*, the
-    block that holds the record. None if *cell* is neither.
+    """Return ``(expr_id, block_id)`` for a record field.
+
+    The field may be a stored ref, or a wrapper ``Link(head_hash=expr_id)`` in
+    *block_hash*. Returns None if *cell* is neither.
 
     Args:
         node: A Node instance for fetching expressions from storage.

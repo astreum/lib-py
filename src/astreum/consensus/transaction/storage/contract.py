@@ -42,11 +42,10 @@ def receipt_at_fixed_point(
 def calculate_transaction_costs(
     *, block: object, transaction: Transaction, node: Any = None
 ) -> int:
-    """Mandatory storage cost of a transaction with no logs: its own fee plus
-    its receipt's, both on the size the block record counts for them.
+    """Return the mandatory storage cost of a transaction with no logs.
 
-    *transaction* must be held whole (as a client builds it), so *node* is only
-    needed if it refers to cells it does not hold.
+    Includes its own fee plus its receipt's, both on the size the block record
+    counts for them. *transaction* must be held whole (as a client builds it).
     """
     tx_fee = storage_walk_fee(node, block, transaction.expr())
     if tx_fee is None:

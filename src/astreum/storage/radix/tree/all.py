@@ -33,9 +33,10 @@ def get_all_from_radix_tree(tree: RadixTree, astreum_node: "Node") -> Dict[bytes
 def get_all_from_radix_tree_with_blocks(
     tree: RadixTree, astreum_node: "Node"
 ) -> Dict[bytes, Tuple[Expr, Optional[bytes]]]:
-    """Walk the entire radix tree and return every key with its value and the
-    block whose record holds the value (None if it is new, or the tree is not
-    tied to a block).
+    """Walk the entire radix tree and return every key with its value.
+
+    Also returns the block whose record holds the value (None if it is
+    new, or the tree is not tied to a block).
 
     Uses iterative DFS over the node tree, reconstructing each key from
     the concatenated bit prefixes along the path.

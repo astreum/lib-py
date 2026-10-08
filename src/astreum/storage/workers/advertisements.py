@@ -107,8 +107,10 @@ def _update_storage_request_price(node: "Node") -> None:
 
 
 def _long_term_store_one(node: "Node") -> bool:
-    """Process one storage-index entry per call: skip if already in the
-    records table, otherwise fetch the data and store it (cold + records).
+    """Process one storage-index entry per call.
+
+    Skips if already in the records table, otherwise fetches the data
+    and stores it (cold + records).
 
     Args:
         node: A Node instance with storage and long-term storage enabled.

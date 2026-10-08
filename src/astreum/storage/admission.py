@@ -14,8 +14,7 @@ _storage_account_cache: Optional[tuple[bytes, "Account"]] = None
 
 
 def is_expr_in_latest_block(node: "Node", expr_id: bytes) -> bool:
-    """Return True if *expr_id* is a key in the latest block's committed
-    storage account data trie.
+    """Return True if *expr_id* is in the latest block's storage trie.
 
     Fail-closed: a node with no ``latest_block`` (or no storage account in it)
     yields ``False``, so unsynced nodes admit nothing.
@@ -52,8 +51,9 @@ def get_latest_storage_account(node: "Node") -> Optional["Account"]:
 
 
 def _get_latest_storage_account(node: "Node") -> Optional["Account"]:
-    """Fetch the STORAGE_ADDRESS account from ``node.latest_block``, cached per
-    latest block hash so repeated admission checks cost one warm radix descent.
+    """Fetch the STORAGE_ADDRESS account from the latest block, cached.
+
+    Cached per block hash so repeated admission checks cost one warm radix descent.
 
     Args:
         node: A Node instance with a ``latest_block`` attribute.

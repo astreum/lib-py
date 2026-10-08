@@ -47,9 +47,10 @@ def pop_scoped_args(machine, stack: List[Expr], name: str) -> tuple[bytes, bytes
 
 
 def check_block(machine, name: str, block_id: bytes) -> None:
-    """Fail unless *block_id* is a key in the storage trie of the block being
-    executed. The same on every validator, so an arbitrary 32 bytes cannot aim
-    a validator's request at any provider.
+    """Fail unless *block_id* is a key in the storage trie.
+
+    Checks the storage trie of the block being executed. The same on every
+    validator, so an arbitrary 32 bytes cannot aim a validator's request.
 
     Without a block (execution outside consensus) there is no trie to check.
     """
@@ -83,8 +84,10 @@ def _is_nil(expr: Optional[Expr], h: Optional[bytes]) -> bool:
 
 
 def _part(machine, block_id: bytes, cell: Expr, side: str) -> Optional[Expr]:
-    """The head or tail of *cell*: loaded, or fetched from *block_id* (a cell
-    reached by plain hash is in the block of the cell that holds it)."""
+    """Return a head or tail of *cell* loaded or fetched from *block_id*.
+
+    A cell reached by plain hash is in the block of the cell that holds it.
+    """
     child = cell._head if side == "head" else cell._tail
     h = cell._head_hash if side == "head" else cell._tail_hash
     if child is not None:
@@ -96,9 +99,12 @@ def _part(machine, block_id: bytes, cell: Expr, side: str) -> Optional[Expr]:
 
 
 def stored_ref_target(machine, block_id: bytes, cell: Expr) -> Optional[tuple[bytes, bytes]]:
-    """``(block_id', expr_id')`` if *cell* is ``Link(bytes(B), Link(bytes(h),
+    """Return stored ref target tuple if *cell* is a ``ref`` marker link.
+
+    ``block_id', expr_id')`` if *cell* is ``Link(bytes(B), Link(bytes(h),
     Link(symbol("ref"), NIL)))``, else None. Stops at the first part that does
-    not fit, so an ordinary cell costs at most a couple of fetches."""
+    not fit, so an ordinary cell costs at most a couple of fetches.
+    """
     if cell._tag != "link":
         return None
     block_leaf = _part(machine, block_id, cell, "head")
@@ -122,9 +128,11 @@ def stored_ref_target(machine, block_id: bytes, cell: Expr) -> Optional[tuple[by
 
 
 def follow_stored_ref(machine, name: str, block_id: bytes, cell: Expr) -> tuple[bytes, Expr]:
-    """If *cell* is a stored ref, fetch what it names, from its block, and
-    return that with the new block. One level: what comes back is not checked
-    again, so a user ref to a ref is returned as data."""
+    """Fetch target of stored ref from its block if *cell* is a stored ref.
+
+    One level: what comes back is not checked again, so a user ref to a ref is
+    returned as data.
+    """
     target = stored_ref_target(machine, block_id, cell)
     if target is None:
         return block_id, cell

@@ -13,8 +13,10 @@ if TYPE_CHECKING:
 def fetch_node_from_radix_tree(
     tree: RadixTree, astreum_node: "Node", h: bytes, block: Optional[bytes] = None
 ) -> Optional[RadixNode]:
-    """The node with hash *h*: cached, or fetched from the provider of *block*
-    (the block whose record holds it; None routes by the hash)."""
+    """Return the node with hash *h* from cache or fetched from provider.
+
+    The *block* is the block whose record holds the node; None routes by hash.
+    """
     cached = tree.nodes.get(h)
     if cached is not None:
         return cached

@@ -60,9 +60,9 @@ def is_primitive(a: int, b: int, c: int) -> bool:
 
 
 class QuadraticForm:
-    """
-    Represents the binary quadratic form ax^2 + bxy + cy^2 with discriminant D,
-    stored in reduced, primitive form.
+    """Represents a binary quadratic form in reduced, primitive form.
+
+    The form is ax^2 + bxy + cy^2 with discriminant D.
     """
 
     def __init__(self, a: int, b: int, c: int, D: int):

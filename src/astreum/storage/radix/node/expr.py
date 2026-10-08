@@ -6,8 +6,9 @@ from astreum.storage.radix.node.model import RadixNode
 
 
 def _pointer(h: bytes, block: bytes | None, rest: Expr) -> Expr:
-    """A list cell whose head is the cell *h*: its hash, or a ref when the cell
-    is held by the record of the older block *block*.
+    """A list cell whose head is the cell *h*: its hash or a ref.
+
+    The cell is held by the record of the older block *block*.
 
     Args:
         h: The 32-byte content hash of the cell.

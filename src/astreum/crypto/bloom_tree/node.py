@@ -4,9 +4,10 @@ from astreum.crypto.bloom_filter import BloomFilter
 
 
 class BloomNode:
-    """A node in the binary bloom tree. Wraps a BloomFilter and holds
-    in-memory child references. Children are not serialized — they are
-    fetched from storage by deterministic key.
+    """A node in the binary bloom tree.
+
+    Wraps a BloomFilter and holds in-memory child references. Children are not
+    serialized — they are fetched from storage by deterministic key.
 
     Level is encoded in the key (bloom:chunk:{idx}:{level}:{index}).
     Width = 1024 >> level.  Leaf = level 10 (width 1).
