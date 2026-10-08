@@ -13,6 +13,15 @@ HASH_BYTE_SYMBOL = b"\x01"
 
 
 def _terminal_hash(tag_byte: bytes, data: bytes) -> bytes:
+    """Compute hash for a terminal expression.
+    
+    Args:
+        tag_byte: The type tag byte.
+        data: The data to hash.
+    
+    Returns:
+        The computed hash.
+    """
     return blake3(tag_byte + blake3(data).digest()).digest()
 
 
@@ -41,7 +50,17 @@ _DECODE_FUNCS = {
 
 
 def _expr_to_fp64(expr) -> float:
-    """Decode any float tag to fp64 for arithmetic/comparison."""
+    """Decode any float tag to fp64 for arithmetic/comparison.
+    
+    Args:
+        expr: The float expression to decode.
+    
+    Returns:
+        The decoded fp64 value.
+    
+    Raises:
+        ValueError: If expr is not a float type.
+    """
     tag = expr._tag
     if tag == "fp64":
         return expr._value
@@ -60,7 +79,17 @@ def _expr_to_fp64(expr) -> float:
 
 def _float_result(tag: str, value: float):
     """Encode an fp64 computed value back to the same type.
-    Raises ValueError if the value overflows the target type."""
+    
+    Args:
+        tag: The target float type tag.
+        value: The fp64 value to encode.
+    
+    Returns:
+        An expression of the specified type.
+    
+    Raises:
+        ValueError: If the value overflows the target type.
+    """
     from astreum.expression.expr import Expr, TYPE_SYMBOLS
     if tag == "fp64":
         _ENCODE_FUNCS["fp64"](value)  # overflow check
@@ -69,14 +98,30 @@ def _float_result(tag: str, value: float):
 
 
 def _float_to_bytes(tag: str, value) -> bytes:
-    """Get wire bytes for a float expression."""
+    """Get wire bytes for a float expression.
+    
+    Args:
+        tag: The float type tag.
+        value: The float value.
+    
+    Returns:
+        The wire bytes representation.
+    """
     if tag == "fp64":
         return pack('<d', value)
     return value
 
 
 def _bytes_to_float_expr(tag: str, data: bytes):
-    """Create a float expression from wire bytes."""
+    """Create a float expression from wire bytes.
+    
+    Args:
+        tag: The float type tag.
+        data: The wire bytes.
+    
+    Returns:
+        A float expression.
+    """
     from astreum.expression.expr import Expr, TYPE_SYMBOLS
     if tag == "fp64":
         return Expr("link", value=unpack('<d', data)[0], tail=TYPE_SYMBOLS["fp64"])

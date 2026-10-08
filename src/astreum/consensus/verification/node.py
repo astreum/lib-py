@@ -10,6 +10,10 @@ from astreum.consensus.verification.worker import make_verify_worker
 
 def verify_blockchain(node: Any):
     """Ensure verification primitives exist, then start verify worker."""
+
+    Args:
+        node (Any): Description.
+
     connect_node(node)
 
     fork_setup(node)

@@ -18,6 +18,13 @@ def parse_record(node: "Node", value: Any) -> "StorageRecord | None":
 
     The value is the header stored in the storage trie at a record's key (the
     block's expr hash). The layout lives in ``StorageRecord``.
+
+    Args:
+        node: A Node instance for decoding expressions.
+        value: The expression value from the storage trie.
+
+    Returns:
+        The parsed StorageRecord, or None if the value is not a record.
     """
     if value is None or getattr(value, "_tag", None) != "link":
         return None
@@ -30,7 +37,15 @@ def parse_record(node: "Node", value: Any) -> "StorageRecord | None":
 
 
 def parse_record_new_count(node: "Node", value: Any) -> int | None:
-    """``new_count`` of the record in a storage-trie value, or None."""
+    """``new_count`` of the record in a storage-trie value, or None.
+
+    Args:
+        node: A Node instance for decoding expressions.
+        value: The expression value from the storage trie.
+
+    Returns:
+        The new_count field, or None if value is not a valid record.
+    """
     record = parse_record(node, value)
     return None if record is None else record.new_count
 
@@ -56,8 +71,15 @@ def fetch_and_store_record(
     reordered cell gives a different root and the record is rejected. The slot
     list is never re-derived from the current storage trie.
 
-    Returns True on success, False if a cell could not be fetched, the replay
-    does not match the record, or the table write failed.
+    Args:
+        node: A Node instance for fetching and storing data.
+        storage_id: The 32-byte block hash (record key).
+        record: The StorageRecord describing the block's storage.
+        contact: Optional ``(relay_key, address, port)`` for fetches.
+
+    Returns:
+        True on success, False if a cell could not be fetched, the replay
+        does not match the record, or the table write failed.
     """
     from astreum.consensus.block.encoding.decode import get_block_from_storage
     from astreum.consensus.block.holders import block_holder

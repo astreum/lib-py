@@ -12,6 +12,11 @@ from astreum.utils.logging import logging_setup
 
 class Node:
     def __init__(self, config: dict = {}):
+        """Initialize an Astreum node with the given configuration.
+
+        Args:
+            config: Configuration dictionary for node settings.
+        """
         self.config = config_setup(config=config)
         self.bootstrap_peers = get_bootstrap_peers(self)
         

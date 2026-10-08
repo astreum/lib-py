@@ -56,6 +56,14 @@ def assemble_env(
 # ---------------------------------------------------------------------------
 
 def _fetch_url(url: str) -> str:
+    """Fetch content from a URL.
+
+    Args:
+        url: The URL to fetch.
+
+    Returns:
+        The content as a UTF-8 string.
+    """
     with _urllib_request.urlopen(url, timeout=30) as resp:
         return resp.read().decode("utf-8")
 
@@ -65,6 +73,15 @@ def _fetch_url(url: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _resolve_identity(path_str: str, from_dir: Optional[Path]) -> str:
+    """Resolve a path string to an identity string.
+
+    Args:
+        path_str: The path string (URL, absolute, or relative).
+        from_dir: The directory to resolve relative paths from.
+
+    Returns:
+        The resolved identity string.
+    """
     if path_str.startswith(("http://", "https://")):
         return path_str
 
@@ -82,6 +99,15 @@ def _resolve_identity(path_str: str, from_dir: Optional[Path]) -> str:
 # ---------------------------------------------------------------------------
 
 def _join_prefixes(chain: Tuple[str, ...], name: str) -> str:
+    """Join a prefix chain with a name.
+
+    Args:
+        chain: The prefix chain tuple.
+        name: The name to append.
+
+    Returns:
+        The fully qualified name.
+    """
     if not chain:
         return name
     return ".".join(chain) + "." + name
@@ -92,6 +118,14 @@ def _join_prefixes(chain: Tuple[str, ...], name: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _link_to_list(link: Expr) -> List[Expr]:
+    """Convert a linked expression to a list.
+
+    Args:
+        link: The head of the linked expression chain.
+
+    Returns:
+        List of expressions in the chain.
+    """
     result: List[Expr] = []
     while link._tag == "link":
         if link._head is None and link._tail is None:
@@ -106,6 +140,14 @@ def _link_to_list(link: Expr) -> List[Expr]:
 # ---------------------------------------------------------------------------
 
 def _path_from_expr(expr: Expr) -> str:
+    """Extract a path string from an expression.
+
+    Args:
+        expr: The expression containing the path.
+
+    Returns:
+        The path string.
+    """
     expr_tag = get_expr_tag(expr)
     if expr_tag == "symbol":
         return _strip_quotes(expr.value)
@@ -115,6 +157,14 @@ def _path_from_expr(expr: Expr) -> str:
 
 
 def _strip_quotes(value: str) -> str:
+    """Strip surrounding quotes from a string.
+
+    Args:
+        value: The string potentially surrounded by quotes.
+
+    Returns:
+        The string with quotes removed if present.
+    """
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
         return value[1:-1]
     return value
@@ -128,6 +178,15 @@ def _parse_module(
     identity: str,
     cache: Dict[str, Tuple[Dict[str, Expr], Dict[str, str]]],
 ) -> Tuple[Dict[str, Expr], Dict[str, str]]:
+    """Parse a module and return its definitions and imports.
+
+    Args:
+        identity: The module identity (file path or URL).
+        cache: Cache for parsed modules.
+
+    Returns:
+        Tuple of (definitions dict, imports dict).
+    """
     if identity in cache:
         return cache[identity]
 
@@ -195,6 +254,17 @@ def _resolve_def(
     visited: Set[Tuple[str, str, Tuple[str, ...]]],
     cache: Dict[str, Tuple[Dict[str, Expr], Dict[str, str]]],
 ) -> None:
+    """Resolve a definition and its dependencies.
+
+    Args:
+        node: The Astreum Node instance.
+        module_id: The module identity.
+        name: The definition name to resolve.
+        prefix_chain: The prefix chain for qualified names.
+        env_data: Dictionary to store resolved definitions.
+        visited: Set of visited (module, name, chain) tuples.
+        cache: Module parse cache.
+    """
     vkey = (module_id, name, prefix_chain)
     if vkey in visited:
         return
@@ -231,6 +301,17 @@ def _resolve_name_chain(
     visited: Set[Tuple[str, str, Tuple[str, ...]]],
     cache: Dict[str, Tuple[Dict[str, Expr], Dict[str, str]]],
 ) -> None:
+    """Resolve a dot-separated name chain across module imports.
+
+    Args:
+        node: The Astreum Node instance.
+        module_id: The starting module identity.
+        name_parts: List of name parts (split by dots).
+        prefix_chain: The accumulated prefix chain.
+        env_data: Dictionary to store resolved definitions.
+        visited: Set of visited (module, name, chain) tuples.
+        cache: Module parse cache.
+    """
     first, *rest = name_parts
     defs, imports = _parse_module(module_id, cache)
 
@@ -263,6 +344,19 @@ def _walk_body(
     cache: Dict[str, Tuple[Dict[str, Expr], Dict[str, str]]],
     node,
 ) -> None:
+    """Walk an expression tree and resolve referenced symbols.
+
+    Args:
+        expr: The expression to walk.
+        module_id: The current module identity.
+        prefix_chain: The current prefix chain.
+        defs: Module definitions dictionary.
+        imports: Module imports dictionary.
+        env_data: Dictionary to store resolved definitions.
+        visited: Set of visited (module, name, chain) tuples.
+        cache: Module parse cache.
+        node: The Astreum Node instance.
+    """
     if get_expr_tag(expr) == "symbol":
         sym = expr.value
         if "." in sym:

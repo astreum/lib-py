@@ -7,7 +7,16 @@ from astreum.storage.radix.node.model import RadixNode
 
 def _pointer(h: bytes, block: bytes | None, rest: Expr) -> Expr:
     """A list cell whose head is the cell *h*: its hash, or a ref when the cell
-    is held by the record of the older block *block*."""
+    is held by the record of the older block *block*.
+
+    Args:
+        h: The 32-byte content hash of the cell.
+        block: The block holding the cell, or None for a plain hash.
+        rest: The tail of the link expression.
+
+    Returns:
+        A link expression with the pointer.
+    """
     if block is None:
         return Expr("link", head_hash=h, tail=rest)
     return link(ref_expr(block, h), rest)
@@ -44,6 +53,14 @@ def convert_radix_node_to_expr(node: RadixNode) -> Expr:
 
 
 def get_radix_node_expr(node: RadixNode) -> Expr:
+    """Return the cached expression for a node, computing it if needed.
+
+    Args:
+        node: The radix node to get the expression for.
+
+    Returns:
+        The cached Expr representation.
+    """
     if node._expr is None:
         node._expr = convert_radix_node_to_expr(node)
     return node._expr

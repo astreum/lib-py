@@ -19,7 +19,14 @@ def enqueue_outgoing(
     message: "Message",
     difficulty: int = 1,
 ) -> bool:
-    """Enqueue an outgoing UDP payload."""
+    """Enqueue an outgoing UDP payload.
+
+    Args:
+        node (Node): The node instance that owns the outgoing queue.
+        address (Tuple[str, int]): The destination address as (host, port).
+        message (Message): The message object to send.
+        difficulty (int): The proof-of-work difficulty for the nonce. Defaults to 1.
+    """
     # if not node.is_connected:
     #     raise RuntimeError("node is not connected; call node.connect() (communication_setup) first")
 

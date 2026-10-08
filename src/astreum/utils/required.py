@@ -4,7 +4,15 @@ from typing import Iterable
 
 
 def required_fields(instance: object, field_names: Iterable[str]) -> None:
-    """Raise ValueError if any named fields are missing or set to None."""
+    """Raise ValueError if any named fields are missing or set to None.
+
+    Args:
+        instance: Object instance to check.
+        field_names: Iterable of attribute names to validate.
+
+    Raises:
+        ValueError: If any fields are missing or None.
+    """
     missing = []
     for name in field_names:
         if not hasattr(instance, name) or getattr(instance, name) is None:

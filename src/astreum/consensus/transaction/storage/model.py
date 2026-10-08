@@ -21,6 +21,10 @@ class StorageRecord:
     _expr: Optional[Expr] = field(default=None, repr=False, compare=False)
 
     def to_expr(self) -> Expr:
+
+        Args:
+            None.
+
         if self._expr is not None:
             return self._expr
         # Permanent core (innermost to outermost)
@@ -38,6 +42,10 @@ class StorageRecord:
         return tail
 
     def expr(self) -> Expr:
+
+        Args:
+            None.
+
         if self._expr is not None:
             return self._expr
         self._expr = self.to_expr()
@@ -49,6 +57,10 @@ class StorageRecord:
         Only what the record holds: the hashes it names (blocks) are left
         unresolved, so this never fetches and never pulls a block's tree in.
         """
+
+        Args:
+            None.
+
         out: list[Expr] = []
         seen: set[bytes] = set()
         stack = [self.expr()]
@@ -68,6 +80,10 @@ class StorageRecord:
     @staticmethod
     def _extract_hash(n: Expr) -> bytes:
         """Extract the stored hash from a node, whether resolved or not."""
+
+        Args:
+            n (Expr): Description.
+
         if n._tag == "link":
             if n._head_hash is not None:
                 return n._head_hash

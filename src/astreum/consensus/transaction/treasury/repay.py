@@ -28,6 +28,10 @@ LOAN_TRANSACTION_ID_SIZE = 32
 
 
 def _current_height(block: object) -> int:
+
+    Args:
+        block (object): Description.
+
     return int(
         getattr(
             block,

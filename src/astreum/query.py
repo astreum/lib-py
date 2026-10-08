@@ -22,6 +22,10 @@ def get_block(node, *, height: int) -> Optional["Block"]:
 
     Returns ``None`` if the block hasn't been mined yet or is not reachable
     from the node's current tip.
+
+    Args:
+        node: Node instance to query.
+        height: Chain height of the target block.
     """
     from astreum.crypto.bloom_search.block_search import find_block_by_height
 
@@ -58,6 +62,16 @@ def find_transactions(
     height (default: ``0`` — search the entire chain).
 
     Set ``limit=0`` for no limit.
+
+    Args:
+        node: Node instance to query.
+        tx_hash: Transaction hash filter.
+        sender: Sender address filter.
+        receiver: Receiver address filter.
+        key: Storage key filter.
+        start_height: Height to start searching backward from.
+        end_height: Height to stop searching at.
+        limit: Maximum number of transactions to return.
     """
     from astreum.crypto.bloom_search import bloom_search_tx
     from astreum.crypto.bloom_search.block_search import find_block_by_height

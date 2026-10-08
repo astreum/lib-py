@@ -11,6 +11,12 @@ def _e5m2_to_fp64(b: int) -> float:
     - mm: 2-bit mantissa (bits 1-0)
     - Exponent 0b00000: zero or subnormal
     - Exponent 0b11111: infinity or NaN
+    
+    Args:
+        b: The 8-bit E5M2 value.
+    
+    Returns:
+        The decoded float value.
     """
     sign = -1.0 if (b & 0x80) else 1.0
     exp = (b >> 2) & 0x1F
@@ -33,7 +39,17 @@ _E5M2_MAX = 57344.0
 
 
 def _encode_e5m2(value: float) -> bytes:
-    """Encode fp64 to E5M2 (8-bit)."""
+    """Encode fp64 to E5M2 (8-bit).
+    
+    Args:
+        value: The float value to encode.
+    
+    Returns:
+        The encoded E5M2 bytes.
+    
+    Raises:
+        ValueError: If value overflows E5M2 range.
+    """
     if isnan(value):
         return b'\x7f'
     if value == float('inf'):
@@ -67,6 +83,13 @@ _E5M2_TABLE = [_e5m2_to_fp64(i) for i in range(256)]
 
 
 def e5m2_(value: float):
-    """Create an E5M2 (8-bit float) expression."""
+    """Create an E5M2 (8-bit float) expression.
+    
+    Args:
+        value: The float value.
+    
+    Returns:
+        An E5M2 expression.
+    """
     from astreum.expression.expr import Expr, E5M2_SYMBOL
     return Expr("link", value=_encode_e5m2(value), tail=E5M2_SYMBOL)

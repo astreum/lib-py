@@ -23,6 +23,10 @@ def _scratch_node(node: "Node", limit_bytes: int = 4 * 1024 * 1024) -> SimpleNam
 
     Lets ``get_block_from_storage`` read the header without touching this
     node's storage or the network until the header has passed its checks.
+
+    Args:
+        node (Node): The node instance.
+        limit_bytes (int, optional): Storage limit in bytes. Defaults to 4MB.
     """
     return SimpleNamespace(
         hot_storage={},
@@ -42,6 +46,11 @@ def handle_block(node: "Node", peer: Peer, content: bytes) -> None:
     announced contact as the holder of the block's uncommitted exprs. A
     validator also adopts the block as its head and relays the announcement to
     the other validators, since any of them may be the next one.
+
+    Args:
+        node (Node): The node receiving the announcement.
+        peer (Peer): The peer that sent the announcement.
+        content (bytes): The block message content.
     """
     decoded = decode_block_message(content)
     if decoded is None:
@@ -97,7 +106,13 @@ def handle_block(node: "Node", peer: Peer, content: bytes) -> None:
 
 
 def _relay(node: "Node", sender: Peer, content: bytes) -> None:
-    """Forward the announcement once to every other validator."""
+    """Forward the announcement once to every other validator.
+
+    Args:
+        node (Node): The node forwarding the announcement.
+        sender (Peer): The original sender peer.
+        content (bytes): The block message content to relay.
+    """
     for key, validator in validator_peers(node).items():
         if key == sender.public_key_bytes:
             continue

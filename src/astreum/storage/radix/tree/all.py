@@ -16,6 +16,13 @@ def get_all_from_radix_tree(tree: RadixTree, astreum_node: "Node") -> Dict[bytes
     """Walk the entire radix tree and return every key-value pair.
 
     See ``get_all_from_radix_tree_with_blocks`` for the block of each value.
+
+    Args:
+        tree: The radix tree to enumerate.
+        astreum_node: A Node instance for fetching nodes from storage.
+
+    Returns:
+        A dict mapping each key (bytes) to its Expr value.
     """
     return {
         key: value

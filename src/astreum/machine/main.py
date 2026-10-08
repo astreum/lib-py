@@ -9,6 +9,13 @@ from astreum.machine.evaluator import evaluation
 
 class Machine():
     def __init__(self, node: "Node", *, meter_limit: int = None, mode: str = "dynamic"):
+        """Initialize a machine instance.
+
+        Args:
+            node: The Astreum Node instance.
+            meter_limit: Optional metering limit for resource tracking.
+            mode: Execution mode - 'dynamic' or 'deterministic'.
+        """
         if mode not in ("dynamic", "deterministic"):
             raise ValueError(f"Invalid mode: {mode!r}. Must be 'dynamic' or 'deterministic'.")
         self.node = node
@@ -23,6 +30,14 @@ class Machine():
         self.library: Dict[bytes, Env] = {}
 
     def snapshot_env(self, env: Env) -> bytes:
+        """Create a hash snapshot of an environment.
+
+        Args:
+            env: The environment to snapshot.
+
+        Returns:
+            The hash of the snapshot environment.
+        """
         if env is None:
             env = Env()
         parent_hash = self.snapshot_env(env.parent) if env.parent else None
@@ -36,6 +51,15 @@ class Machine():
         return env_hash
 
     def run(self, expr: "Expr", env: "Env" = None):
+        """Run an expression in the machine.
+
+        Args:
+            expr: The expression to evaluate.
+            env: The environment for evaluation.
+
+        Returns:
+            The result expression from the stack.
+        """
         if env is None:
             env = Env()
         stack = []
@@ -43,6 +67,16 @@ class Machine():
         return stack[-1] if stack else NIL
 
     def spawn_actor(self, body: "Expr", actor_name: str, parent_env: "Env"):
+        """Spawn a new actor with its own mailbox.
+
+        Args:
+            body: The expression to execute as the actor's body.
+            actor_name: Unique name for the actor's mailbox.
+            parent_env: The parent environment for the actor.
+
+        Returns:
+            True if the actor was spawned, False if name already exists.
+        """
         with self.lock:
             if actor_name in self.mailboxes:
                 return False
@@ -60,6 +94,13 @@ class Machine():
         return True
 
     def run_actor(self, body: "Expr", actor_name: str, parent_env: "Env"):
+        """Run an actor's body in a separate thread.
+
+        Args:
+            body: The expression to evaluate.
+            actor_name: The actor's identifier.
+            parent_env: The parent environment for the actor.
+        """
         env = Env(parent=parent_env)
         stack = []
         try:
@@ -71,6 +112,7 @@ class Machine():
                 self.mailboxes.pop(actor_name, None)
 
     def enable_console(self):
+        """Enable console input handling via the @pipe mailbox."""
         self._stdin_stop = threading.Event()
         q = Queue()
         with self.lock:
@@ -79,6 +121,7 @@ class Machine():
         t.start()
 
     def disable_console(self):
+        """Disable console input handling."""
         self._stdin_stop.set()
 
     def _stdin_reader(self):

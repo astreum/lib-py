@@ -48,6 +48,14 @@ def _compute_pow_and_challenge(
     table (byte offset = index * 32); the tree over that list is built in
     memory and gives the slot's proof against ``record.slots_root``. Returns
     ``(storage_id, slot_expr_bytes, proof, nonce)`` or None if unavailable.
+
+    Args:
+        node: A Node instance for storage and network access.
+        storage_id: The 32-byte storage ID (block hash).
+        record: The StorageRecord to claim for.
+
+    Returns:
+        A Claim tuple, or None if the record cannot be claimed.
     """
     last_payment_block_hash = record.last_payment_block_hash
     if len(last_payment_block_hash) != 32:
@@ -111,6 +119,12 @@ def _next_claim_counter(node: Node) -> int:
     node-local ``next_claim_counter`` (bumped after each successful send so
     consecutive eras don't wait for on-chain confirmation). A missing
     account, no latest block, or a fetch failure all mean 0.
+
+    Args:
+        node: A Node instance with account access.
+
+    Returns:
+        The next transaction counter.
     """
     if not hasattr(node, "next_claim_counter"):
         node.next_claim_counter = 0
@@ -130,6 +144,14 @@ def _next_claim_counter(node: Node) -> int:
 
 
 def _claim_expr(claim: Claim) -> Expr:
+    """Convert a Claim tuple to an S-expression.
+
+    Args:
+        claim: A (storage_id, slot_bytes, proof, nonce) tuple.
+
+    Returns:
+        An Expr representing the claim.
+    """
     storage_id, slot_bytes, proof, nonce = claim
     return link(
         bytes_(storage_id),
@@ -142,7 +164,14 @@ def _claim_expr(claim: Claim) -> Expr:
 
 def _tree_bytes(expr: Expr) -> int:
     """Encoded size of every distinct cell of a loaded expr: what a peer fetching
-    the whole tree receives."""
+    the whole tree receives.
+
+    Args:
+        expr: The expression to measure.
+
+    Returns:
+        Total encoded size in bytes.
+    """
     seen: set[bytes] = set()
     total = 0
     stack = [expr]
@@ -166,6 +195,12 @@ def _split_claims(entries: list[tuple]) -> list[list[tuple]]:
 
     Each entry is ``(*claim, payout)``. A claim bigger than the limit on its
     own gets a transaction of its own.
+
+    Args:
+        entries: List of claim tuples.
+
+    Returns:
+        List of claim groups.
     """
     groups: list[list[tuple]] = []
     current: list[tuple] = []
@@ -188,7 +223,17 @@ def _build_multi_claim_tx(
     secret_key,
     counter: int,
 ) -> object:
-    """Build a signed STORAGE_PAYMENT transaction with the given claims."""
+    """Build a signed STORAGE_PAYMENT transaction with the given claims.
+
+    Args:
+        node: A Node instance with chain ID.
+        claims: List of Claim tuples.
+        secret_key: The signing key.
+        counter: The transaction counter.
+
+    Returns:
+        The signed transaction object.
+    """
     claims_expr = NIL
     for claim in reversed(claims):
         claims_expr = link(_claim_expr(claim), claims_expr)
@@ -216,6 +261,14 @@ def _build_claims_for_records(
     where ``payout = new_size × (block_height − last_payment_height)``
     mirrors the reward calculation in ``storage/payment.py`` so the submit
     gate can check the bundle's aggregate economics.
+
+    Args:
+        node: A Node instance for storage access.
+        latest_block: The latest block.
+        spacing_eras: Dict tracking spacing backoff per storage ID.
+
+    Returns:
+        List of claim tuples with payouts.
     """
     from astreum.consensus.constants import STORAGE_ADDRESS
 
@@ -274,7 +327,12 @@ _RECEIPT_OVERHEAD_BYTES = 720
 def _submit_claims(node: Node, entries: list[tuple]) -> None:
     """Send the given claims (``(*claim, payout)`` entries) as STORAGE_PAYMENT
     transactions of about ``MAX_CLAIM_TX_BYTES`` each, every one only if its
-    own payout covers its protocol cost."""
+    own payout covers its protocol cost.
+
+    Args:
+        node: A Node instance for sending transactions.
+        entries: List of claim tuples with payouts.
+    """
     if not entries:
         return
     latest_block = getattr(node, "latest_block", None)
@@ -288,7 +346,16 @@ def _submit_claims(node: Node, entries: list[tuple]) -> None:
 def _submit_claim_group(node: Node, latest_block, entries: list[tuple]) -> bool:
     """Build and send one claim transaction. Returns False to stop submitting
     (the cost cannot be computed yet); an unprofitable or failed group is
-    dropped and the next one still goes."""
+    dropped and the next one still goes.
+
+    Args:
+        node: A Node instance for sending transactions.
+        latest_block: The latest block for fee calculation.
+        entries: List of claim tuples with payouts.
+
+    Returns:
+        True to continue, False to stop submitting.
+    """
     try:
         claims = [entry[:4] for entry in entries]
         counter = _next_claim_counter(node)

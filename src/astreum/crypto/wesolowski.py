@@ -6,7 +6,10 @@ from quadratic_form import QuadraticForm
 
 def hash_to_int(*args: bytes) -> int:
     """
-    Hash the concatenation of args (bytes) to a large integer using SHA-256.
+    Hash the concatenation of args to a large integer using SHA-256.
+
+    Args:
+        *args: Bytes values to concatenate and hash.
     """
     h = hashlib.sha256()
     for b in args:
@@ -18,6 +21,10 @@ def hash_to_int(*args: bytes) -> int:
 def group_mul(x: QuadraticForm, y: QuadraticForm) -> QuadraticForm:
     """
     Compose two class-group elements via QuadraticForm multiplication.
+
+    Args:
+        x: First quadratic form.
+        y: Second quadratic form.
     """
     return (x * y)
 
@@ -25,6 +32,9 @@ def group_mul(x: QuadraticForm, y: QuadraticForm) -> QuadraticForm:
 def identity(D: int) -> QuadraticForm:
     """
     Return the identity element of the class group for discriminant D.
+
+    Args:
+        D: Discriminant value.
     """
     # For D ≡ 1 mod 4, identity form is (1, 1, (1-D)//4)
     b0 = 1
@@ -35,6 +45,9 @@ def identity(D: int) -> QuadraticForm:
 def class_group_square(x: QuadraticForm) -> QuadraticForm:
     """
     One sequential squaring step in the class group.
+
+    Args:
+        x: Quadratic form to square.
     """
     return group_mul(x, x)
 
@@ -42,6 +55,10 @@ def class_group_square(x: QuadraticForm) -> QuadraticForm:
 def group_exp(x: QuadraticForm, exponent: int) -> QuadraticForm:
     """
     Fast exponentiation in the class group by repeated squaring.
+
+    Args:
+        x: Base quadratic form.
+        exponent: Exponent value.
     """
     result = identity(x.D)
     base = x
@@ -61,10 +78,14 @@ def compute_wesolowski_proof(
     T: int
 ) -> QuadraticForm:
     """
-    Compute the Wesolowski proof π for VDF evaluation:
-    Solve 2^T = c * q + r, where
-      c = hash(x0 || y || T)
-    Return π = x0^q in the class group.
+    Compute the Wesolowski proof π for VDF evaluation.
+
+    Solve 2^T = c * q + r where c = hash(x0 || y || T) and return π = x0^q.
+
+    Args:
+        x0: Initial quadratic form.
+        y: Final quadratic form after T squarings.
+        T: Number of squarings.
     """
     # Derive challenge c
     h_bytes = serialize(x0) + serialize(y) + T.to_bytes((T.bit_length()+7)//8, 'big')
@@ -83,7 +104,13 @@ def verify_wesolowski_proof(
     T: int
 ) -> bool:
     """
-    Verify π satisfies: π^c * x0^r == y.
+    Verify π satisfies π^c * x0^r == y.
+
+    Args:
+        x0: Initial quadratic form.
+        y: Final quadratic form.
+        pi: Proof quadratic form.
+        T: Number of squarings.
     """
     h_bytes = serialize(x0) + serialize(y) + T.to_bytes((T.bit_length()+7)//8, 'big')
     c = hash_to_int(h_bytes)
@@ -97,6 +124,9 @@ def verify_wesolowski_proof(
 def serialize(x: QuadraticForm) -> bytes:
     """
     Serialize a QuadraticForm to bytes.
+
+    Args:
+        x: Quadratic form to serialize.
     """
     return x.to_bytes()
 
@@ -104,6 +134,10 @@ def serialize(x: QuadraticForm) -> bytes:
 def deserialize(data: bytes, D: int) -> QuadraticForm:
     """
     Deserialize bytes into a QuadraticForm of discriminant D.
+
+    Args:
+        data: Serialized data.
+        D: Discriminant value.
     """
     return QuadraticForm.from_bytes(data, D)
 
@@ -115,12 +149,15 @@ def vdf_generate(
     D: int
 ) -> Tuple[bytes, bytes]:
     """
-    Evaluate the VDF by sequentially squaring the previous output 'T' times,
-    then produce a Wesolowski proof.
+    Evaluate the VDF by squaring the previous output T times and produce proof.
+
+    Args:
+        old_output: Previous VDF output.
+        T: Number of squarings.
+        D: Discriminant value.
 
     Returns:
-      new_output : serialized new VDF output (y)
-      proof      : serialized proof (π)
+        Tuple of new output and serialized proof.
     """
     # Decode previous output
     x0 = deserialize(old_output, D)
@@ -146,7 +183,15 @@ def vdf_verify(
     """
     Verify the Wesolowski VDF proof.
 
-    Returns True if valid, False otherwise.
+    Args:
+        old_output: Previous VDF output.
+        new_output: New VDF output to verify.
+        proof: Serialized proof.
+        T: Number of squarings.
+        D: Discriminant value.
+
+    Returns:
+        True if valid, False otherwise.
     """
     x0 = deserialize(old_output, D)
     y  = deserialize(new_output, D)

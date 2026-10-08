@@ -16,7 +16,11 @@ MAX_INLINE_MESSAGE_BYTES = MAX_UDP_DATAGRAM_BYTES - MESSAGE_FRAMING_BYTES
 
 
 def _leading_zero_bits(buf: bytes) -> int:
-    """Return the number of leading zero bits in the provided buffer."""
+    """Return the number of leading zero bits in the provided buffer.
+
+    Args:
+        buf (bytes): The buffer to count leading zero bits in.
+    """
     zeros = 0
     for byte in buf:
         if byte == 0:
@@ -31,6 +35,10 @@ def calculate_message_nonce(message_bytes: bytes, difficulty: int) -> int:
     """Find a nonce such that blake3(message_bytes + nonce_bytes) meets difficulty.
 
     message_bytes should exclude any nonce prefix that will be added on the wire.
+
+    Args:
+        message_bytes (bytes): The message content excluding the nonce prefix.
+        difficulty (int): The required number of leading zero bits.
     """
     target = max(1, difficulty)
     nonce = 0

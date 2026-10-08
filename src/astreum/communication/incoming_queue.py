@@ -20,10 +20,16 @@ def enqueue_incoming(
     payload: bytes,
 ) -> tuple[bool, str | None]:
     """Enqueue an incoming UDP payload while tracking queued bytes.
+
     Increments `node.incoming_queue_size` by `len(payload) + 6` and enforces
     `node.incoming_queue_size_limit` (bytes) as a soft cap by dropping enqueues that
     would exceed the limit. If `node.incoming_queue_timeout` is > 0, it waits up to
     that many seconds (using `communication_stop_event.wait`) for space before dropping.
+
+    Args:
+        node (Node): The node instance that owns the incoming queue.
+        address (Tuple[str, int]): The source address as (host, port).
+        payload (bytes): The raw UDP payload to enqueue.
     """
     required_difficulty = message_difficulty(node)
     if len(payload) <= NONCE_SIZE:

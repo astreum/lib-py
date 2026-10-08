@@ -39,7 +39,11 @@ class _Destination:
 
 
 def init_request_buffer(node: "Node") -> None:
-    """Create the buffer state on *node* (called from communication setup)."""
+    """Create the buffer state on *node* (called from communication setup).
+
+    Args:
+        node: A Node instance to attach the buffer to.
+    """
     node.storage_request_buffer = {}
     node.storage_request_buffered = set()
     node.storage_request_buffer_lock = threading.Lock()
@@ -47,6 +51,17 @@ def init_request_buffer(node: "Node") -> None:
 
 
 def _provider_destination(node: "Node", relay_key_bytes: bytes, address: str, port: int):
+    """Build a destination tuple for a provider.
+
+    Args:
+        node: A Node instance with relay secret key.
+        relay_key_bytes: The provider's relay public key.
+        address: The provider's IP address.
+        port: The provider's port.
+
+    Returns:
+        A tuple of (key, address, shared_key_bytes, difficulty).
+    """
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
 
     provider_public_key = X25519PublicKey.from_public_bytes(relay_key_bytes)
@@ -62,6 +77,15 @@ def _resolve_destination(node: "Node", expr_id: bytes, contact=None, block_hash=
     is one, else the provider indexed for it, else the peer nearest the block
     hash. Otherwise an indexed provider wins for *expr_id*, then the closest
     peer.
+
+    Args:
+        node: A Node instance for routing.
+        expr_id: The content hash to route to.
+        contact: Optional ``(relay_key, address, port)`` for direct routing.
+        block_hash: Optional block hash for scoped routing.
+
+    Returns:
+        A tuple of (key, address, shared_key_bytes, difficulty) or None.
     """
     try:
         if contact is not None:
@@ -102,6 +126,14 @@ def _resolve_destination(node: "Node", expr_id: bytes, contact=None, block_hash=
 
 
 def _max_entries(node: "Node") -> int:
+    """Return the maximum number of entries per STORAGE_GET datagram.
+
+    Args:
+        node: A Node instance with config.
+
+    Returns:
+        The maximum number of entries (>= 1).
+    """
     from astreum.communication.storage_request.model import max_get_entries
 
     budget = (getattr(node, "config", None) or {}).get(
@@ -162,6 +194,16 @@ def queue_storage_get(
 def _send_chunk(
     node: "Node", destination: _Destination, chunk: list[tuple[bytes, int, bytes | None]]
 ) -> bool:
+    """Send one STORAGE_GET datagram to a destination.
+
+    Args:
+        node: A Node instance with outgoing queue.
+        destination: The destination to send to.
+        chunk: List of (expr_id, resolution, block_hash) tuples.
+
+    Returns:
+        True if queued successfully, False otherwise.
+    """
     from astreum.communication.models.message import Message, MessageTopic
     from astreum.communication.outgoing_queue import enqueue_outgoing
     from astreum.communication.storage_request.code import StorageRequestCode
@@ -189,6 +231,12 @@ def flush_storage_requests(node: "Node") -> int:
 
     Destinations go lowest difficulty first so a busy peer's proof-of-work
     does not hold up the rest. Claims are taken here, right before sending.
+
+    Args:
+        node: A Node instance with a request buffer.
+
+    Returns:
+        The number of datagrams queued.
     """
     with node.storage_request_buffer_lock:
         pending = node.storage_request_buffer
@@ -237,6 +285,12 @@ def request_storage(node: "Node") -> None:
 
     Runs as ``request_storage_thread``. A destination filling a datagram sets
     ``storage_request_flush_event`` to flush early.
+
+    Args:
+        node: A Node instance with a request buffer and flush event.
+
+    Returns:
+        None. Runs indefinitely until ``communication_stop_event`` is set.
     """
     stop = node.communication_stop_event
     event = node.storage_request_flush_event

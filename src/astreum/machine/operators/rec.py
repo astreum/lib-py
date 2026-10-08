@@ -10,7 +10,14 @@ if TYPE_CHECKING:
 
 
 def _evaluation(machine, expr, stack, env):
-    """Lazy import to break circular dependency."""
+    """Lazy import to break circular dependency.
+    
+    Args:
+        machine: The machine instance.
+        expr: The expression to evaluate.
+        stack: The evaluation stack.
+        env: The environment.
+    """
     from astreum.machine.evaluator import evaluation
 
     return evaluation(machine, expr, stack, env)
@@ -19,6 +26,16 @@ def _evaluation(machine, expr, stack, env):
 def handle_stack_rec(
     machine: "Machine", stack: List[Expr], env: Env
 ) -> List[Expr]:
+    """Handle recursion operator.
+    
+    Args:
+        machine: The machine instance.
+        stack: The evaluation stack.
+        env: The environment.
+    
+    Returns:
+        The updated stack.
+    """
     if len(stack) < 4:
         raise OpError("stack underflow")
 
@@ -52,6 +69,16 @@ def handle_stack_rec(
 
 
 def handle_stack_rec_with_result(machine, stack, env):
+    """Handle recursion operator with result wrapping.
+    
+    Args:
+        machine: The machine instance.
+        stack: The evaluation stack.
+        env: The environment.
+    
+    Returns:
+        The updated stack with result wrapped in ok/err tag.
+    """
     try:
         stack = handle_stack_rec(machine, stack, env)
         top = stack.pop()

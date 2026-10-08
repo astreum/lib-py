@@ -12,6 +12,12 @@ def _e4m3_to_fp64(b: int) -> float:
     - Exponent 0b0000: zero or subnormal
     - Exponent 0b1111: infinity or NaN
     - Two NaN encodings: 0b01111111 and 0b11111111
+    
+    Args:
+        b: The 8-bit E4M3 value.
+    
+    Returns:
+        The decoded float value.
     """
     sign = -1.0 if (b & 0x80) else 1.0
     exp = (b >> 3) & 0x0F
@@ -28,7 +34,17 @@ def _e4m3_to_fp64(b: int) -> float:
 
 
 def _encode_e4m3(value: float) -> bytes:
-    """Encode fp64 to E4M3 (8-bit)."""
+    """Encode fp64 to E4M3 (8-bit).
+    
+    Args:
+        value: The float value to encode.
+    
+    Returns:
+        The encoded E4M3 bytes.
+    
+    Raises:
+        ValueError: If value overflows E4M3 range.
+    """
     if isnan(value):
         return b'\x7f'
     if isinf(value):
@@ -68,6 +84,13 @@ _E4M3_TABLE = [_e4m3_to_fp64(i) for i in range(256)]
 
 
 def e4m3_(value: float):
-    """Create an E4M3 (8-bit float) expression."""
+    """Create an E4M3 (8-bit float) expression.
+    
+    Args:
+        value: The float value.
+    
+    Returns:
+        An E4M3 expression.
+    """
     from astreum.expression.expr import Expr, E4M3_SYMBOL
     return Expr("link", value=_encode_e4m3(value), tail=E4M3_SYMBOL)

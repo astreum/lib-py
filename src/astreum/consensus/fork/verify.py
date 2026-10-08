@@ -13,6 +13,11 @@ from astreum.consensus.fork.node import update_fork
 
 def verify_fork(node: Any, head_id: bytes) -> bool:
     """Verify fork headers from head to root."""
+
+    Args:
+        node (Any): Description.
+        head_id (bytes): Description.
+
     with node.forks_lock:
         fork = node.forks[head_id]
         root = fork.root

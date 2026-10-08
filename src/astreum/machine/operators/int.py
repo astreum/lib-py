@@ -5,6 +5,13 @@ from astreum.machine import OpError
 
 
 def handle_stack_int(machine, stack: List[Expr], env) -> None:
+    """Convert value to integer.
+    
+    Args:
+        machine: The machine instance.
+        stack: The evaluation stack.
+        env: The environment.
+    """
     v = stack.pop()
     tag = get_expr_tag(v)
     if tag == "bytes":
@@ -34,6 +41,13 @@ def handle_stack_int(machine, stack: List[Expr], env) -> None:
 
 
 def handle_stack_int_with_result(machine, stack, env):
+    """Convert value to integer with result wrapping.
+    
+    Args:
+        machine: The machine instance.
+        stack: The evaluation stack.
+        env: The environment.
+    """
     try:
         handle_stack_int(machine, stack, env)
         result = stack.pop()

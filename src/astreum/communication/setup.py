@@ -28,7 +28,14 @@ from astreum.utils.bytes import hex_to_bytes
 from astreum.utils.config import DEFAULT_SEED
 
 def load_x25519(hex_key: Optional[str]) -> X25519PrivateKey:
-    """DH key for relaying (always X25519)."""
+    """DH key for relaying (always X25519).
+
+    Args:
+        hex_key (Optional[str]): The hex-encoded private key or None to generate.
+
+    Returns:
+        X25519PrivateKey: The loaded or generated X25519 private key.
+    """
     if hex_key:
         return X25519PrivateKey.from_private_bytes(bytes.fromhex(hex_key))
     return X25519PrivateKey.generate()
@@ -37,7 +44,15 @@ def make_routes(
     storage_pk_bytes: bytes,
     val_sk: Optional[ed25519.Ed25519PrivateKey]
 ) -> Tuple[Route, Optional[Route]]:
-    """Peer route (Ed25519 storage key) + optional validation route (ed pubkey)."""
+    """Peer route (Ed25519 storage key) + optional validation route (ed pubkey).
+
+    Args:
+        storage_pk_bytes (bytes): The storage public key bytes.
+        val_sk (Optional[ed25519.Ed25519PrivateKey]): The validation secret key or None.
+
+    Returns:
+        Tuple[Route, Optional[Route]]: The peer route and optional validation route.
+    """
     peer_rt = Route(storage_pk_bytes)
     val_rt  = Route(val_sk.public_key().public_bytes(
         encoding=serialization.Encoding.Raw,
@@ -46,11 +61,24 @@ def make_routes(
     return peer_rt, val_rt
 
 def make_maps():
-    """Empty lookup maps: peers and addresses."""
+    """Empty lookup maps: peers and addresses.
+
+    Args:
+        None
+    """
     return
 
 
 def _resolve_default_seed_ips(node: "Node", default_seed: Optional[str]) -> Set[str]:
+    """Resolve default seed hostname to a set of IP addresses.
+
+    Args:
+        node (Node): The node instance for logging.
+        default_seed (Optional[str]): The default seed address or None.
+
+    Returns:
+        Set[str]: The set of resolved IP addresses.
+    """
     if default_seed is None:
         return set()
     try:
@@ -73,6 +101,14 @@ def _resolve_default_seed_ips(node: "Node", default_seed: Optional[str]) -> Set[
 
 
 def _resolve_relay_ip_address(node: "Node") -> Optional[str]:
+    """Derive the relay IP address by connecting to the default seed.
+
+    Args:
+        node (Node): The node instance for logging.
+
+    Returns:
+        Optional[str]: The local relay IP address or None if unavailable.
+    """
     try:
         host, port = address_str_to_host_and_port(DEFAULT_SEED)
     except Exception as exc:
@@ -90,6 +126,12 @@ def _resolve_relay_ip_address(node: "Node") -> Optional[str]:
 
 
 def communication_setup(node: "Node", config: dict):
+    """Initialize node communication including sockets, queues, and threads.
+
+    Args:
+        node (Node): The node instance to configure.
+        config (dict): Configuration dictionary with keys for ports, keys, etc.
+    """
     node.logger.info("Setting up node communication")
     node.use_ipv6              = config.get('use_ipv6', False)
     node.peers_lock = threading.RLock()

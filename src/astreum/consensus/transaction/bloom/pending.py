@@ -4,6 +4,13 @@ from astreum.consensus.models.receipt import STATUS_SUCCESS
 
 def finalize_pending_bloom_inserts(node, block, transaction, receipt_status) -> int:
     """Insert pending bloom variants if tx succeeded. Returns storage fee."""
+
+    Args:
+        node: Description.
+        block: Description.
+        transaction: Description.
+        receipt_status: Description.
+
     keys = transaction.pending_bloom_keys
     inserts = transaction.pending_bloom_inserts
     if receipt_status != STATUS_SUCCESS or not keys:

@@ -23,12 +23,24 @@ _THREAD_ATTRS: tuple[str, ...] = (
 
 
 def _set_event(node: "Node", attr_name: str) -> None:
+    """Set an event attribute on the node.
+
+    Args:
+        node (Node): The node with event attributes.
+        attr_name (str): The name of the event attribute to set.
+    """
     event = getattr(node, attr_name, None)
     if event is not None:
         event.set()
 
 
 def _close_socket(node: "Node", attr_name: str) -> None:
+    """Close a socket attribute on the node.
+
+    Args:
+        node (Node): The node with socket attributes.
+        attr_name (str): The name of the socket attribute to close.
+    """
     sock = getattr(node, attr_name, None)
     if sock is None:
         return
@@ -39,7 +51,11 @@ def _close_socket(node: "Node", attr_name: str) -> None:
 
 
 def disconnect_node(node: "Node") -> None:
-    """Gracefully stop worker threads and close communication sockets."""
+    """Gracefully stop worker threads and close communication sockets.
+
+    Args:
+        node (Node): The node to disconnect.
+    """
     node.logger.info("Disconnecting Astreum Node")
 
     _set_event(node, "communication_stop_event")

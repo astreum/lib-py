@@ -19,6 +19,12 @@ def encode_storage_payment_required(
     Format (no marker byte):
       - no hint: payment_public_key[32] + storage_size_estimate[8] + base_storage_fee[8]
       - with hint: base fields + hint_relay_public_key[32] + hint_ipv4[4] + hint_port[2]
+
+    Args:
+        payment_public_key (bytes): The payment public key (32 bytes).
+        storage_size_estimate (int): The estimated storage size.
+        base_storage_fee (int): The base storage fee.
+        hint_peer (Optional[Tuple[bytes, str, int]]): Optional hint peer tuple.
     """
     payment_key = payment_public_key
     if len(payment_key) != 32:
@@ -62,7 +68,14 @@ def encode_storage_payment_required(
 def decode_storage_payment_required(
     payload: bytes,
 ) -> Tuple[bytes, int, int, Optional[Tuple[bytes, str, int]]]:
-    """Decode payment-required payload using length to determine optional hint."""
+    """Decode payment-required payload using length to determine optional hint.
+
+    Args:
+        payload (bytes): The encoded payload to decode.
+
+    Returns:
+        Tuple[bytes, int, int, Optional[Tuple[bytes, str, int]]]: The decoded fields.
+    """
     payload_bytes = payload
     if len(payload_bytes) == STORAGE_PAYMENT_REQUIRED_NO_HINT_PAYLOAD_LEN:
         payment_public_key = payload_bytes[:32]

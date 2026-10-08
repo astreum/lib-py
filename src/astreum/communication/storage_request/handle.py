@@ -36,7 +36,15 @@ if TYPE_CHECKING:
 
 
 def _collect_for_resolution(expr, desired: int) -> list:
-    """Collect exprs based on desired resolution, sending best available."""
+    """Collect exprs based on desired resolution, sending best available.
+
+    Args:
+        expr (Any): The expression to collect from.
+        desired (int): The desired resolution level.
+
+    Returns:
+        list: A list of collected expressions.
+    """
     if desired >= RESOLUTION_FULL and expr._tag == "link":
         return collect_full(expr)
     if desired >= RESOLUTION_LIST and expr._tag == "link":
@@ -52,6 +60,16 @@ BATCH_INLINE_FETCH_LIMIT = 8
 def _handle_put(
     node: "Node", peer: "Peer", storage_request: StorageRequest
 ) -> tuple[bool, str | None]:
+    """Handle a STORAGE_PUT request by indexing and forwarding entries.
+
+    Args:
+        node (Node): The node instance handling the request.
+        peer (Peer): The peer sending the request.
+        storage_request (StorageRequest): The storage request object.
+
+    Returns:
+        tuple[bool, str | None]: A tuple of (success, error_reason).
+    """
     from astreum.storage.admission import get_latest_storage_account, is_expr_in_latest_block
     from astreum.storage.exprs.network import destination_peer, send_put_entries
     from astreum.storage.radix import RadixTree, get_from_radix_tree
@@ -140,12 +158,18 @@ def _serve_get(
     desired: int,
     block_hash: bytes | None = None,
 ) -> tuple[bool, str | None]:
-    """Serve one STORAGE_GET entry: paged ``STORAGE_FOUND``, a provider
-    redirect, or a payment-required reply.
+    """Serve one STORAGE_GET entry: paged ``STORAGE_FOUND``, a provider redirect, or a payment-required reply.
 
     A scoped entry (*block_hash* given) is served the same way, by a local get
     of *expr_id*: the block only decides who is asked. A miss is redirected by
     the block's provider or nearest peer instead of by *expr_id*'s.
+
+    Args:
+        node (Node): The node instance serving the request.
+        peer (Peer): The peer making the request.
+        expr_id (bytes): The expression ID to retrieve.
+        desired (int): The desired resolution level.
+        block_hash (bytes | None): Optional block hash for scoped requests.
     """
     local_atom = get_expr_from_local_storage(node, expr_id)
     if local_atom is not None:
@@ -285,6 +309,16 @@ def _serve_get(
 
 
 def handle_storage_request(node: "Node", peer: "Peer", message: Message) -> tuple[bool, str | None]:
+    """Handle a STORAGE_REQUEST message from a peer.
+
+    Args:
+        node (Node): The node instance handling the request.
+        peer (Peer): The peer sending the request.
+        message (Message): The message containing the storage request.
+
+    Returns:
+        tuple[bool, str | None]: A tuple of (success, error_reason).
+    """
     if message.content is None:
         node.logger.debug("STORAGE_REQUEST from %s missing content", peer.address)
         return False, "missing content"

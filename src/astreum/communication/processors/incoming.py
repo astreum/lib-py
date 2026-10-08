@@ -22,7 +22,11 @@ if TYPE_CHECKING:
 
 
 def process_incoming_messages(node: "Node") -> None:
-    """Process incoming messages (placeholder)."""
+    """Process incoming messages (placeholder).
+
+    Args:
+        node (Node): The node instance processing the messages.
+    """
     stop = node.communication_stop_event
     while not stop.is_set():
         try:
@@ -218,7 +222,11 @@ def process_incoming_messages(node: "Node") -> None:
 
 
 def populate_incoming_messages(node: "Node") -> None:
-    """Receive UDP packets and feed the incoming queue."""
+    """Receive UDP packets and feed the incoming queue.
+
+    Args:
+        node (Node): The node instance receiving UDP packets.
+    """
     stop = node.communication_stop_event
     while not stop.is_set():
         try:

@@ -6,7 +6,14 @@ from typing import Any
 
 
 def _level_0_size(table_dir: str | Path | None) -> int:
-    """Sum the sizes of the ``*.bin`` files in a table's ``level_0``."""
+    """Sum the sizes of the ``*.bin`` files in a table's ``level_0``.
+    
+    Args:
+        table_dir: The table directory path, or None.
+    
+    Returns:
+        Total size in bytes, or 0 if the directory does not exist.
+    """
     if not table_dir:
         return 0
     level_0_path = Path(table_dir) / "level_0"

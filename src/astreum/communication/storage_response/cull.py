@@ -9,7 +9,11 @@ from astreum.expression import (
 
 
 def _child_hashes(expr: Expr) -> List[bytes]:
-    """Return the head and tail hashes of a link (empty for other exprs)."""
+    """Return the head and tail hashes of a link (empty for other exprs).
+
+    Args:
+        expr (Expr): The expression to extract child hashes from.
+    """
     if expr.base != "link":
         return []
     hashes: List[bytes] = []
@@ -36,6 +40,11 @@ def cull_to_resolution(
     reachable from the root through head and tail links. Only exprs present in
     ``exprs`` can be kept, each at most once, root first. Anything else in the
     reply is dropped.
+
+    Args:
+        root (Expr): The root expression.
+        exprs (List[Expr]): The list of delivered expressions.
+        resolution (Optional[int]): The requested resolution level.
     """
     by_hash: Dict[bytes, Expr] = {}
     for expr in exprs:

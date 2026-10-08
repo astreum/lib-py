@@ -7,7 +7,11 @@ if TYPE_CHECKING:
 
 
 def message_difficulty(node: "Node") -> int:
-    """Compute current message difficulty based on incoming queue pressure."""
+    """Compute current message difficulty based on incoming queue pressure.
+
+    Args:
+        node (Node): The node with an incoming queue to measure.
+    """
     size = node.incoming_queue_size
     limit = node.incoming_queue_size_limit
 

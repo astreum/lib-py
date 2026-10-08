@@ -12,6 +12,10 @@ from astreum.consensus.block.holders import block_holder
 
 
 def _is_fully_verified(fork: Any) -> bool:
+
+    Args:
+        fork (Any): Description.
+
     return (
         fork.header_verified_up_to == fork.root
         and fork.transactions_verified_up_to == fork.root
@@ -19,6 +23,10 @@ def _is_fully_verified(fork: Any) -> bool:
 
 
 def _merge_forks(node: Any) -> bool:
+
+    Args:
+        node (Any): Description.
+
     merged = False
     with node.forks_lock:
         forks = node.forks
@@ -66,6 +74,10 @@ def _merge_forks(node: Any) -> bool:
 
 def _scan_peer_heads(node: Any) -> None:
     """Scan peers for latest block hashes and update forks/peers."""
+
+    Args:
+        node (Any): Description.
+
     grouped: dict[bytes, set[Any]] = {}
     with node.peers_lock:
         peers = list(node.peers.items())
@@ -91,6 +103,10 @@ def _scan_peer_heads(node: Any) -> None:
 
 
 def _select_latest_block(node: Any) -> None:
+
+    Args:
+        node (Any): Description.
+
     config = node.config or {}
     try:
         max_stale = int(config.get("verification_max_stale_seconds", 10))
@@ -162,7 +178,14 @@ def _select_latest_block(node: Any) -> None:
 def make_verify_worker(node: Any):
     """Build the consensus fork verify worker bound to the given node."""
 
+    Args:
+        node (Any): Description.
+
     def _verify_worker() -> None:
+
+        Args:
+            None.
+
         stop = node._verify_stop_event
         while not stop.is_set():
             _scan_peer_heads(node)

@@ -11,7 +11,13 @@ if TYPE_CHECKING:
 
 
 def handle_ping(node: "Node", peer: Peer, payload: bytes) -> None:
-    """Update peer and validation state based on an incoming ping message."""
+    """Update peer and validation state based on an incoming ping message.
+
+    Args:
+        node (Node): The node receiving the ping.
+        peer (Peer): The peer that sent the ping.
+        payload (bytes): The ping message payload.
+    """
     try:
         ping = Ping.from_bytes(payload)
     except Exception as exc:

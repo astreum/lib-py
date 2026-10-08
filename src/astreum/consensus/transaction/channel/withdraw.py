@@ -33,6 +33,10 @@ def _withdraw_message(
 
 
 def _data_nodes(data) -> list:
+
+    Args:
+        data: Description.
+
     result = []
     current = data
     while current is not None and getattr(current, "_tag", None) == "link":

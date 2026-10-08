@@ -29,10 +29,19 @@ from astreum.consensus.transaction.treasury.utils import _remaining_payment_coun
 
 
 def _extend_pending_exprs(block: object, exprs: list[Expr]) -> None:
+
+    Args:
+        block (object): Description.
+        exprs (list[Expr]): Description.
+
     block.pending_exprs.extend(exprs)
 
 
 def _data_nodes(data) -> list:
+
+    Args:
+        data: Description.
+
     result = []
     current = data
     while current is not None and getattr(current, "_tag", None) == "link":
@@ -43,6 +52,10 @@ def _data_nodes(data) -> list:
 
 
 def _current_height(block: object) -> int:
+
+    Args:
+        block (object): Description.
+
     return int(
         getattr(
             block,

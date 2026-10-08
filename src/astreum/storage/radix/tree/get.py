@@ -16,7 +16,16 @@ if TYPE_CHECKING:
 def _find_node(tree: RadixTree, astreum_node: "Node", key: bytes) -> Optional[RadixNode]:
     """The node holding *key*, or None. Each node is fetched from the block
     that holds it: the tree's root block for the root, then the block a child
-    pointer names (a plain hash is in the block of the node that holds it)."""
+    pointer names (a plain hash is in the block of the node that holds it).
+
+    Args:
+        tree: The radix tree to search.
+        astreum_node: A Node instance for fetching nodes.
+        key: The key to find.
+
+    Returns:
+        The RadixNode at the key, or None if not found.
+    """
     if tree.root_hash is None or tree.root_hash == ZERO32:
         return None
 
@@ -63,6 +72,14 @@ def exists_in_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes) -> b
     Walks the same trie path as ``get_from_radix_tree`` but stops at the leaf
     without materializing the stored value (no ``get_expr`` on the leaf), so
     checking existence does not trigger storage reads for the value.
+
+    Args:
+        tree: The radix tree to search.
+        astreum_node: A Node instance for fetching nodes.
+        key: The key to check.
+
+    Returns:
+        True if the key exists with a value, False otherwise.
     """
     found = _find_node(tree, astreum_node, key)
     return found is not None and found.value is not None
@@ -73,7 +90,16 @@ def get_from_radix_tree_with_block(
 ) -> tuple[Optional[Expr], Optional[bytes]]:
     """``(value, block)`` for *key*: the value and the block whose record holds
     it (None if the value is new, or the tree is not tied to a block). The
-    cells below a value held by a plain hash are in that block."""
+    cells below a value held by a plain hash are in that block.
+
+    Args:
+        tree: The radix tree to search.
+        astreum_node: A Node instance for fetching nodes.
+        key: The key to retrieve.
+
+    Returns:
+        A tuple of (Expr, block_hash), or (None, None) if not found.
+    """
     found = _find_node(tree, astreum_node, key)
     if found is None or found.value is None:
         return None, None

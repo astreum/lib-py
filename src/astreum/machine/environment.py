@@ -4,10 +4,24 @@ from typing import Dict, Optional
 
 class Env:
     def __init__(self, data: Dict[str, Expr] = None, parent: "Env" = None):
+        """Initialize an environment.
+
+        Args:
+            data: Initial variable bindings.
+            parent: Parent environment for lexical scoping.
+        """
         self.data: Dict[str, Expr] = {} if data is None else data
         self.parent = parent
 
     def get(self, key: str) -> Optional[Expr]:
+        """Look up a variable in the environment chain.
+
+        Args:
+            key: The variable name to look up.
+
+        Returns:
+            The bound expression, or None if not found.
+        """
         if key in self.data:
             return self.data[key]
         if self.parent:
@@ -15,10 +29,26 @@ class Env:
         return None
 
     def put(self, key: str, value: Expr):
+        """Bind a variable in the current environment.
+
+        Args:
+            key: The variable name.
+            value: The expression to bind.
+        """
         self.data[key] = value
 
 
 def env_to_radix_tree(env: Env, node, parent_hash: bytes = None) -> Expr:
+    """Convert an environment to a radix tree expression.
+
+    Args:
+        env: The environment to convert.
+        node: The Astreum Node instance for storage access.
+        parent_hash: Hash of the parent environment level.
+
+    Returns:
+        An expression representing the environment as a radix tree.
+    """
     """Env level as a tagged expr: link(level . env), built over the level's
     bindings via the Patricia trie.
 

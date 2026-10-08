@@ -8,6 +8,11 @@ class MeterExceededError(Exception):
 
 class Meter:
     def __init__(self, limit: Optional[int] = None):
+        """Initialize a meter.
+
+        Args:
+            limit: Optional limit for total meter usage.
+        """
         self.limit: Optional[int] = limit
         self.eval: int = 0
         self.storage: int = 0
@@ -24,6 +29,18 @@ class Meter:
         return max(0, self.limit - self.total)
 
     def charge(self, n: int, kind: str = "eval") -> bool:
+        """Charge the meter for resource usage.
+
+        Args:
+            n: The amount to charge.
+            kind: The kind of charge ('eval' or 'storage').
+
+        Returns:
+            True if charge succeeded.
+
+        Raises:
+            MeterExceededError: If the limit would be exceeded.
+        """
         if self.limit is None:
             return True
         with self._lock:
@@ -43,4 +60,13 @@ class Meter:
             return True
 
     def charge_bytes(self, n: int, is_storage: bool = False) -> bool:
+        """Charge for byte-based resource usage.
+
+        Args:
+            n: The number of bytes to charge.
+            is_storage: If True, charge to storage; otherwise eval.
+
+        Returns:
+            True if charge succeeded.
+        """
         return self.charge(n, kind="storage" if is_storage else "eval")

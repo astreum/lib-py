@@ -10,14 +10,13 @@ from astreum.crypto.bloom_search.search import ERA_SIZE
 def find_block_by_height(astreum_node: Any, *,
                          starting_block=None,
                          target_height: int) -> Optional[Block]:
-    """Find a block by height using the bloom tree's binary tree structure.
+    """
+    Find a block by height using the bloom tree's binary structure.
 
-    Walks backward from starting_block to find the era containing target_height,
-    then binary-descents the bloom tree by offset (not by bloom test) to locate
-    the leaf containing the target block's expr hash.
-
-    Returns None if the block hasn't been mined yet or isn't reachable
-    (e.g. target_height > starting_block.height).
+    Args:
+        astreum_node: Astreum node.
+        starting_block: Block to start search from.
+        target_height: Target block height.
     """
     if starting_block is None:
         return None
@@ -83,14 +82,14 @@ def find_block_by_height(astreum_node: Any, *,
 
 def _storage_find_leaf(astreum_node: Any, root_hash: bytes,
                        offset: int, block_hash: Optional[bytes] = None) -> Optional[bytes]:
-    """Binary-descent by *position* (not bloom test) in the bloom tree.
+    """
+    Binary-descent by position in the bloom tree.
 
-    Fetches nodes on demand from storage.  Returns the leaf's ``start_hash``
-    (the block's expr hash), or ``None`` if the path doesn't exist (block not
-    mined) or the leaf's start_hash hasn't been set yet (deferred).
-
-    *block_hash* is the block whose header holds *root_hash*: its provider is
-    asked for the nodes (a child by plain hash is in the same block).
+    Args:
+        astreum_node: Astreum node.
+        root_hash: Root node hash.
+        offset: Target offset in the tree.
+        block_hash: Block holding the root.
     """
     from astreum.crypto.bloom_tree.tree import read_bloom_node
 

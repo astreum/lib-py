@@ -16,6 +16,13 @@ def _read_body(node, body, contact, scope):
     The last cell holds the transaction by hash and is never fetched: the
     receipt names the transaction, it does not need its body.
     """
+
+    Args:
+        node: Description.
+        body: Description.
+        contact: Description.
+        scope: Description.
+
     from astreum.storage.exprs import get_expr
 
     items: list[Expr] = []
@@ -73,9 +80,17 @@ class Receipt:
     def total_fee(self) -> int:
         # transaction_fee holds the execution fee: counting it again would
         # charge a call twice.
+
+        Args:
+            None.
+
         return self.transaction_fee + self.data_fee + self.storage_fee
 
     def to_expr(self) -> "Expr":
+
+        Args:
+            None.
+
         body: Expr = Expr("link", head_hash=self.transaction_hash)
         body = link(int_(self.transaction_fee), body)
         body = link(int_(self.storage_fee), body)
@@ -88,6 +103,10 @@ class Receipt:
             symbol("receipt"))
 
     def expr(self) -> "Expr":
+
+        Args:
+            None.
+
         if self._expr is not None:
             return self._expr
         self._expr = self.to_expr()

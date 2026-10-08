@@ -41,6 +41,12 @@ DEFAULT_STORAGE_FOUND_MAX_PAGES = 64
 def config_setup(config: Dict = {}):
     """
     Normalize configuration values before the node starts.
+
+    Args:
+        config: Configuration dictionary to normalize. Modified in place.
+
+    Returns:
+        The normalized configuration dictionary.
     """
     chain_str = config.get("chain")
     if chain_str not in {"main", "test"}:

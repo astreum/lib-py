@@ -31,13 +31,25 @@ class Fork:
         self.peers: Set[Any] = set()
 
     def add_peer(self, peer_id: Any) -> None:
+
+        Args:
+            peer_id (Any): Description.
+
         self.peers.add(peer_id)
 
     def remove_peer(self, peer_id: Any) -> None:
+
+        Args:
+            peer_id (Any): Description.
+
         self.peers.discard(peer_id)
 
     def to_bytes(self) -> bytes:
         """Serialize fork identity and verification markers."""
+
+        Args:
+            None.
+
         header_flag = b"\x01" if self.header_verified_up_to is not None else b"\x00"
         tx_flag = (
             b"\x01" if self.transactions_verified_up_to is not None else b"\x00"
@@ -67,6 +79,10 @@ class Fork:
     @classmethod
     def from_bytes(cls, payload: bytes) -> "Fork":
         """Deserialize fork identity and verification markers."""
+
+        Args:
+            payload (bytes): Description.
+
         if not isinstance(payload, (bytes, bytearray)):
             raise TypeError("fork bytes must be bytes")
         block_size = len(ZERO32)

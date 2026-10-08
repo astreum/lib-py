@@ -8,6 +8,9 @@ def decode_storage_provider(payload: bytes) -> Tuple[bytes, bytes, str, int]:
     Format: Ed25519_storage(32) + X25519_relay(32) + IPv4(4) + port(2)
 
     Returns (storage_public_key, relay_public_key, address, port).
+
+    Args:
+        payload (bytes): The 70-byte provider payload to decode.
     """
     expected_len = 32 + 32 + 4 + 2
     if len(payload) < expected_len:

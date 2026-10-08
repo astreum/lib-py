@@ -25,6 +25,11 @@ class LoanType(IntEnum):
 
 
 def _root_item(root_hash: bytes, block: Optional[bytes]) -> Expr:
+
+    Args:
+        root_hash (bytes): Description.
+        block (Optional[bytes]): Description.
+
     if root_hash == ZERO32:
         return Expr("link", head_hash=ZERO32)
     return pointer_item(root_hash, block)
@@ -81,6 +86,10 @@ class TreasuryUserRecord:
             ``[balance, loans_root_hash, total_interest_paid,
             guarantees_root_hash, loaned, defaulted, guaranteed]``.
         """
+
+        Args:
+            None.
+
         if self._expr is not None:
             return self._expr
         detail: Expr = link(int_(self.guaranteed), NIL)
@@ -99,6 +108,10 @@ class TreasuryUserRecord:
         Returns:
             The cached (or freshly built) `Expr` from `to_expr`.
         """
+
+        Args:
+            None.
+
         if self._expr is not None:
             return self._expr
         self._expr = self.to_expr()
@@ -168,6 +181,13 @@ class TreasuryUserRecord:
 def load_from_tree(cls: Any, node: Any, tree: Any, key: bytes, contact=None):
     """The record of type *cls* stored at *key* in *tree*, read from the block
     that holds it; None if the key is absent or does not decode."""
+
+    Args:
+        node (Any): Description.
+        tree (Any): Description.
+        key (bytes): Description.
+        contact: Description.
+
     head, block = get_from_radix_tree_with_block(tree, node, key)
     return cls.from_storage(node, head or ZERO32, contact=contact, block_hash=block)
 
@@ -210,6 +230,10 @@ def _claimed_guarantees_to_expr(claimed_guarantees: list[tuple[bytes, bytes, int
         `NIL` if *claimed_guarantees* is empty, otherwise a `link`-list `Expr`
         of the encoded entries.
     """
+
+    Args:
+        claimed_guarantees (list[tuple[bytes, bytes, int]]): Description.
+
     if not claimed_guarantees:
         return NIL
     result: Expr = NIL
@@ -294,6 +318,10 @@ class TreasuryLoanRecord:
     _expr: Optional[Expr] = field(default=None, repr=False, compare=False)
 
     def to_expr(self) -> Expr:
+
+        Args:
+            None.
+
         if self._expr is not None:
             return self._expr
         detail: Expr = link(bytes_(self.owner), NIL)
@@ -310,6 +338,10 @@ class TreasuryLoanRecord:
         return detail
 
     def expr(self) -> Expr:
+
+        Args:
+            None.
+
         if self._expr is not None:
             return self._expr
         self._expr = self.to_expr()
@@ -409,6 +441,10 @@ class TreasuryGuarantee:
             A `link`-list `Expr` of the guarantee's fields in storage order:
             ``[amount, duration, price, expiry, claimed_by]``.
         """
+
+        Args:
+            None.
+
         if self._expr is not None:
             return self._expr
         detail: Expr = link(bytes_(self.claimed_by), NIL)
@@ -425,6 +461,10 @@ class TreasuryGuarantee:
         Returns:
             The cached (or freshly built) `Expr` from `to_expr`.
         """
+
+        Args:
+            None.
+
         if self._expr is not None:
             return self._expr
         self._expr = self.to_expr()
@@ -479,6 +519,10 @@ class TreasuryGuarantee:
 
 
 def encode_borrow_request(request: TreasuryBorrowRequest) -> bytes:
+
+    Args:
+        request (TreasuryBorrowRequest): Description.
+
     if request.payment_interval_blocks <= 0:
         raise ValueError("payment_interval_blocks must be positive")
     if request.payment_count <= 0:
@@ -492,6 +536,10 @@ def encode_borrow_request(request: TreasuryBorrowRequest) -> bytes:
 
 
 def decode_borrow_request(payload: bytes) -> TreasuryBorrowRequest | None:
+
+    Args:
+        payload (bytes): Description.
+
     payload_bytes = payload
     if len(payload_bytes) != BORROW_REQUEST_SIZE:
         return None

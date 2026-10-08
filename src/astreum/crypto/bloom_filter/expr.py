@@ -5,8 +5,12 @@ from astreum.crypto.bloom_filter.main import BloomFilter
 
 
 def bloom_to_expr(bf: BloomFilter) -> Expr:
-    """Serialize a BloomFilter to an Expr.
-    head=NIL when start_hash is None, head_hash=start_hash when set."""
+    """
+    Serialize a BloomFilter to an Expr.
+
+    Args:
+        bf: Bloom filter to serialize.
+    """
     tiers: Expr = NIL
     for tier in reversed(bf.tiers):
         tiers = link(bytes_(bytes(tier)), tiers)
@@ -30,7 +34,12 @@ def bloom_to_expr(bf: BloomFilter) -> Expr:
 
 
 def bloom_from_expr(expr: Expr) -> BloomFilter:
-    """Deserialize a BloomFilter from an Expr."""
+    """
+    Deserialize a BloomFilter from an Expr.
+
+    Args:
+        expr: Expression to deserialize.
+    """
     head = expr._head
     if head is None or head is NIL:
         start_hash = None

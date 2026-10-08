@@ -4,6 +4,14 @@ from astreum.storage.radix.node.model import RadixNode
 
 
 def clone_radix_node(node: RadixNode) -> RadixNode:
+    """Create a deep copy of a radix node.
+
+    Args:
+        node: The radix node to clone.
+
+    Returns:
+        A new RadixNode with the same data.
+    """
     cloned = RadixNode(
         key_len=node.key_len,
         key=node.key,

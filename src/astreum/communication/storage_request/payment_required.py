@@ -12,7 +12,16 @@ if TYPE_CHECKING:
 
 
 def _requires_storage_channel(node: "Node", peer: "Peer", next_upload_bytes: int) -> bool:
-    """Return True when a peer must use a payment/channel before another object share."""
+    """Return True when a peer must use a payment/channel before another object share.
+
+    Args:
+        node (Node): The node instance checking the requirement.
+        peer (Peer): The peer being checked.
+        next_upload_bytes (int): The projected upload size in bytes.
+
+    Returns:
+        bool: True if payment/channel is required, False otherwise.
+    """
     pending_upload = next_upload_bytes
     if pending_upload <= 0:
         return False
@@ -41,7 +50,17 @@ def _queue_storage_payment_required(
     expr_id: bytes,
     storage_size_estimate: int,
 ) -> bool:
-    """Queue a STORAGE_PAYMENT_REQUIRED response for a peer."""
+    """Queue a STORAGE_PAYMENT_REQUIRED response for a peer.
+
+    Args:
+        node (Node): The node instance sending the response.
+        peer (Peer): The peer requiring payment.
+        expr_id (bytes): The expression ID being requested.
+        storage_size_estimate (int): The estimated storage size in bytes.
+
+    Returns:
+        bool: True if the response was queued, False otherwise.
+    """
     payment_public_key = (getattr(node, "config", {}) or {}).get("storage_public_key_bytes")
     if not isinstance(payment_public_key, (bytes, bytearray)) or len(payment_public_key) != 32:
         node.logger.warning(

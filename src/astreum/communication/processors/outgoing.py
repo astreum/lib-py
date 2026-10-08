@@ -10,6 +10,15 @@ if TYPE_CHECKING:
 
 
 def _find_peer_by_address(node: "Node", addr):
+    """Find a peer by its address.
+
+    Args:
+        node (Node): The node instance containing the peer list.
+        addr (Any): The address to search for as (host, port).
+
+    Returns:
+        Any: The matching peer object or None if not found.
+    """
     try:
         host = addr[0]
         port = int(addr[1])
@@ -35,7 +44,11 @@ def _find_peer_by_address(node: "Node", addr):
     return None
 
 def process_outgoing_messages(node: "Node") -> None:
-    """Send queued outbound packets."""
+    """Send queued outbound packets.
+
+    Args:
+        node (Node): The node instance sending the packets.
+    """
     stop = node.communication_stop_event
     while not stop.is_set():
         try:

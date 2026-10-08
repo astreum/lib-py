@@ -40,13 +40,27 @@ def get_latest_storage_account(node: "Node") -> Optional["Account"]:
 
     Public wrapper over the per-block-hash cached lookup in
     :func:`_get_latest_storage_account`.
+
+    Args:
+        node: A Node instance with a ``latest_block`` attribute (may be
+            ``None`` while unsynced).
+
+    Returns:
+        The STORAGE_ADDRESS account from the latest block, or None.
     """
     return _get_latest_storage_account(node)
 
 
 def _get_latest_storage_account(node: "Node") -> Optional["Account"]:
     """Fetch the STORAGE_ADDRESS account from ``node.latest_block``, cached per
-    latest block hash so repeated admission checks cost one warm radix descent."""
+    latest block hash so repeated admission checks cost one warm radix descent.
+
+    Args:
+        node: A Node instance with a ``latest_block`` attribute.
+
+    Returns:
+        The STORAGE_ADDRESS account, or None if no latest block or no account.
+    """
     global _storage_account_cache
 
     latest_block = getattr(node, "latest_block", None)

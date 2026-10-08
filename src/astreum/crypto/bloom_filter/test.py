@@ -5,8 +5,13 @@ from astreum.crypto.bloom_filter.main import BloomFilter
 
 
 def bloom_test(bf: BloomFilter, element: bytes) -> bool:
-    """Test if an element may be present. Checks tiers smallest-to-largest, returns
-    True on first hit. False means definitely absent."""
+    """
+    Test if an element may be present.
+
+    Args:
+        bf: Bloom filter.
+        element: Element to test.
+    """
     for tier in bf.tiers:
         bits = len(tier) * 8
         positions = _bloom_positions(element, bits)

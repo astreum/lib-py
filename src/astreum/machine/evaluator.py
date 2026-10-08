@@ -7,6 +7,17 @@ from astreum.machine.operators.main import OPERATOR_LIST, apply_operator
 
 
 def evaluation(machine, expr: Expr, stack: List[Expr] = [], env: Env = Env()) -> List[Expr]:
+    """Evaluate an expression and manipulate the stack.
+
+    Args:
+        machine: The machine instance managing execution state.
+        expr: The expression to evaluate.
+        stack: The current evaluation stack.
+        env: The environment for variable bindings.
+
+    Returns:
+        The updated stack after evaluation.
+    """
 
     if expr.base == "symbol":
         if machine.mode == "deterministic":

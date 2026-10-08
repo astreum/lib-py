@@ -36,6 +36,10 @@ class Fork:
         self.malicious_block_hash: Optional[bytes] = malicious_block_hash
 
     def to_dict(self) -> dict[str, Any]:
+
+        Args:
+            None.
+
         return {
             "head": self.head,
             "verified_up_to": self.verified_up_to,
@@ -46,6 +50,10 @@ class Fork:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> Fork:
+
+        Args:
+            payload (dict[str, Any]): Description.
+
         head = payload.get("head")
         if not isinstance(head, (bytes, bytearray)):
             raise TypeError("fork head must be bytes")
@@ -87,13 +95,29 @@ class Fork:
         )
 
     def add_peer(self, peer_id: Any) -> None:
+
+        Args:
+            peer_id (Any): Description.
+
         self.peers.add(peer_id)
 
     def remove_peer(self, peer_id: Any) -> None:
+
+        Args:
+            peer_id (Any): Description.
+
         self.peers.discard(peer_id)
 
     def verify(self, node: Any) -> bool:
+
+        Args:
+            node (Any): Description.
+
         def _hex(value: Optional[bytes]) -> str:
+
+            Args:
+                value (Optional[bytes]): Description.
+
             if isinstance(value, (bytes, bytearray)):
                 return value.hex()
             return str(value)
@@ -106,6 +130,10 @@ class Fork:
         anchor_validated = False
 
         def is_on_other_fork_path(target_hash: bytes) -> Optional[bytes]:
+
+            Args:
+                target_hash (bytes): Description.
+
             for other_head in node.forks:
                 if other_head == self.head:
                     continue
@@ -234,6 +262,10 @@ class Fork:
         current_validator = config.get("validation_public_key_bytes")
 
         def skip_slow_pass(block: Block) -> bool:
+
+            Args:
+                block (Block): Description.
+
             if not current_validator:
                 return False
             return (

@@ -14,6 +14,14 @@ if TYPE_CHECKING:
 
 
 def _value_hash(value: Union[Expr, bytes, None]) -> bytes | None:
+    """Return the hash of a value, or the value itself if already a hash.
+
+    Args:
+        value: An Expr or bytes hash, or None.
+
+    Returns:
+        The 32-byte hash, or None.
+    """
     if value is None or isinstance(value, bytes):
         return value
     return value.hash()
@@ -26,6 +34,12 @@ def put_in_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes, value: 
     not written keeps the block that holds it (``child_*_block``,
     ``value_block``), and is encoded as a stored ref to that block. A write
     that does not change the value leaves the tree as it is.
+
+    Args:
+        tree: The radix tree to update.
+        astreum_node: A Node instance for fetching nodes.
+        key: The key to write at.
+        value: The value to write (Expr or bytes hash).
     """
     total_bits = len(key) * 8
 
@@ -96,6 +110,17 @@ def _append_leaf(
     value: Union[Expr, bytes],
     stack: List[Tuple[RadixNode, bytes, int]],
 ) -> None:
+    """Append a new leaf node under a parent.
+
+    Args:
+        tree: The radix tree to update.
+        parent: The parent node to attach to.
+        dir_bit: Direction (0 or 1) for the child pointer.
+        key: The full key being inserted.
+        key_pos: Current bit position in the key.
+        value: The value to store.
+        stack: Ancestor stack for bubbling updates.
+    """
     tail_len = len(key) * 8 - (key_pos + 1)
     tail_bits, tail_len = _bit_slice(key, key_pos + 1, tail_len)
     leaf = _make_node(tail_bits, tail_len, value, None, None)
@@ -127,6 +152,16 @@ def _split_and_insert(
     key_pos: int,
     value: Union[Expr, bytes],
 ) -> None:
+    """Split a node and insert a new branch.
+
+    Args:
+        tree: The radix tree to update.
+        node: The node to split.
+        stack: Ancestor stack for bubbling updates.
+        key: The full key being inserted.
+        key_pos: Current bit position in the key.
+        value: The value to store.
+    """
     max_lcp = min(node.key_len, len(key) * 8 - key_pos)
     lcp = 0
     while lcp < max_lcp and _bit(node.key, lcp) == _bit(key, key_pos + lcp):
@@ -196,6 +231,13 @@ def _bubble(
     stack: List[Tuple[RadixNode, bytes, int]],
     new_hash: bytes
 ) -> None:
+    """Bubble a hash change up the ancestor stack.
+
+    Args:
+        tree: The radix tree to update.
+        stack: Ancestor stack (parent, old_hash, dir_bit).
+        new_hash: The new hash to propagate.
+    """
     while stack:
         parent, old_hash, dir_bit = stack.pop()
 

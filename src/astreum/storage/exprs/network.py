@@ -10,14 +10,29 @@ from astreum.expression import Expr, ZERO32, RESOLUTION_SINGLE, RESOLUTION_LIST,
 
 
 def _is_builtin_type_hash(h: bytes) -> bool:
-    """The type symbol of an int, str or float: known, never fetched."""
+    """The type symbol of an int, str or float: known, never fetched.
+
+    Args:
+        h: The 32-byte content hash to check.
+
+    Returns:
+        True if h is a builtin type hash, False otherwise.
+    """
     from astreum.expression.expr import _BUILTIN_TYPE_HASH, BUILTIN_COMPOSITE_TYPE_NAMES
 
     return _BUILTIN_TYPE_HASH.get(h) in BUILTIN_COMPOSITE_TYPE_NAMES
 
 
 def _collect_missing_hashes(expr: Expr, resolution: int) -> list[bytes]:
-    """Return unresolved hashes from a partially-resolved expr."""
+    """Return unresolved hashes from a partially-resolved expr.
+
+    Args:
+        expr: The expression to inspect.
+        resolution: The resolution strategy (LIST or FULL).
+
+    Returns:
+        List of unresolved 32-byte content hashes.
+    """
     missing: list[bytes] = []
     if resolution == RESOLUTION_LIST:
         current = expr
@@ -48,6 +63,13 @@ def _poll_local(node, expr_ids: list[bytes]) -> dict[bytes, Optional[Expr]]:
 
     Waits overlap: one ``storage_fetch_retries x storage_fetch_interval``
     window covers every hash. Hashes that never arrive map to ``None``.
+
+    Args:
+        node: A Node instance for storage access.
+        expr_ids: List of 32-byte content hashes to poll for.
+
+    Returns:
+        Dict mapping each expr_id to its Expr (or None if not found).
     """
     interval = node.config["storage_fetch_interval"]
     retries = node.config["storage_fetch_retries"]
@@ -81,6 +103,16 @@ def _resolve_structured(
     *contact* and *block_hash* keep the follow-up fetch of the missing inner
     hashes on the same peer and block as the root fetch: a cell reached by
     plain hash is in the block of the cell that holds it.
+
+    Args:
+        node: A Node instance for storage access.
+        expr_id: The content hash of the root expression.
+        resolution: LIST or FULL resolution strategy.
+        contact: Optional contact for network fetches.
+        block_hash: Optional block hash for scoped fetches.
+
+    Returns:
+        The fully resolved Expr, or None.
     """
     interval = node.config["storage_fetch_interval"]
     retries = node.config["storage_fetch_retries"]
@@ -206,7 +238,16 @@ def get_expr_from_network(
 
 
 def _is_resolved_locally(node, expr_id: bytes, resolution: int) -> bool:
-    """True if nothing is left to fetch for *expr_id* at *resolution*."""
+    """True if nothing is left to fetch for *expr_id* at *resolution*.
+
+    Args:
+        node: A Node instance for storage access.
+        expr_id: The 32-byte content hash to check.
+        resolution: The resolution strategy.
+
+    Returns:
+        True if fully resolved locally, False otherwise.
+    """
     if resolution == RESOLUTION_SINGLE:
         return get_expr_from_local_storage(node, expr_id) is not None
     if resolution == RESOLUTION_LIST:
@@ -229,6 +270,13 @@ def prefetch_exprs_from_network(
     finds everything in local storage. It is an optimisation only, so it never
     raises; whatever is still missing afterwards is fetched by the caller's
     normal path.
+
+    Args:
+        node: A Node instance for network access.
+        expr_ids: Iterable of 32-byte content hashes.
+        resolution: Resolution strategy (default SINGLE).
+        contact: Optional contact for network fetches.
+        block_hash: Optional block hash for scoped fetches.
     """
     try:
         if not getattr(node, "is_connected", False):
@@ -247,7 +295,17 @@ def prefetch_exprs_from_network(
 
 def build_provider_payload(node) -> bytes:
     """Encode this node's provider contact (70 bytes):
-    storage key + relay key + ipv4 + port.  Raises on missing/invalid config."""
+    storage key + relay key + ipv4 + port.  Raises on missing/invalid config.
+
+    Args:
+        node: A Node instance with provider network config.
+
+    Returns:
+        70-byte encoded provider payload.
+
+    Raises:
+        OSError: If the IP address is invalid.
+    """
     provider_ip_bytes = socket.inet_aton(node.relay_ip_address)
     provider_port_bytes = int(node.config["port"]).to_bytes(2, "big", signed=False)
     return (
@@ -260,7 +318,15 @@ def build_provider_payload(node) -> bytes:
 
 def destination_peer(node, expr_id: bytes):
     """Return the peer *expr_id*'s ad should be sent to, or ``None`` when this
-    node is itself the closest (same xor comparison used for all STORAGE_PUT routing)."""
+    node is itself the closest (same xor comparison used for all STORAGE_PUT routing).
+
+    Args:
+        node: A Node instance with peer routing.
+        expr_id: The 32-byte content hash to route.
+
+    Returns:
+        The closest Peer object, or None if this node is closest.
+    """
     from astreum.communication.util import xor_distance
 
     closest_peer = node.peer_route.closest_peer_for_hash(expr_id)
@@ -278,7 +344,16 @@ def destination_peer(node, expr_id: bytes):
 
 
 def _send_storage_put(node, peer, storage_req) -> tuple[bool, str | None]:
-    """Encrypt and enqueue one StorageRequest to *peer* at the peer's difficulty."""
+    """Encrypt and enqueue one StorageRequest to *peer* at the peer's difficulty.
+
+    Args:
+        node: A Node instance with outgoing queue.
+        peer: The target Peer.
+        storage_req: The StorageRequest to send.
+
+    Returns:
+        Tuple of (success, error_reason).
+    """
     from astreum.communication.models.message import Message, MessageTopic
     from astreum.communication.outgoing_queue import enqueue_outgoing
 
@@ -312,6 +387,15 @@ def send_put_entries(
     """Send *entries* (``(expr_id, payload_type)``) to *peer*, chunked so every
     ``STORAGE_PUT`` datagram fits ``storage_put_batch_max_bytes``.  Returns one
     ``(chunk_entries, ok, reason)`` tuple per datagram sent.
+
+    Args:
+        node: A Node instance with outgoing queue.
+        peer: The target Peer.
+        provider_payload: The 70-byte provider payload.
+        entries: List of (expr_id, payload_type) tuples.
+
+    Returns:
+        List of (chunk, success, reason) tuples.
     """
     from astreum.communication.storage_request.code import StorageRequestCode
     from astreum.communication.storage_request.model import (
@@ -344,6 +428,13 @@ def put_exprs_in_network(
     Exprs whose closest node is this node are self-indexed.  Every other
     destination's list goes out through :func:`send_put_entries` (one PoW per
     datagram).  Returns ``(expr_id, ok, reason)`` per input entry.
+
+    Args:
+        node: A Node instance with storage and network access.
+        entries: List of (expr_id, payload_type) tuples.
+
+    Returns:
+        List of (expr_id, success, reason) tuples.
     """
     from astreum.storage.providers import provider_id_for_payload
 

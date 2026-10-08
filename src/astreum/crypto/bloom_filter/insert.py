@@ -8,15 +8,25 @@ K = 7  # number of hash functions per element (k = m/n * ln(2) ≈ 6.93, rounds 
 
 
 def _bloom_positions(element: bytes, bits: int) -> list[int]:
-    """Compute K bit positions via double hashing (Kirsch-Mitzenmacher).
-    Uses 2 blake3 calls independently of K."""
+    """
+    Compute K bit positions via double hashing.
+
+    Args:
+        element: Element to hash.
+        bits: Number of bits in the filter.
+    """
     h1 = int.from_bytes(blake3(element + b"\x00").digest()[:4], "big")
     h2 = int.from_bytes(blake3(element + b"\x01").digest()[:4], "big")
     return [(h1 + i * h2) % bits for i in range(K)]
 
 
 def _ensure_tier(bf: BloomFilter) -> int:
-    """Ensure enough tiers exist for the next element. Returns the active tier index."""
+    """
+    Ensure enough tiers exist for the next element.
+
+    Args:
+        bf: Bloom filter to check.
+    """
     # Find which tier this element belongs to
     cum = 0
     tier_idx = 0
@@ -38,7 +48,13 @@ def _ensure_tier(bf: BloomFilter) -> int:
 
 
 def bloom_insert(bf: BloomFilter, element: bytes) -> None:
-    """Insert an element into the active tier of the bloom filter."""
+    """
+    Insert an element into the active tier of the bloom filter.
+
+    Args:
+        bf: Bloom filter.
+        element: Element to insert.
+    """
     tier_idx = _ensure_tier(bf)
     tier = bf.tiers[tier_idx]
     bits = len(tier) * 8

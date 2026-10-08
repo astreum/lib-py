@@ -33,9 +33,18 @@ class Accounts:
 
     @property
     def root_hash(self) -> Optional[bytes]:
+
+        Args:
+            None.
+
         return self._trie.root_hash
 
     def get_account(self, address: bytes, node: Optional[Any] = None) -> Optional[Account]:
+
+        Args:
+            address (bytes): Description.
+            node (Optional[Any]): Description.
+
         cached = self._cache.get(address)
         if cached is not None:
             return cached
@@ -88,9 +97,18 @@ class Accounts:
         return account
 
     def set_account(self, address: bytes, account: Account) -> None:
+
+        Args:
+            address (bytes): Description.
+            account (Account): Description.
+
         self._cache[address] = account
 
     def update_trie(self, node: Any) -> Optional[bytes]:
+
+        Args:
+            node (Any): Description.
+
         for address, account in self._cache.items():
             account.data_hash = account.data.root_hash or ZERO32
             account.data_block = account.data.root_block
@@ -107,6 +125,10 @@ class Accounts:
 
 
 def _trie_nodes_exprs(trie: RadixTree) -> List[Expr]:
+
+    Args:
+        trie (RadixTree): Description.
+
     exprs: List[Expr] = []
     for node in trie.nodes.values():
         exprs.append(get_radix_node_expr(node))
@@ -117,6 +139,10 @@ def _trie_nodes_exprs(trie: RadixTree) -> List[Expr]:
 
 
 def extract_accounts_exprs(accounts: Accounts) -> List[Expr]:
+
+    Args:
+        accounts (Accounts): Description.
+
     exprs: List[Expr] = []
 
     exprs.extend(_trie_nodes_exprs(accounts._trie))

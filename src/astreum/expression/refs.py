@@ -19,7 +19,15 @@ PartReader = Callable[[Expr, str], Optional[Expr]]
 
 
 def ref_expr(block_id: bytes, expr_id: bytes) -> Expr:
-    """``Link(bytes(block_id), Link(bytes(expr_id), Link(symbol("ref"), NIL)))``."""
+    """``Link(bytes(block_id), Link(bytes(expr_id), Link(symbol("ref"), NIL)))``.
+    
+    Args:
+        block_id: The block identifier bytes.
+        expr_id: The expression identifier bytes.
+    
+    Returns:
+        A ref expression linking to the specified block and expr.
+    """
     return link(bytes_(block_id), link(bytes_(expr_id), link(symbol("ref"), NIL)))
 
 
@@ -28,6 +36,13 @@ def pointer_item(expr_id: bytes, block_id: Optional[bytes]) -> Expr:
 
     A reference wrapper ``Link(head_hash=expr_id)`` for a cell that is new, a
     ref when it is held by the record of an older block *block_id*.
+    
+    Args:
+        expr_id: The expression identifier bytes.
+        block_id: Optional block identifier bytes. None for new cells.
+    
+    Returns:
+        A link expression for new cells, or a ref expression for older blocks.
     """
     if block_id is None:
         return Expr("link", head_hash=expr_id)
@@ -35,6 +50,15 @@ def pointer_item(expr_id: bytes, block_id: Optional[bytes]) -> Expr:
 
 
 def _is_nil(expr: Optional[Expr], h: Optional[bytes]) -> bool:
+    """Check if an expression or hash represents nil.
+    
+    Args:
+        expr: Optional expression to check.
+        h: Optional hash to check.
+    
+    Returns:
+        True if the expression or hash represents nil.
+    """
     if expr is None:
         return h is None or h == ZERO32
     return expr is NIL or (
@@ -45,7 +69,15 @@ def _is_nil(expr: Optional[Expr], h: Optional[bytes]) -> bool:
 
 
 def local_part(cell: Expr, side: str) -> Optional[Expr]:
-    """The head or tail of *cell* if it is loaded, else None (no fetching)."""
+    """The head or tail of *cell* if it is loaded, else None (no fetching).
+    
+    Args:
+        cell: The expression cell to read.
+        side: Either "head" or "tail".
+    
+    Returns:
+        The head or tail expression if loaded, else None.
+    """
     return cell._head if side == "head" else cell._tail
 
 
@@ -56,7 +88,15 @@ def stored_ref_target(cell: Expr, part: PartReader = local_part) -> Optional[tup
     stops at the first part that does not fit, so an ordinary cell costs at
     most a couple of reads, and a cell whose tail is nil (a pointer wrapper)
     none.
+    
+    Args:
+        cell: The expression cell to check.
+        part: Function to read head or tail of a cell.
+    
+    Returns:
+        Tuple of (block_id, expr_id) if cell is a stored ref, else None.
     """
+    if cell._tag != "link":
     if cell._tag != "link":
         return None
     if _is_nil(cell._tail, cell._tail_hash):

@@ -13,6 +13,10 @@ from astreum.consensus.block.utils.bits import count_leading_zero_bits
 
 
 def _hex(value: Optional[bytes]) -> str:
+
+    Args:
+        value (Optional[bytes]): Description.
+
     if isinstance(value, (bytes, bytearray)):
         return value.hex()
     return str(value)
@@ -20,6 +24,11 @@ def _hex(value: Optional[bytes]) -> str:
 
 def verify_block_head(node: Any, block: Any) -> bool:
     """Verify block header fields, using attached previous block when available."""
+
+    Args:
+        node (Any): Description.
+        block (Any): Description.
+
     base_required = [
         "expr_id",
         "previous_block_hash",

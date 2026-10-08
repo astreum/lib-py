@@ -44,6 +44,10 @@ _CREDIT_FUNDING_CODES = {TransactionCode.STORAGE_PAYMENT}
 
 
 def _data_nodes(data: Expr) -> list[Expr]:
+
+    Args:
+        data (Expr): Description.
+
     result = []
     current = data
     while current is not None and current._tag == "link":
@@ -144,6 +148,10 @@ def _apply_tx_effects(
             transfer_amount = 0
 
     def _get_or_create_recipient_account() -> tuple["Account", bool]:
+
+        Args:
+            None.
+
         if transaction.recipient == transaction.sender:
             return sender_account, False
         if transaction.recipient == STORAGE_ADDRESS:
@@ -523,6 +531,10 @@ def _apply_tx_effects(
     receipt = None
     if not nested:
         def _build_receipt(storage_fee: int) -> Receipt:
+
+            Args:
+                storage_fee (int): Description.
+
             return Receipt(
                 transaction_hash=transaction_hash,
                 transaction_fee=tx_fee,
@@ -604,6 +616,12 @@ def _apply_tx_effects(
 def apply_transaction(node: Any, block: object, transaction_hash: bytes) -> None:
     """Apply a transaction, collecting results on *block* (top-level entry
     point used by block verification / production)."""
+
+    Args:
+        node (Any): Description.
+        block (object): Description.
+        transaction_hash (bytes): Description.
+
     # A verified block's transactions are asked from its provider.
     block_hash = getattr(block, "expr_id", None)
     scope = {} if not block_hash or block_hash == ZERO32 else {"block_hash": block_hash}
@@ -616,4 +634,10 @@ def apply_transaction(node: Any, block: object, transaction_hash: bytes) -> None
 def apply_transaction_obj(node: Any, block: object, transaction: Any) -> None:
     """Apply an already-decoded Transaction (whole-message path) without
     re-parsing or fetching from storage."""
+
+    Args:
+        node (Any): Description.
+        block (object): Description.
+        transaction (Any): Description.
+
     _apply_tx_effects(node, block, transaction, transaction.hash)

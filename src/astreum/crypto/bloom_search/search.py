@@ -20,12 +20,19 @@ def bloom_search_tx(astreum_node: Any, *,
                     starting_block=None,
                     end_block_height: int = 0,
                     limit: int = 1) -> list["Transaction"]:
-    """Search for transactions matching filter args.
-    Walks backward from starting_block (its bloom_hash = this era's bloom root).
-    For each era, searches the bloom tree.
-    Leaves with start_hash = None → txs are in the block whose bloom_hash we searched.
-    Leaves with start_hash → txs are in that block.
-    Stops when block heights drop below end_block_height or limit is reached."""
+    """
+    Search for transactions matching filter args.
+
+    Args:
+        astreum_node: Astreum node.
+        tx_hash: Transaction hash filter.
+        sender: Sender address filter.
+        receiver: Receiver address filter.
+        key: Data key filter.
+        starting_block: Block to start search from.
+        end_block_height: Minimum block height.
+        limit: Maximum results.
+    """
     from astreum.consensus.transaction.from_storage import get_transaction_from_storage
     from astreum.consensus.block.encoding.decode import get_block_from_storage
 
@@ -80,7 +87,13 @@ def bloom_search_tx(astreum_node: Any, *,
 
 
 def _load_block_txs(node: Any, block) -> list["Transaction"]:
-    """Load all Transaction objects from a block's transactions_hash."""
+    """
+    Load all Transaction objects from a block's transactions_hash.
+
+    Args:
+        node: Astreum node.
+        block: Block to load from.
+    """
     from astreum.consensus.transaction.from_storage import get_transaction_from_storage
 
     if not block.transactions_hash or block.transactions_hash == ZERO32:
@@ -120,8 +133,16 @@ def _tx_matches(tx: "Transaction", *,
                 sender: bytes = ZERO32,
                 receiver: bytes = ZERO32,
                 key: bytes = ZERO32) -> bool:
-    """Check if a Transaction matches the given search params.
-    A param of ZERO32 means 'match anything' for that field."""
+    """
+    Check if a Transaction matches the given search params.
+
+    Args:
+        tx: Transaction to check.
+        tx_hash: Transaction hash filter.
+        sender: Sender address filter.
+        receiver: Receiver address filter.
+        key: Data key filter.
+    """
     if tx_hash != ZERO32 and tx.hash != tx_hash:
         return False
     if sender != ZERO32 and tx.sender != sender:

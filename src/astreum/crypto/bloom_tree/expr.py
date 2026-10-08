@@ -10,16 +10,23 @@ from astreum.storage.pointers import cell_reader, read_field
 
 
 def _ref(value: bytes | None) -> Expr:
-    """NIL when None, Link(head_hash=value) when set."""
+    """
+    Create reference expression.
+
+    Args:
+        value: Hash value or None.
+    """
     return NIL if value is None else Expr("link", head_hash=value)
 
 
 def _child_item(child: BloomNode | None, h: bytes | None, block: bytes | None) -> Expr:
-    """The cell for a child pointer: NIL, the hash of a cell that is new, or a
-    ref to the block that holds a cell that is not rewritten.
+    """
+    Create cell for child pointer.
 
-    A loaded child that is not changed is written as it was stored, so the
-    pointer keeps the block it came from; a changed one is new.
+    Args:
+        child: Child bloom node.
+        h: Hash value.
+        block: Block reference.
     """
     if child is not None:
         h = child.expr().hash()
@@ -31,13 +38,11 @@ def _child_item(child: BloomNode | None, h: bytes | None, block: bytes | None) -
 
 
 def bloom_node_to_expr(node: BloomNode) -> Expr:
-    """Serialize a BloomNode to an Expr.
+    """
+    Serialize a BloomNode to an Expr.
 
-    Format: Link(block_ref, Link(left_ref, Link(right_ref, Link(bloom_filter, NIL))))
-    block_ref = NIL when absent, Link(head_hash=start_hash) when set.
-    A child pointer is NIL when absent, Link(head_hash=child) for a child that
-    is new in this block and ``(block_id child ref)`` for one that is older
-    (docs/plans/2026-10-08-refs-in-tries.md).
+    Args:
+        node: Bloom node to serialize.
     """
     block_ref = _ref(node.start_hash)
     left_ref = _child_item(node.left, node._left_hash, node._left_block)
@@ -88,15 +93,15 @@ def bloom_node_from_expr(
     contact=None,
     level: int | None = None,
 ) -> BloomNode:
-    """Deserialize a BloomNode from an Expr.
+    """
+    Deserialize a BloomNode from an Expr.
 
-    The cells of *expr* are read as loaded; any that is only a hash is fetched
-    with *astreum_node* from the provider of *block*, the block whose record
-    holds *expr* (a child written as a ref names its own block). Without a
-    node nothing is fetched.
-
-    *level* is the node's depth in its tree (the root is 0); a leaf is level
-    10. When not given it is 10 for a node without children, else 0.
+    Args:
+        expr: Expression to deserialize.
+        astreum_node: Astreum node for fetching.
+        block: Block holding the expression.
+        contact: Peer contact.
+        level: Node level in tree.
     """
     part = cell_reader(astreum_node, block, contact)
 

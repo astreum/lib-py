@@ -9,6 +9,11 @@ from astreum.storage.radix import RadixTree, clone_radix_tree, get_radix_node_ex
 
 
 def _root_item(root_hash: bytes, block: Optional[bytes]) -> Expr:
+
+    Args:
+        root_hash (bytes): Description.
+        block (Optional[bytes]): Description.
+
     if root_hash == ZERO32:
         return Expr("link", head_hash=ZERO32)
     return pointer_item(root_hash, block)
@@ -34,6 +39,10 @@ class Account:
     _expr: Optional["Expr"] = field(default=None, repr=False)
 
     def to_expr(self) -> "Expr":
+
+        Args:
+            None.
+
         detail: Expr = link(int_(self.balance), NIL)
         detail = link(_root_item(self.channels_hash, self.channels_block), detail)
         detail = link(_root_item(self.code_hash, self.code_block), detail)
@@ -43,17 +52,29 @@ class Account:
 
     def state_key(self) -> tuple:
         """The fields that make up the account's encoding."""
+
+        Args:
+            None.
+
         return (
             self.balance, self.counter, self.data_hash, self.code_hash, self.channels_hash,
         )
 
     def expr(self) -> "Expr":
+
+        Args:
+            None.
+
         if self._expr is not None:
             return self._expr
         self._expr = self.to_expr()
         return self._expr
 
     def clone(self) -> "Account":
+
+        Args:
+            None.
+
         cloned = Account(
             balance=self.balance,
             code_hash=self.code_hash,
@@ -74,6 +95,10 @@ class Account:
 
 def extract_account_exprs(account: Account) -> list[Expr]:
     """Collect every expr that must be in storage to reconstruct an Account."""
+
+    Args:
+        account (Account): Description.
+
     exprs: list[Expr] = [account.expr()]
     for node in account.data.nodes.values():
         exprs.append(get_radix_node_expr(node))

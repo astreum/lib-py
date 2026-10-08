@@ -9,12 +9,27 @@ if TYPE_CHECKING:
 
 
 def _evaluation(machine, expr, stack, env):
-    """Lazy import to break circular dependency."""
+    """Lazy import to break circular dependency.
+    
+    Args:
+        machine: The machine instance.
+        expr: The expression to evaluate.
+        stack: The evaluation stack.
+        env: The environment.
+    """
     from astreum.machine.evaluator import evaluation
     return evaluation(machine, expr, stack, env)
 
 
 def is_truthy(expr: Expr) -> bool:
+    """Check if an expression is truthy.
+    
+    Args:
+        expr: The expression to test.
+    
+    Returns:
+        True if the expression is truthy.
+    """
     tag = get_expr_tag(expr)
     if tag == "bytes":
         return int.from_bytes(expr.value, "big") != 0
@@ -30,6 +45,16 @@ def is_truthy(expr: Expr) -> bool:
 def handle_stack_if(
     machine: "Machine", stack: List[Expr], env: Env
 ) -> List[Expr]:
+    """Handle if conditional operator.
+    
+    Args:
+        machine: The machine instance.
+        stack: The evaluation stack.
+        env: The environment.
+    
+    Returns:
+        The updated stack.
+    """
     if len(stack) < 3:
         raise OpError("stack underflow")
     else_branch = stack.pop()
@@ -45,6 +70,16 @@ def handle_stack_if(
 
 
 def handle_stack_if_with_result(machine, stack, env):
+    """Handle if conditional operator with result wrapping.
+    
+    Args:
+        machine: The machine instance.
+        stack: The evaluation stack.
+        env: The environment.
+    
+    Returns:
+        The updated stack with result wrapped in ok/err tag.
+    """
     try:
         stack = handle_stack_if(machine, stack, env)
         top = stack.pop()

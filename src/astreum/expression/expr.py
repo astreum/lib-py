@@ -25,19 +25,53 @@ HASH_BYTE_BYTES = b"\x02"
 
 
 def _terminal_hash(tag_byte: bytes, data: bytes) -> bytes:
+    """Compute hash for a terminal expression (symbol or bytes).
+    
+    Args:
+        tag_byte: The type tag byte.
+        data: The data to hash.
+    
+    Returns:
+        The computed hash.
+    """
     return blake3(tag_byte + blake3(data).digest()).digest()
 
 
 def _link_hash(head_hash: bytes, tail_hash: bytes) -> bytes:
+    """Compute hash for a link expression.
+    
+    Args:
+        head_hash: Hash of the head expression.
+        tail_hash: Hash of the tail expression.
+    
+    Returns:
+        The computed hash.
+    """
     return blake3(HASH_BYTE_LINK + blake3(head_hash + tail_hash).digest()).digest()
 
 
 def _encode_int(value: int) -> bytes:
+    """Encode an integer to bytes.
+    
+    Args:
+        value: The integer value to encode.
+    
+    Returns:
+        The encoded bytes.
+    """
     n = max(1, (value.bit_length() + 8) // 8)
     return value.to_bytes(n, "little", signed=True)
 
 
 def _decode_int(data: bytes) -> int:
+    """Decode bytes to an integer.
+    
+    Args:
+        data: The bytes to decode.
+    
+    Returns:
+        The decoded integer.
+    """
     return int.from_bytes(data, "little", signed=True)
 
 
@@ -110,6 +144,14 @@ _BUILTIN_TYPE_HASH = {
 
 
 def _get_head_hash(expr: Expr) -> bytes:
+    """Get the head hash of an expression.
+    
+    Args:
+        expr: The expression to get the head hash from.
+    
+    Returns:
+        The head hash or ZERO32 if nil.
+    """
     if expr.head_hash is not None:
         return expr.head_hash
     if expr.value is not None and expr.tail is not None and expr.tail.base == "symbol":
@@ -124,6 +166,14 @@ def _get_head_hash(expr: Expr) -> bytes:
 
 
 def _get_tail_hash(expr: Expr) -> bytes:
+    """Get the tail hash of an expression.
+    
+    Args:
+        expr: The expression to get the tail hash from.
+    
+    Returns:
+        The tail hash or ZERO32 if nil.
+    """
     if expr.tail_hash is not None:
         return expr.tail_hash
     if expr.tail is NIL:
@@ -137,6 +187,16 @@ class Expr:
     __slots__ = ("base", "value", "head", "tail", "head_hash", "tail_hash", "_hash", "_size")
 
     def __init__(self, base, value=None, head=None, tail=None, head_hash=None, tail_hash=None):
+        """Initialize an expression.
+        
+        Args:
+            base: The base type ("link", "symbol", or "bytes").
+            value: Optional value for terminal expressions.
+            head: Optional head expression for links.
+            tail: Optional tail expression for links.
+            head_hash: Optional hash of the head expression.
+            tail_hash: Optional hash of the tail expression.
+        """
         self.base = base
         self.value = value
         self.head = head
@@ -215,6 +275,11 @@ class Expr:
             return f"#<{self._tag} {self._value}>"
 
     def _repr_link(self) -> str:
+        """Represent a link expression as a string.
+        
+        Returns:
+            String representation of the link.
+        """
         if self is NIL:
             return "nil"
 
@@ -247,6 +312,11 @@ class Expr:
         return f"({' '.join(parts)})"
 
     def _hash_of_encoded(self) -> bytes:
+        """Compute hash from encoded value.
+        
+        Returns:
+            The computed hash or ZERO32.
+        """
         encoder = TAG_BYTE_ENCODINGS.get(self._tag)
         if encoder is None:
             if self._value is not None and hasattr(self._value, "hash"):
@@ -255,10 +325,11 @@ class Expr:
         return _terminal_hash(HASH_BYTE_BYTES, encoder(self._value))
 
     def hash(self):
-        # nil is referenced as ZERO32 everywhere else (a nil child hashes to
-        # ZERO32, get_expr(ZERO32) returns NIL), so nil's own hash is ZERO32.
-        # Identity, not structure: link(NIL, NIL) is a real node and keeps its
-        # own hash.
+        """Compute and cache the hash of the expression.
+        
+        Returns:
+            The hash of the expression.
+        """
         if self is NIL:
             return ZERO32
 
@@ -277,18 +348,21 @@ class Expr:
             self._hash = _terminal_hash(HASH_BYTE_BYTES, self.value)
             return self._hash
 
-        # Only reachable if base is unexpectedly wrong.
         head_hash = self._value.hash() if self._value is not None else ZERO32
         tail_hash = _terminal_hash(HASH_BYTE_SYMBOL, self.base.encode("utf-8"))
         self._hash = _link_hash(head_hash, tail_hash)
         return self._hash
 
     def size(self):
+        """Compute and cache the size of the expression.
+        
+        Returns:
+            The size in bytes.
+        """
         if self._size is not None:
             return self._size
 
         if self.base == "link":
-            # Builtin composite — use payload size
             if self.value is not None and self.tail is not None and self.tail.base == "symbol":
                 encoder = TAG_BYTE_ENCODINGS.get(self.tail.value)
                 if encoder is not None:
@@ -297,7 +371,6 @@ class Expr:
             if self.head is not None and self.head.base == "bytes":
                 self._size = len(self.head.value)
                 return self._size
-            # Pair link
             h = self.head.size() if self.head is not None else 32
             if self.head_hash is not None:
                 h = 32
@@ -315,7 +388,6 @@ class Expr:
             self._size = len(self.value)
             return self._size
 
-        # Fallback for unexpected base values (legacy tag compatibility)
         encoder = TAG_BYTE_ENCODINGS.get(self.base)
         if encoder is not None:
             self._size = len(encoder(self._value))
@@ -330,6 +402,11 @@ class Expr:
         return 0
 
     def resolution(self) -> int:
+        """Get the resolution level of the expression.
+        
+        Returns:
+            RESOLUTION_SINGLE, RESOLUTION_LIST, or RESOLUTION_FULL.
+        """
         if self.base != "link":
             return RESOLUTION_SINGLE
         hh = self.head_hash
@@ -386,22 +463,63 @@ TYPE_SYMBOLS = {
 # =============================================================================
 
 def int_(value: int) -> Expr:
+    """Create an integer expression.
+    
+    Args:
+        value: The integer value.
+    
+    Returns:
+        An integer expression.
+    """
     return Expr("link", value=value, tail=INT_SYMBOL)
 
 
 def str_(value: str) -> Expr:
+    """Create a string expression.
+    
+    Args:
+        value: The string value.
+    
+    Returns:
+        A string expression.
+    """
     return Expr("link", value=value, tail=STR_SYMBOL)
 
 
 def symbol(value: str) -> Expr:
+    """Create a symbol expression.
+    
+    Args:
+        value: The symbol value.
+    
+    Returns:
+        A symbol expression.
+    """
     return Expr("symbol", value=value)
 
 
 def bytes_(value: bytes) -> Expr:
+    """Create a bytes expression.
+    
+    Args:
+        value: The bytes value.
+    
+    Returns:
+        A bytes expression.
+    """
     return Expr("bytes", value=value)
 
 
 def link(head, tail) -> Expr:
+    """Create a link expression.
+    
+    Args:
+        head: The head expression or None.
+        tail: The tail expression or None.
+    
+    Returns:
+        A link expression.
+    """
     return Expr("link", head=head, tail=tail)
 
 
@@ -410,6 +528,14 @@ def link(head, tail) -> Expr:
 # =============================================================================
 
 def collect_list(expr: Expr) -> list:
+    """Collect a linked list into a Python list.
+    
+    Args:
+        expr: The head of the linked list.
+    
+    Returns:
+        List of expressions in the linked list.
+    """
     result = [expr]
     current = expr
     while current.base == "link" and current.tail is not None:
@@ -419,6 +545,14 @@ def collect_list(expr: Expr) -> list:
 
 
 def collect_full(expr: Expr) -> list:
+    """Collect all expressions in a tree, avoiding cycles.
+    
+    Args:
+        expr: The root expression.
+    
+    Returns:
+        List of all expressions in the tree.
+    """
     result = []
     visited = set()
 

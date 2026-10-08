@@ -32,6 +32,14 @@ _PRICE_MOVEMENT_TABLE: tuple[tuple[float, float], ...] = (
 
 
 def _clamp01(value: float) -> float:
+    """Clamp a value to the range [0.0, 1.0].
+
+    Args:
+        value: The value to clamp.
+
+    Returns:
+        The clamped value.
+    """
     if value <= 0.0:
         return 0.0
     if value >= 1.0:
@@ -40,6 +48,14 @@ def _clamp01(value: float) -> float:
 
 
 def _incoming_queue_pressure(node: "Node") -> float:
+    """Compute the incoming queue pressure as a ratio of size to limit.
+
+    Args:
+        node: A Node instance with incoming queue metrics.
+
+    Returns:
+        Queue pressure in range [0.0, 1.0].
+    """
     with node.incoming_queue_size_lock:
         size = int(node.incoming_queue_size or 0)
         limit = int(node.incoming_queue_size_limit or 0)
@@ -50,6 +66,14 @@ def _incoming_queue_pressure(node: "Node") -> float:
 
 
 def _price_movement_factor_for_pressure(pressure: float) -> float:
+    """Return the price adjustment factor for a given queue pressure.
+
+    Args:
+        pressure: Queue pressure in range [0.0, 1.0].
+
+    Returns:
+        Price movement factor (e.g., 1.04 for +4%, 0.96 for -4%).
+    """
     p = _clamp01(float(pressure))
     for threshold, factor in _PRICE_MOVEMENT_TABLE:
         if p <= threshold:
@@ -58,6 +82,11 @@ def _price_movement_factor_for_pressure(pressure: float) -> float:
 
 
 def _update_storage_request_price(node: "Node") -> None:
+    """Adjust storage request price based on queue pressure.
+
+    Args:
+        node: A Node instance with storage request pricing state.
+    """
     pressure = _incoming_queue_pressure(node)
     factor = _price_movement_factor_for_pressure(pressure)
     previous_price = node.storage_request_current_price
@@ -77,7 +106,14 @@ def _update_storage_request_price(node: "Node") -> None:
 
 def _long_term_store_one(node: "Node") -> bool:
     """Process one storage-index entry per call: skip if already in the
-    records table, otherwise fetch the data and store it (cold + records)."""
+    records table, otherwise fetch the data and store it (cold + records).
+
+    Args:
+        node: A Node instance with storage and long-term storage enabled.
+
+    Returns:
+        True if an entry was processed, False otherwise.
+    """
     if not node.long_term_storage:
         return False
 
@@ -125,6 +161,9 @@ def advertise_storage(astreum_node: "Node") -> None:
     Args:
         astreum_node: A Node instance with storage and communication infrastructure
             already initialized (``setup_storage`` must have been called).
+
+    Returns:
+        None. Runs indefinitely until ``communication_stop_event`` is set.
     """
     price_interval = float(astreum_node.config.get("storage_request_price_interval") or 0)
     prune_interval = float(astreum_node.config.get("expr_request_ttl") or 0)

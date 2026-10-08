@@ -7,6 +7,10 @@ from astreum.communication.models.peer import get_peer
 
 def validator_peers(node: Any) -> Dict[bytes, Any]:
     """Connected validator peers (with an address), keyed by public key."""
+
+    Args:
+        node (Any): Description.
+
     validation_route = getattr(node, "validation_route", None)
     if validation_route is None:
         return {}

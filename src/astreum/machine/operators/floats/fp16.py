@@ -14,6 +14,11 @@ def handle_stack_fp16(machine, stack: List[Expr], env) -> None:
     - int: convert to float then encode
     - fp16: passthrough
     - other float types: error (strict)
+    
+    Args:
+        machine: The machine instance.
+        stack: The evaluation stack.
+        env: The environment.
     """
     v = stack.pop()
     tag = get_expr_tag(v)
@@ -58,6 +63,13 @@ def handle_stack_fp16(machine, stack: List[Expr], env) -> None:
 
 
 def handle_stack_fp16_with_result(machine, stack, env):
+    """Convert value to fp16 with result wrapping.
+    
+    Args:
+        machine: The machine instance.
+        stack: The evaluation stack.
+        env: The environment.
+    """
     try:
         handle_stack_fp16(machine, stack, env)
         result = stack.pop()

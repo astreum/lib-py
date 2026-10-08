@@ -29,6 +29,17 @@ from astreum.storage.cold.collate import _next_collated_number
 
 
 def _iter_index_entries(index_path: Path):
+    """Iterate over entries in an index file.
+
+    Args:
+        index_path: Path to the index file.
+
+    Yields:
+        Tuples of (expr_id, position, size) for each entry.
+
+    Raises:
+        ValueError: If the index file is malformed.
+    """
     with index_path.open("rb") as index_file:
         count_bytes = index_file.read(64)
         if len(count_bytes) != 64:

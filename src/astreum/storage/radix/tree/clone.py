@@ -5,6 +5,14 @@ from astreum.storage.radix.tree.model import RadixTree
 
 
 def clone_radix_tree(tree: RadixTree) -> RadixTree:
+    """Create a deep copy of a radix tree.
+
+    Args:
+        tree: The radix tree to clone.
+
+    Returns:
+        A new RadixTree with the same data.
+    """
     cloned = RadixTree(
         root_hash=None if tree.root_hash is None else tree.root_hash,
         contact=tree.contact,

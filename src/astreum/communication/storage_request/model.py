@@ -23,15 +23,22 @@ SCOPED_FLAG = 0x80
 
 
 def max_get_entries(budget_bytes: int) -> int:
-    """Return how many entries fit in one STORAGE_GET datagram of at most
-    *budget_bytes* on the wire (message framing and request code included).
-    Counted at the scoped size, the worst case, so any batch fits."""
+    """Return how many entries fit in one STORAGE_GET datagram of at most *budget_bytes* on the wire (message framing and request code included).
+
+    Counted at the scoped size, the worst case, so any batch fits.
+
+    Args:
+        budget_bytes (int): The maximum byte budget for the datagram.
+    """
     return (budget_bytes - MESSAGE_FRAMING_BYTES - 1 - GET_HEADER_BYTES) // SCOPED_GET_ENTRY_BYTES
 
 
 def max_batch_entries(budget_bytes: int) -> int:
-    """Return how many entries fit in one STORAGE_PUT datagram of at most
-    *budget_bytes* on the wire (message framing and request code included)."""
+    """Return how many entries fit in one STORAGE_PUT datagram of at most *budget_bytes* on the wire (message framing and request code included).
+
+    Args:
+        budget_bytes (int): The maximum byte budget for the datagram.
+    """
     return (budget_bytes - MESSAGE_FRAMING_BYTES - 1 - BATCH_HEADER_BYTES) // BATCH_ENTRY_BYTES
 
 
@@ -50,9 +57,19 @@ class StorageRequest:
         payload_type: int | None = None,
         entries: list[tuple] | None = None,
     ):
-        """*entries* are ``(expr_id, payload_type)`` for STORAGE_PUT. For
+        """Initialize a StorageRequest.
+
+        *entries* are ``(expr_id, payload_type)`` for STORAGE_PUT. For
         STORAGE_GET they are ``(expr_id, resolution, block_hash | None)``; a
-        2-tuple is taken as unscoped."""
+        2-tuple is taken as unscoped.
+
+        Args:
+            code (StorageRequestCode): The request type code.
+            data (bytes): The provider payload for STORAGE_PUT. Defaults to b"".
+            expr_id (bytes): The expression ID. Defaults to None.
+            payload_type (int | None): The payload type. Defaults to None.
+            entries (list[tuple] | None): The entry list. Defaults to None.
+        """
         self.code = code
         self.data = data
         self.expr_id = expr_id
@@ -64,6 +81,14 @@ class StorageRequest:
         self.entries = entries
 
     def to_bytes(self):
+        """Encode the storage request to bytes.
+
+        Args:
+            None
+
+        Returns:
+            bytes: The encoded request bytes.
+        """
         if self.code == StorageRequestCode.STORAGE_PUT:
             return self._put_to_bytes()
         if self.code == StorageRequestCode.STORAGE_GET:
@@ -71,6 +96,14 @@ class StorageRequest:
         raise ValueError(f"Cannot encode StorageRequestCode {self.code!r}")
 
     def _get_to_bytes(self) -> bytes:
+        """Encode a STORAGE_GET request to bytes.
+
+        Args:
+            None
+
+        Returns:
+            bytes: The encoded STORAGE_GET bytes.
+        """
         if not self.entries:
             raise ValueError("STORAGE_GET requires at least one entry")
         if len(self.entries) > 0xFFFF:
@@ -96,6 +129,14 @@ class StorageRequest:
         return body
 
     def _put_to_bytes(self) -> bytes:
+        """Encode a STORAGE_PUT request to bytes.
+
+        Args:
+            None
+
+        Returns:
+            bytes: The encoded STORAGE_PUT bytes.
+        """
         if len(self.data) != PROVIDER_PAYLOAD_BYTES:
             raise ValueError(
                 f"STORAGE_PUT provider payload must be {PROVIDER_PAYLOAD_BYTES} bytes"
@@ -122,6 +163,14 @@ class StorageRequest:
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "StorageRequest":
+        """Decode a storage request from bytes.
+
+        Args:
+            data (bytes): The encoded request bytes.
+
+        Returns:
+            StorageRequest: The decoded storage request.
+        """
         if len(data) < 1:
             raise ValueError("Too short for StorageRequest (0 bytes)")
 
@@ -140,6 +189,14 @@ class StorageRequest:
 
     @classmethod
     def _get_from_bytes(cls, data: bytes) -> "StorageRequest":
+        """Decode a STORAGE_GET request from bytes.
+
+        Args:
+            data (bytes): The encoded STORAGE_GET bytes.
+
+        Returns:
+            StorageRequest: The decoded storage request.
+        """
         if len(data) > MAX_INLINE_MESSAGE_BYTES:
             raise ValueError(
                 f"STORAGE_GET too large ({len(data)} > {MAX_INLINE_MESSAGE_BYTES})"
@@ -176,6 +233,14 @@ class StorageRequest:
 
     @classmethod
     def _put_from_bytes(cls, data: bytes) -> "StorageRequest":
+        """Decode a STORAGE_PUT request from bytes.
+
+        Args:
+            data (bytes): The encoded STORAGE_PUT bytes.
+
+        Returns:
+            StorageRequest: The decoded storage request.
+        """
         if len(data) > MAX_INLINE_MESSAGE_BYTES:
             raise ValueError(
                 f"STORAGE_PUT too large ({len(data)} > {MAX_INLINE_MESSAGE_BYTES})"

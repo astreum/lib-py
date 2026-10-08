@@ -5,6 +5,12 @@ from astreum.consensus.block.rate_window import windowed_rate_fraction
 
 def calculate_discount_rate(block: object, node=None, range_blocks: int = 0) -> float:
     """Calculate the discount rate over a window of *range_blocks* (default 0 = all-time)."""
+
+    Args:
+        block (object): Description.
+        node: Description.
+        range_blocks (int): Description.
+
     if node is not None and block.previous_block is None:
         prev_hash = getattr(block, "previous_block_hash", None)
         if prev_hash:
@@ -25,6 +31,11 @@ def calculate_discount_rate(block: object, node=None, range_blocks: int = 0) -> 
 
 def calculate_storage_fee(block: object, total_bytes: int) -> int:
     """Calculate storage fee from the previous block."""
+
+    Args:
+        block (object): Description.
+        total_bytes (int): Description.
+
     previous_block = block.previous_block
     if previous_block is None:
         # TODO: return None instead of 0, propagate None through

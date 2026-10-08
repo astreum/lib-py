@@ -9,6 +9,14 @@ from astreum.expression.encoding import encode_expr_to_bytes
 
 
 def _level_size(level_path: Path) -> int | None:
+    """Sum the sizes of all files in a level directory.
+
+    Args:
+        level_path: Path to the level directory.
+
+    Returns:
+        Total size in bytes, or None on error.
+    """
     total = 0
     for entry in level_path.iterdir():
         try:
@@ -20,6 +28,18 @@ def _level_size(level_path: Path) -> int | None:
 
 
 def _level_limit(node: Any, level: int) -> int:
+    """Return the size limit for a given level (base × 10^level).
+
+    Args:
+        node: A Node instance providing config.
+        level: The level number (>= 0).
+
+    Returns:
+        The size limit in bytes for that level.
+
+    Raises:
+        ValueError: If cold_storage_base_size is missing or invalid.
+    """
     try:
         base_limit = int(node.config["cold_storage_base_size"])
     except (TypeError, ValueError) as exc:

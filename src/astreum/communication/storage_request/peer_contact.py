@@ -9,6 +9,9 @@ def encode_peer_contact_bytes(peer: "Peer") -> bytes:
     """Return a fixed-width peer contact payload (70 bytes).
 
     Format: Ed25519_storage(32) + X25519_relay(32) + IPv4(4) + port(2)
+
+    Args:
+        peer (Peer): The peer to encode contact information for.
     """
     host, port = peer.address
     storage_key_bytes = peer.public_key_bytes

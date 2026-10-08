@@ -10,11 +10,26 @@ if TYPE_CHECKING:
 
 
 def _evaluation(machine, expr, stack, env):
+    """Lazy import to break circular dependency.
+    
+    Args:
+        machine: The machine instance.
+        expr: The expression to evaluate.
+        stack: The evaluation stack.
+        env: The environment.
+    """
     from astreum.machine.evaluator import evaluation
     return evaluation(machine, expr, stack, env)
 
 
 def handle_stack_apply(machine: "Machine", stack: List[Expr], env) -> None:
+    """Apply a function to arguments from the stack.
+    
+    Args:
+        machine: The machine instance.
+        stack: The evaluation stack.
+        env: The environment.
+    """
     if not stack:
         raise OpError("stack underflow")
     fn_val = stack.pop()
@@ -67,6 +82,13 @@ def handle_stack_apply(machine: "Machine", stack: List[Expr], env) -> None:
 
 
 def handle_stack_apply_with_result(machine, stack, env):
+    """Apply a function with result wrapping.
+    
+    Args:
+        machine: The machine instance.
+        stack: The evaluation stack.
+        env: The environment.
+    """
     try:
         handle_stack_apply(machine, stack, env)
         result = stack.pop()

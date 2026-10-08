@@ -15,6 +15,16 @@ PAGE_ENTRY_BUDGET = MAX_INLINE_MESSAGE_BYTES - _RESPONSE_HEADER_BYTES - _PAGE_HE
 
 
 def _build_page(page: int, total: int, entries: List[bytes]) -> bytes:
+    """Build a single STORAGE_FOUND page payload.
+
+    Args:
+        page (int): The 1-based page number.
+        total (int): The total number of pages.
+        entries (List[bytes]): The list of encoded expression bytes.
+
+    Returns:
+        bytes: The encoded page payload.
+    """
     parts = [
         bytes([STORAGE_FOUND_PAYLOAD]),
         page.to_bytes(2, "big", signed=False),
@@ -41,6 +51,10 @@ def encode_found_pages(
     root goes first in page 1; the rest are packed greedily in order. A
     non-root expr too large for a page is skipped (``on_skip(expr,
     encoded_len)`` is called); an oversized root raises ``ValueError``.
+
+    Args:
+        exprs (List[Expr]): The list of expressions to encode (root first).
+        on_skip (Optional[Callable[[Expr, int], None]]): Callback for skipped exprs.
     """
     if not exprs:
         raise ValueError("no exprs to page")
@@ -71,7 +85,11 @@ def encode_found_pages(
 
 
 def decode_found_page(payload: bytes) -> Tuple[int, int, List[Expr]]:
-    """Decode a page payload (including the type byte) to ``(page, total, exprs)``."""
+    """Decode a page payload (including the type byte) to ``(page, total, exprs)``.
+
+    Args:
+        payload (bytes): The page payload including the type byte.
+    """
     if len(payload) < _PAGE_HEADER_BYTES:
         raise ValueError("truncated page header")
     if payload[0] != STORAGE_FOUND_PAYLOAD:
@@ -106,6 +124,10 @@ def decode_found_page(payload: bytes) -> Tuple[int, int, List[Expr]]:
 
 
 def found_page_expr_bytes(payload: bytes) -> int:
-    """Total expr bytes carried by a page payload (excludes framing)."""
+    """Total expr bytes carried by a page payload (excludes framing).
+
+    Args:
+        payload (bytes): The page payload to measure.
+    """
     count = int.from_bytes(payload[5:7], "big", signed=False)
     return len(payload) - _PAGE_HEADER_BYTES - 4 * count

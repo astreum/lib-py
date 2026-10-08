@@ -6,6 +6,11 @@ from pathlib import Path
 
 
 def _cleanup_temp(*paths: Path) -> None:
+    """Remove temporary files if they exist.
+
+    Args:
+        *paths: Paths to temporary files to remove.
+    """
     for path in paths:
         try:
             if path.exists():
@@ -15,6 +20,11 @@ def _cleanup_temp(*paths: Path) -> None:
 
 
 def _fsync_dir(path: Path) -> None:
+    """Fsync a directory to ensure durability of file operations.
+
+    Args:
+        path: Path to the directory.
+    """
     try:
         dir_fd = os.open(path, os.O_RDONLY)
     except OSError:
@@ -37,6 +47,14 @@ def _fsync_dir(path: Path) -> None:
 
 
 def _next_collated_number(l1_path: Path) -> int:
+    """Determine the next available collated file number in level_1.
+
+    Args:
+        l1_path: Path to the level_1 directory.
+
+    Returns:
+        The next available file number.
+    """
     max_number = -1
     for path in l1_path.glob("*_index"):
         prefix = path.name.split("_", 1)[0]

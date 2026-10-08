@@ -25,6 +25,10 @@ from astreum.crypto.bloom_tree import BloomTree
 
 
 def _hex(value: Optional[bytes]) -> str:
+
+    Args:
+        value (Optional[bytes]): Description.
+
     if isinstance(value, (bytes, bytearray)):
         return value.hex()
     return str(value)
@@ -32,6 +36,11 @@ def _hex(value: Optional[bytes]) -> str:
 
 def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str]]:
     """Verify receipts, transactions, and accounts hashes for this block."""
+
+    Args:
+        node (Any): Description.
+        block (Any): Description.
+
     if node is None:
         raise ValueError("node required for block verification")
 
@@ -57,6 +66,10 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         return False, "missing accounts_hash"
 
     def _load_hash_list(head: bytes) -> Optional[List[bytes]]:
+
+        Args:
+            head (bytes): Description.
+
         if head == ZERO32:
             return []
         expr = get_expr_list(node, head, contact=block.contact, block_hash=block.expr_id)

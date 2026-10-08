@@ -29,11 +29,22 @@ class PendingAd(NamedTuple):
 
 
 def init_pending_ads(node: Any) -> None:
+
+    Args:
+        node (Any): Description.
+
     node.pending_ads = deque(maxlen=MAX_PENDING_ADS)
 
 
 def queue_ads(node: Any, height: int, block_hash: bytes, ids: list[bytes]) -> None:
     """Hold *ids*, committed by the block at *height*, until it is adopted."""
+
+    Args:
+        node (Any): Description.
+        height (int): Description.
+        block_hash (bytes): Description.
+        ids (list[bytes]): Description.
+
     if not ids:
         return
     if getattr(node, "pending_ads", None) is None:
@@ -42,6 +53,10 @@ def queue_ads(node: Any, height: int, block_hash: bytes, ids: list[bytes]) -> No
 
 
 def _block_hash(block: Any) -> Optional[bytes]:
+
+    Args:
+        block (Any): Description.
+
     expr_id = getattr(block, "expr_id", None)
     if expr_id and expr_id != ZERO32:
         return expr_id
@@ -58,6 +73,12 @@ def _hash_at_height(node: Any, head: Any, height: int) -> Optional[bytes]:
 
     None if the chain cannot be followed that far from what this node holds.
     """
+
+    Args:
+        node (Any): Description.
+        head (Any): Description.
+        height (int): Description.
+
     from astreum.consensus.block.encoding.decode import get_block_from_storage
 
     block = head
@@ -83,6 +104,10 @@ def flush_ads(node: Any) -> list[bytes]:
     head passes through it. A block the chain skips lost a fork and is dropped
     unsent, as is one that cannot be placed after ``MAX_PENDING_AD_AGE`` blocks.
     """
+
+    Args:
+        node (Any): Description.
+
     pending = getattr(node, "pending_ads", None)
     if not pending:
         return []

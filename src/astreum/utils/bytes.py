@@ -2,7 +2,22 @@ from typing import Optional
 
 
 def hex_to_bytes(value: str, *, expected_length: Optional[int] = None) -> bytes:
-    """Convert a 0x-prefixed hex string into raw bytes."""
+    """Convert a 0x-prefixed hex string into raw bytes.
+
+    Args:
+        value: 0x-prefixed hex string to convert.
+        expected_length: Optional expected byte length. If provided, validates
+            the decoded bytes match this length.
+
+    Returns:
+        The decoded bytes.
+
+    Raises:
+        TypeError: If value is not a string.
+        ValueError: If value does not start with '0x', has odd-length hex
+            digits, contains non-hexadecimal characters, or does not match
+            expected_length.
+    """
     if not isinstance(value, str):
         raise TypeError("hex value must be provided as a string")
 

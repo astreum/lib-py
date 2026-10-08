@@ -15,6 +15,12 @@ DEFAULT_STORAGE_FOUND_MAX_PAGES = 64
 class PendingExprRequest:
     """A pending network request plus the reply pages staged for it.
 
+    Args:
+        payload_type: The requested resolution (SINGLE / LIST / FULL / RECORD).
+        expires_at: Idle deadline (``time.monotonic()``); pushed out on every
+            accepted page.
+        block_hash: Optional block hash for scoped requests.
+
     Attributes:
         payload_type: The requested resolution (SINGLE / LIST / FULL / RECORD).
         expires_at: Idle deadline (``time.monotonic()``); pushed out on every
@@ -69,6 +75,14 @@ def _live_entry(node: "Node", expr_id: bytes, now: float):
 
     Must be called with ``expr_requests_lock`` held. Only looks at the one
     hash; expired entries are left for :func:`prune_expired_expr_reqs`.
+
+    Args:
+        node: A Node instance with the ``expr_requests`` registry.
+        expr_id: The content hash being requested.
+        now: The current monotonic time.
+
+    Returns:
+        The PendingExprRequest if live, or None.
     """
     entry = node.expr_requests.get(expr_id)
     if entry is None or entry.expires_at <= now:
@@ -109,7 +123,15 @@ def claim_expr_req(
 
 
 def has_expr_req(node: "Node", expr_id: bytes) -> bool:
-    """Return True if a live (unexpired) request is tracked for ``expr_id``."""
+    """Return True if a live (unexpired) request is tracked for ``expr_id``.
+
+    Args:
+        node: A Node instance with the ``expr_requests`` registry.
+        expr_id: The content hash being requested.
+
+    Returns:
+        True if a live request exists, False otherwise.
+    """
     with node.expr_requests_lock:
         return _live_entry(node, expr_id, time.monotonic()) is not None
 
@@ -135,6 +157,17 @@ def stage_found_page(
     number is out of range; or the page was already staged. Every accepted
     page pushes the idle deadline to ``now + expr_request_ttl``. The page that
     completes the set removes the entry, so exactly one caller wins.
+
+    Args:
+        node: A Node instance with the ``expr_requests`` registry.
+        expr_id: The content hash being requested.
+        peer_key: The public key of the peer sending the page.
+        page: The page number (1-indexed).
+        total: The total number of pages declared by the sender.
+        exprs: The list of expressions in this page.
+
+    Returns:
+        A tuple of ``(StageResult, PendingExprRequest | None)``.
     """
     if total < 1 or page < 1 or page > total:
         return StageResult.IGNORED, None
@@ -166,6 +199,10 @@ def stage_found_page(
 def pop_expr_req(node: "Node", expr_id: bytes) -> Optional[int]:
     """Remove the pending request if present and return its payload type.
 
+    Args:
+        node: A Node instance with the ``expr_requests`` registry.
+        expr_id: The content hash being requested.
+
     Returns:
         The payload type the request was registered with, or ``None`` if no
         live request exists.
@@ -178,14 +215,30 @@ def pop_expr_req(node: "Node", expr_id: bytes) -> Optional[int]:
 
 
 def get_expr_req_payload(node: "Node", expr_id: bytes) -> Optional[int]:
-    """Return the payload type for a live request without removing it."""
+    """Return the payload type for a live request without removing it.
+
+    Args:
+        node: A Node instance with the ``expr_requests`` registry.
+        expr_id: The content hash being requested.
+
+    Returns:
+        The payload type, or None if no live request exists.
+    """
     with node.expr_requests_lock:
         entry = _live_entry(node, expr_id, time.monotonic())
         return None if entry is None else entry.payload_type
 
 
 def get_expr_req_block(node: "Node", expr_id: bytes) -> Optional[bytes]:
-    """Return the block a live request is scoped to, or None."""
+    """Return the block a live request is scoped to, or None.
+
+    Args:
+        node: A Node instance with the ``expr_requests`` registry.
+        expr_id: The content hash being requested.
+
+    Returns:
+        The block hash the request is scoped to, or None.
+    """
     with node.expr_requests_lock:
         entry = _live_entry(node, expr_id, time.monotonic())
         return None if entry is None else entry.block_hash
@@ -196,6 +249,12 @@ def prune_expired_expr_reqs(node: "Node") -> int:
 
     This is the only full pass over the registry; it runs from the storage
     worker thread, never on the request/response path.
+
+    Args:
+        node: A Node instance with the ``expr_requests`` registry.
+
+    Returns:
+        The number of expired requests that were removed.
     """
     with node.expr_requests_lock:
         now = time.monotonic()

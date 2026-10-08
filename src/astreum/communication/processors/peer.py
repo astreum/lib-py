@@ -14,6 +14,14 @@ if TYPE_CHECKING:
 
 
 def _queue_bootstrap_handshakes(node: "Node") -> int:
+    """Queue handshake messages to all bootstrap peers.
+
+    Args:
+        node (Node): The node instance initiating handshakes.
+
+    Returns:
+        int: The number of handshakes successfully queued.
+    """
     relay_public_key = node.relay_public_key
 
     bootstrap_peers = node.bootstrap_peers
@@ -60,7 +68,11 @@ def _queue_bootstrap_handshakes(node: "Node") -> int:
 
 
 def manage_peer(node: "Node") -> None:
-    """Continuously evict peers whose timestamps exceed the configured timeout."""
+    """Continuously evict peers whose timestamps exceed the configured timeout.
+
+    Args:
+        node (Node): The node instance managing peers.
+    """
     node.logger.info(
         "Peer manager started (timeout=%3ds, interval=%3ds)",
         node.config["peer_timeout"],

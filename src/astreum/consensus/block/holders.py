@@ -17,12 +17,21 @@ Contact = Tuple[bytes, str, int]
 
 
 def init_block_holders(node: Any) -> None:
+
+    Args:
+        node (Any): Description.
+
     node.block_holders = OrderedDict()
     node.block_holders_lock = threading.Lock()
 
 
 def block_holder(node: Any, block_hash: Optional[bytes]) -> Optional[Contact]:
     """Return the ``(relay_key, address, port)`` holding *block_hash*, or None."""
+
+    Args:
+        node (Any): Description.
+        block_hash (Optional[bytes]): Description.
+
     holders = getattr(node, "block_holders", None)
     if holders is None or not block_hash:
         return None
@@ -31,6 +40,11 @@ def block_holder(node: Any, block_hash: Optional[bytes]) -> Optional[Contact]:
 
 
 def has_block_holder(node: Any, block_hash: bytes) -> bool:
+
+    Args:
+        node (Any): Description.
+        block_hash (bytes): Description.
+
     return block_holder(node, block_hash) is not None
 
 
@@ -40,6 +54,12 @@ def record_block_holder(node: Any, block_hash: bytes, contact: Contact) -> bool:
     Keeps the first holder seen. Returns False if one was already recorded.
     Oldest entries are dropped beyond ``MAX_BLOCK_HOLDERS``.
     """
+
+    Args:
+        node (Any): Description.
+        block_hash (bytes): Description.
+        contact (Contact): Description.
+
     with node.block_holders_lock:
         if block_hash in node.block_holders:
             return False

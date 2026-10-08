@@ -168,14 +168,26 @@ class CSVTimedRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
 
 
 def _gzip_rotator(src: str, dst: str) -> None:
-    """Rotate the log file by gzipping it and removing the original."""
+    """Rotate the log file by gzipping it and removing the original.
+
+    Args:
+        src: Path to the source log file.
+        dst: Destination path for the gzipped file.
+    """
     with open(src, "rb") as source, gzip.open(f"{dst}.gz", "wb") as target:
         shutil.copyfileobj(source, target)
     os.remove(src)
 
 
 def _namer(default_name: str) -> str:
-    """Custom name for rotated logs: node-YYYY-MM-DD.ext."""
+    """Custom name for rotated logs: node-YYYY-MM-DD.ext.
+
+    Args:
+        default_name: Default rotation filename from the handler.
+
+    Returns:
+        Reformatted filename with date appended before the extension.
+    """
     path = pathlib.Path(default_name)
     parent = path.parent
     name = path.name
@@ -198,7 +210,14 @@ def _remove_legacy_recent_log(log_dir: pathlib.Path) -> None:
 
 
 def _human_line(record: logging.LogRecord) -> str:
-    """Format a record as a concise human-readable line."""
+    """Format a record as a concise human-readable line.
+
+    Args:
+        record: LogRecord to format.
+
+    Returns:
+        Formatted human-readable log line.
+    """
     dt = datetime.fromtimestamp(record.created, tz=timezone.utc)
     stamp = f"{dt:%Y-%m-%d}-{dt:%S}-{dt:%M}"
     prefix = getattr(record, "logger_name", None)
@@ -215,7 +234,12 @@ class HumanFormatter(logging.Formatter):
 
 
 def _shutdown_listener(listener: logging.handlers.QueueListener, handlers: list[logging.Handler]) -> None:
-    """Stop the queue listener and close handlers on interpreter exit."""
+    """Stop the queue listener and close handlers on interpreter exit.
+
+    Args:
+        listener: QueueListener to stop.
+        handlers: List of handlers to close.
+    """
     try:
         listener.stop()
     except Exception:
@@ -229,7 +253,16 @@ def _shutdown_listener(listener: logging.handlers.QueueListener, handlers: list[
 
 
 def _disabled_logger(product: str, instance_id: str, logger_name: str | None) -> logging.LoggerAdapter:
-    """Return a logger adapter that silently drops all log records."""
+    """Return a logger adapter that silently drops all log records.
+
+    Args:
+        product: Product name for logger namespace.
+        instance_id: Instance identifier for logger namespace.
+        logger_name: Optional logger name for extra context.
+
+    Returns:
+        LoggerAdapter with NullHandler that drops all records.
+    """
     base_logger = logging.getLogger(f"{product}.{instance_id}.disabled")
     base_logger.setLevel(logging.INFO)
     base_logger.handlers.clear()
@@ -242,7 +275,18 @@ def _disabled_logger(product: str, instance_id: str, logger_name: str | None) ->
 
 
 def logging_setup(config: dict) -> logging.LoggerAdapter:
-    """Configure logging according to the runtime config and return an adapter."""
+    """Configure logging according to the runtime config and return an adapter.
+
+    Args:
+        config: Configuration dictionary with keys:
+            - logging_retention_days: Number of days to retain log files.
+            - logging_enabled: Boolean to enable/disable logging.
+            - logger_name: Optional logger name for extra context.
+            - verbose: Boolean to enable console output.
+
+    Returns:
+        LoggerAdapter instance for logging.
+    """
     if config is None:
         config = {}
     elif not isinstance(config, dict):

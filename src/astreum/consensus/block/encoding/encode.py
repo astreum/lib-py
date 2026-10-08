@@ -15,6 +15,10 @@ def _statistics_to_expr(statistics: list | None) -> Expr:
     - entry 0: ``(prev_fee, prev_stake)``
     - entry N: ``(prev_fee, prev_stake, curr_fee, curr_stake)``
     """
+
+    Args:
+        statistics (list | None): Description.
+
     if not statistics:
         return NIL
     expr = NIL
@@ -42,6 +46,10 @@ def block_to_expr(block: Block) -> Expr:
     Returns:
         The Expr representing the serialized block.
     """
+
+    Args:
+        block (Block): Description.
+
     if block._expr is not None:
         return block._expr
     body: Expr = link(_statistics_to_expr(block.statistics), NIL)

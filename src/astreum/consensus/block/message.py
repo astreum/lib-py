@@ -38,6 +38,10 @@ def block_header_exprs(block_expr: Expr) -> List[Expr]:
     storage or the network. The encoded value of each builtin composite (int,
     ...) is included as its own bytes expr.
     """
+
+    Args:
+        block_expr (Expr): Description.
+
     result: List[Expr] = []
     seen: set[bytes] = set()
     stack: List[Expr] = [block_expr]
@@ -79,10 +83,20 @@ def encode_block_message(provider_payload: bytes, block_expr: Expr) -> bytes:
         ValueError: if the provider payload is not 70 bytes or the header does
             not fit one datagram.
     """
+
+    Args:
+        provider_payload (bytes): Description.
+        block_expr (Expr): Description.
+
     if len(provider_payload) != PROVIDER_PAYLOAD_BYTES:
         raise ValueError("provider payload must be 70 bytes")
 
     def _no_skip(expr: Expr, size: int) -> None:
+
+        Args:
+            expr (Expr): Description.
+            size (int): Description.
+
         raise ValueError("block header expr too large for one page")
 
     pages = encode_found_pages(block_header_exprs(block_expr), on_skip=_no_skip)
@@ -103,6 +117,10 @@ def decode_block_message(content: bytes) -> Optional[Tuple[Contact, List[Expr]]]
     flat (hash references, as stored), so the first one's ``hash()`` is the
     block hash.
     """
+
+    Args:
+        content (bytes): Description.
+
     if not content or len(content) <= PROVIDER_PAYLOAD_BYTES:
         return None
     try:
