@@ -17,13 +17,13 @@ class PendingExprRequest:
 
     Args:
         payload_type: The requested resolution (SINGLE / LIST / FULL / RECORD).
-        expires_at: Idle deadline (``time.monotonic()``); pushed out on every
+        expires_at: Idle deadline (``time.monotonic()``). Pushed out on every
             accepted page.
         block_hash: Optional block hash for scoped requests.
 
     Attributes:
         payload_type: The requested resolution (SINGLE / LIST / FULL / RECORD).
-        expires_at: Idle deadline (``time.monotonic()``); pushed out on every
+        expires_at: Idle deadline (``time.monotonic()``). Pushed out on every
             accepted page.
         sender: Peer key of the first accepted page, ``None`` until then.
         total: Page count declared by the first accepted page.
@@ -74,7 +74,7 @@ def _live_entry(node: "Node", expr_id: bytes, now: float):
     """Return the entry for ``expr_id`` or ``None`` if missing/expired.
 
     Must be called with ``expr_requests_lock`` held. Only looks at the one
-    hash; expired entries are left for :func:`prune_expired_expr_reqs`.
+    hash. Expired entries are left for :func:`prune_expired_expr_reqs`.
 
     Args:
         node: A Node instance with the ``expr_requests`` registry.
@@ -147,14 +147,14 @@ def stage_found_page(
     """Stage one STORAGE_FOUND page on the pending request for ``expr_id``.
 
     Bookkeeping only (one lock acquisition, no decoding or storage writes).
-    Returns ``(result, request)``; ``request`` is the popped
+    Returns ``(result, request)``. ``request`` is the popped
     :class:`PendingExprRequest` when the result is ``COMPLETE``, else ``None``.
 
     A page is ignored, changing nothing on the entry, when: the request is
-    missing or expired; the first page declares more than
-    ``storage_found_max_pages`` pages; the sender is not the one bound by the
-    first accepted page; ``total`` differs from the first page's; the page
-    number is out of range; or the page was already staged. Every accepted
+    missing or expired. The first page declares more than
+    ``storage_found_max_pages`` pages. The sender is not the one bound by the
+    first accepted page. ``total`` differs from the first page's. The page
+    number is out of range. Or the page was already staged. Every accepted
     page pushes the idle deadline to ``now + expr_request_ttl``. The page that
     completes the set removes the entry, so exactly one caller wins.
 
@@ -247,7 +247,7 @@ def get_expr_req_block(node: "Node", expr_id: bytes) -> Optional[bytes]:
 def prune_expired_expr_reqs(node: "Node") -> int:
     """Delete every expired request and return how many were removed.
 
-    This is the only full pass over the registry; it runs from the storage
+    This is the only full pass over the registry. It runs from the storage
     worker thread, never on the request/response path.
 
     Args:

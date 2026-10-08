@@ -130,7 +130,7 @@ class Receipt:
     def from_storage(
         cls, node: Any, receipt_id: bytes, contact=None, block_hash=None
     ) -> "Receipt":
-        """Load a receipt; *block_hash* is the block whose provider holds it."""
+        """Load a receipt. *block_hash* is the block whose provider holds it."""
         scope = {} if block_hash is None else {"block_hash": block_hash}
         header = get_expr_list(node, receipt_id, contact=contact, **scope)
         if header is None:

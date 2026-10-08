@@ -26,7 +26,7 @@ def handle_stack_match(
 
     Args:
         machine: The machine instance used to continue evaluation.
-        stack: The current evaluation stack; must contain at least four
+        stack: The current evaluation stack. Must contain at least four
             expressions: [..., val, succ_tag, succ_cl, fail_cl] (top to
             bottom: fail_cl, succ_cl, succ_tag, val).
         env: The environment in which the resulting closure is evaluated.

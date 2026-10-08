@@ -59,8 +59,8 @@ def put_expr_in_cold_storage(
     """Write an Expr into cold storage with automatic collation and merging.
 
     Stores the expression bytes to the table's ``level_0`` under its content
-    hash.  If ``level_0`` exceeds ``cold_storage_base_size``, triggers a
-    collation step that packs entries into higher levels.  Higher
+    hash. If ``level_0`` exceeds ``cold_storage_base_size``, triggers a
+    collation step that packs entries into higher levels. Higher
     levels that exceed their size limit (``base_size × 10^level``)
     are merged recursively.
 
@@ -71,7 +71,7 @@ def put_expr_in_cold_storage(
         node: A Node instance providing config and storage access.
         expr: The expression to persist.
         table: The cold-storage table to write into (``"exprs"`` or
-            ``"records"``); selects the on-disk subdirectory.
+            ``"records"``). Selects the on-disk subdirectory.
         size_attr: Node attribute tracking the table's current
             ``level_0`` size.
         key: Optional explicit key (file stem id) instead of ``expr.hash()``.

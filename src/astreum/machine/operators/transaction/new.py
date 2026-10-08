@@ -16,11 +16,11 @@ def handle_stack_tx_new(machine: "Machine", stack: List[Expr], env) -> None:
 
     Construct an internal (unsigned) transaction and apply its effects inline as
     part of the current contract call. The contract appears as the nested tx's
-    sender; the value transferred debits the contract's balance; execution +
+    sender. The value transferred debits the contract's balance. Execution +
     storage fees debit the outer tx sender. No separate Transaction/Receipt is
-    recorded — net effects are absorbed by the outer tx's consensus hashes
+    recorded. Net effects are absorbed by the outer tx's consensus hashes
     (replay-safe by determinism). On success pushes the nested tx's would-be
-    hash (32-byte Bytes); on failure pushes NIL.
+    hash (32-byte Bytes). On failure pushes NIL.
     """
     if len(stack) < 4:
         raise OpError("stack underflow")

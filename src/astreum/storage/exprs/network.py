@@ -144,7 +144,7 @@ def get_exprs_from_network(
 ) -> dict[bytes, Optional[Expr]]:
     """Fetch many Exprs from the P2P network, batching the requests.
 
-    Every entry goes into the request buffer; ``request_storage_thread`` sends
+    Every entry goes into the request buffer. ``request_storage_thread`` sends
     GETs for the same destination together, one ``STORAGE_GET`` per
     ``max_get_entries`` exprs. Local storage is then polled for all of them at
     once, so the waits overlap.
@@ -215,7 +215,7 @@ def get_exprs_from_network(
 def get_expr_from_network(
     node, expr_id: bytes, resolution: int = RESOLUTION_SINGLE, contact=None, block_hash=None
 ) -> Optional[Expr]:
-    """Fetch one Expr from the P2P network; a batch of one.
+    """Fetch one Expr from the P2P network. A batch of one.
 
     See :func:`get_exprs_from_network`.
 
@@ -268,7 +268,7 @@ def prefetch_exprs_from_network(
     For callers that know a whole hash list up front and would otherwise fetch
     it one hash at a time: call this first, and the existing per-item code then
     finds everything in local storage. It is an optimisation only, so it never
-    raises; whatever is still missing afterwards is fetched by the caller's
+    raises. Whatever is still missing afterwards is fetched by the caller's
     normal path.
 
     Args:

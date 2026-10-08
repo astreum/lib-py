@@ -69,7 +69,7 @@ def parse_astre_amount(text: str) -> int:
 
     Numeric notation is decimal only: plain integers (``"1000"``), decimals
     (``"1.5"``) and SI-style digit grouping with single spaces in the
-    integer part (``"1 000 000"``; groups after the first must be exactly
+    integer part (``"1 000 000"``. Groups after the first must be exactly
     three digits). Scientific notation is not accepted, so ``e``/``E``
     always means the Exa prefix. Unit suffixes are case-insensitive and
     space-agnostic: ``"1MA"``, ``"1 MA"``, ``"1 mastre"``, ``"1 MegaAstre"``,
@@ -110,7 +110,7 @@ def parse_astre_amount(text: str) -> int:
 def format_astre_amount(amount: int, style: str = "short") -> str:
     """Format an integer amount of base units as human-readable text.
 
-    The largest prefix for which the value is >= 1 is used; trailing zeros
+    The largest prefix for which the value is >= 1 is used. Trailing zeros
     are trimmed. Round-trip is guaranteed:
     ``parse_astre_amount(format_astre_amount(n)) == n``.
 

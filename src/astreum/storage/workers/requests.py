@@ -4,7 +4,7 @@ Not to be confused with ``astreum.storage.requests``, the pending-request
 registry (``claim_expr_req`` and friends). This module only holds GETs that
 have not been sent yet.
 
-Requesters call :func:`queue_storage_get`; ``request_storage_thread`` runs
+Requesters call :func:`queue_storage_get`. ``request_storage_thread`` runs
 :func:`request_storage`, which every ``storage_request_flush_interval`` (or as
 soon as one destination fills a datagram) sends one ``STORAGE_GET`` per
 destination per chunk of ``max_get_entries`` exprs.
@@ -153,7 +153,7 @@ def queue_storage_get(
     preclaimed: bool = False,
     block_hash: Optional[bytes] = None,
 ) -> bool:
-    """Buffer a GET for *expr_id*; the flush thread sends it.
+    """Buffer a GET for *expr_id*. The flush thread sends it.
 
     Returns False when there is nowhere to send it (no provider or peer), so
     the caller can give up instead of waiting. True means the GET is buffered,

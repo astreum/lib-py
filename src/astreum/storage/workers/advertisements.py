@@ -153,11 +153,11 @@ def advertise_storage(astreum_node: "Node") -> None:
 
     Runs a single timed loop in a daemon thread that adjusts
     ``storage_request_current_price`` based on incoming queue pressure to
-    signal demand.  When ``long_term_storage`` is enabled, the same loop also
+    signal demand. When ``long_term_storage`` is enabled, the same loop also
     processes one storage-index entry per ``long_term_storage_interval``
     seconds: entries missing from the records table are fetched and written
-    to cold storage plus the records table.  Fresh-expr advertisement happens
-    at block creation via ``advertise_exprs(entries=...)``; the periodic
+    to cold storage plus the records table. Fresh-expr advertisement happens
+    at block creation via ``advertise_exprs(entries=...)``. The periodic
     re-advertise loop was removed.
 
     The thread exits when ``communication_stop_event`` is set.

@@ -17,14 +17,14 @@ def get_expr_from_cold_storage(
     Searches the table's ``level_0/*.bin`` first, then walks ``level_N``
     (ascending) index files in reverse file order (highest number first,
     which holds the most recent data for a key). Returns the first hit,
-    decoded from bytes.  Runs under ``cold_storage_lock`` so collate/merge
+    decoded from bytes. Runs under ``cold_storage_lock`` so collate/merge
     cannot remove source files mid-read.
 
     Args:
         node: A Node instance providing ``config`` and ``cold_storage_lock``.
         expr_id: The 32-byte content hash of the expression to retrieve.
         table: The cold-storage table to read from (``"exprs"`` or
-            ``"records"``); selects the on-disk subdirectory.
+            ``"records"``). Selects the on-disk subdirectory.
 
     Returns:
         The decoded Expr, or ``None`` if not found or the data is malformed.

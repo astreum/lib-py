@@ -82,20 +82,20 @@ def handle_treasury_guarantee(
     ``expiry``), loads (or creates, on first post) the sender's
     `TreasuryUserRecord`, inserts the guarantee into that record's
     ``guarantees_root_hash`` trie keyed by *transaction_hash*, and writes the
-    updated record back. No principal moves on a post — the guarantee only
+    updated record back. No principal moves on a post. The guarantee only
     becomes economically active once a consumer claims it (see
     `claim_guarantee`).
 
     Args:
         node: Storage node used to resolve and persist trie/expr data.
-        block: The block currently being applied against; the guarantee's
+        block: The block currently being applied against. The guarantee's
             validity is checked against this block's height and its pending
             exprs are extended with everything the guarantee/record needs
             persisted.
         transaction: The decoded `TREASURY_GUARANTEE` transaction. Its ``data``
             must decode to four ints: ``amount``, ``duration``, ``price``,
             ``expiry`` (in that order).
-        transaction_hash: The 32-byte hash of *transaction*; used as the
+        transaction_hash: The 32-byte hash of *transaction*. Used as the
             guarantee's key inside the guarantor's guarantees trie.
         sender_account: The sender's account (unused directly here — no
             balance changes happen on a post — kept for handler-signature

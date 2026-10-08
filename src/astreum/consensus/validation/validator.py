@@ -34,7 +34,7 @@ def current_validator(
 
     Also returns the accounts to build it on (that validator's stake halved).
     *contact* is the ``(relay_key, address, port)`` of the peer holding
-    *block_hash*'s uncommitted state; every fetch made here goes to it.
+    *block_hash*'s uncommitted state. Every fetch made here goes to it.
     """
     block = get_block_from_storage(astreum_node=node, block_hash=block_hash, contact=contact)
 

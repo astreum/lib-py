@@ -66,7 +66,7 @@ class Meter:
 
         Args:
             n: The number of bytes to charge.
-            is_storage: If True, charge to storage; otherwise eval.
+            is_storage: If True, charge to storage. Otherwise eval.
 
         Returns:
             True if charge succeeded.

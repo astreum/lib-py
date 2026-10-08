@@ -112,16 +112,16 @@ def _release_guarantees(
     ``(guarantor_address, guarantee_transaction_id, guarantee_amount)`` this loan claimed at
     origination, credits that guarantor's ``guaranteed`` back by
     ``guarantee_amount * paid_count // payment_count``, where ``paid_count =
-    payment_count - loan.missed_count`` — the remainder stays in
+    payment_count - loan.missed_count``. The remainder stays in
     ``guaranteed`` permanently as the guarantor's loss on this loan. A no-op
     for `SECURED` loans (`claimed_guarantees` is always empty for those).
 
     Args:
         node: Storage node used to resolve and persist trie/expr data.
-        treasury_account: The `TREASURY_ADDRESS` account; its ``data`` trie
+        treasury_account: The `TREASURY_ADDRESS` account. Its ``data`` trie
             holds every guarantor's `TreasuryUserRecord`, keyed by guarantor
             address. Mutated in place (multiple guarantors' slots may be
-            written in one call); ``data_hash`` is refreshed before return.
+            written in one call). ``data_hash`` is refreshed before return.
         loan: The loan that just reached full payoff/close/write-off, with
             its *final* ``missed_count`` already applied.
 

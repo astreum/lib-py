@@ -78,7 +78,7 @@ def _announce_block(node: Any, block: Block) -> None:
     """Send the new block's header to every validator (``BLOCK``).
 
     The block's other exprs exist only on this node until a later block
-    commits them; the announcement carries this node's contact so the
+    commits them. The announcement carries this node's contact so the
     receivers fetch them from here. The validators relay it to each other,
     because the next validator is picked at random by stake and may not be
     connected to us.

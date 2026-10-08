@@ -16,7 +16,7 @@ def _evaluation(machine, expr, stack, env):
 def _step(machine: "Machine", fn: Expr, env, pre_stack: List[Expr]) -> Expr:
     """Evaluate one iteration of a program (quotation or spec).
 
-    The program runs on a copy of ``pre_stack``; dispatch (eval-style vs
+    The program runs on a copy of ``pre_stack``. Dispatch (eval-style vs
     apply-style) is explicit in the program itself, not inferred from shape.
     """
     cost = sum(e.size() for e in pre_stack)

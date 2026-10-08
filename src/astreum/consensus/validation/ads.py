@@ -109,7 +109,7 @@ def _hash_at_height(node: Any, head: Any, height: int) -> Optional[bytes]:
 
 
 def flush_ads(node: Any) -> list[bytes]:
-    """Send the ids of every queued block that has been built on; return them.
+    """Send the ids of every queued block that has been built on. Return them.
 
     A block is adopted once the head is past its height and the chain to the
     head passes through it. A block the chain skips lost a fork and is dropped

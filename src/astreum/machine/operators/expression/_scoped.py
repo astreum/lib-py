@@ -23,7 +23,7 @@ CELL_FETCH_BYTES = 70
 
 
 def pop_scoped_args(machine, stack: List[Expr], name: str) -> tuple[bytes, bytes]:
-    """Pop ``expr_id`` then ``block_id``; return ``(block_id, expr_id)``.
+    """Pop ``expr_id`` then ``block_id``. Return ``(block_id, expr_id)``.
 
     There is no one-argument form: one value on the stack is an underflow.
     """

@@ -29,8 +29,8 @@ def put_expr_in_hot_storage(node, expr: "Expr") -> bool:
     """Store an Expr in the in-memory hot storage cache with LRU eviction.
 
     Recursively stores Link children before their parent so that child
-    hashes are stable.  Checks the expression size against
-    ``hot_storage_limit``; if the cache is full, evicts the oldest
+    hashes are stable. Checks the expression size against
+    ``hot_storage_limit``. If the cache is full, evicts the oldest
     entries (by access timestamp) until space is available.
 
     Args:

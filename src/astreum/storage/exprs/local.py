@@ -9,7 +9,7 @@ from astreum.storage.exprs.hot import get_expr_from_hot_storage
 def get_expr_from_local_storage(node, expr_id: bytes) -> Optional["Expr"]:
     """Retrieve an Expr from local storage (hot → cold).
 
-    Tries the in-memory hot cache first; if not found, falls back to
+    Tries the in-memory hot cache first. If not found, falls back to
     cold storage on disk.
 
     Args:

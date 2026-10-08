@@ -370,7 +370,7 @@ def exprs_to_linked_expr(items: list[Expr]) -> Expr:
 def resolve_list_exprs(
     node, expr: Expr, contact=None, block_hash=None
 ) -> tuple[list[Expr], list[bytes]]:
-    """Resolve the items of a list; *block_hash* scopes the fetches to a block.
+    """Resolve the items of a list. *block_hash* scopes the fetches to a block.
     
     Args:
         node: The node for resolving expressions.
@@ -421,7 +421,7 @@ def resolve_list_exprs(
 def resolve_inner_exprs(
     node, expr: Expr, contact=None, block_hash=None
 ) -> tuple[list[Expr], list[bytes]]:
-    """Resolve every inner expr; *block_hash* scopes the fetches to a block.
+    """Resolve every inner expr. *block_hash* scopes the fetches to a block.
     
     Args:
         node: The node for resolving expressions.

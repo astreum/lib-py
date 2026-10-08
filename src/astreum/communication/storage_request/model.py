@@ -66,7 +66,7 @@ class StorageRequest:
         """Initialize a StorageRequest.
 
         *entries* are ``(expr_id, payload_type)`` for STORAGE_PUT. For
-        STORAGE_GET they are ``(expr_id, resolution, block_hash | None)``; a
+        STORAGE_GET they are ``(expr_id, resolution, block_hash | None)``. A
         2-tuple is taken as unscoped.
 
         Args:

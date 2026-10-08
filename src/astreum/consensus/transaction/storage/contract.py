@@ -20,7 +20,7 @@ def receipt_at_fixed_point(
     ``build(storage_fee)`` makes the receipt. Its size grows with the value of
     ``storage_fee`` and the fee grows with its size, so start from the fees so
     far and repeat until the value stops changing. The sequence never
-    decreases; after a bounded number of rounds the larger value is taken.
+    decreases. After a bounded number of rounds the larger value is taken.
     ``named`` are the hashes the receipt only refers to (the transaction and
     its logs): they are charged on their own. Returns None if the receipt
     cannot be sized.

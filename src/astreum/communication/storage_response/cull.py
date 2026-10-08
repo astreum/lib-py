@@ -39,7 +39,7 @@ def cull_to_resolution(
 ) -> List[Expr]:
     """Keep only the delivered exprs within the requested ``resolution``.
 
-    SINGLE keeps the root; LIST the root and its tail chain; FULL everything
+    SINGLE keeps the root. LIST the root and its tail chain. FULL everything
     reachable from the root through head and tail links. Only exprs present in
     ``exprs`` can be kept, each at most once, root first. Anything else in the
     reply is dropped.

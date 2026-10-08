@@ -3,7 +3,7 @@
 A new cell points to an older cell with a stored ref
 (``expression/refs.py``) and to a cell that is new in its block by hash. A
 reader needs for each pointer the cell it names and the block whose provider
-holds it: a ref names its block; a hash is in the block of the cell that holds
+holds it: a ref names its block. A hash is in the block of the cell that holds
 it. See ``docs/plans/2026-10-08-refs-in-tries.md``.
 """
 
@@ -20,7 +20,7 @@ def cell_reader(node: Any, block_hash: Optional[bytes], contact: Any = None):
     """Return a ``part(cell, side)`` function for reading cell heads/tails.
 
     The function returns the head or tail of *cell* as loaded, or fetched from
-    the provider of *block_hash*; None for nil.
+    the provider of *block_hash*. None for nil.
 
     Args:
         node: A Node instance for fetching expressions from storage.

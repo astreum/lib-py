@@ -15,7 +15,7 @@ def encrypt(key: bytes, nonce: bytes, plaintext: bytes, aad: bytes = b"") -> byt
     key : bytes
         A 32-byte (256-bit) secret key.
     nonce : bytes
-        A 12-byte nonce. Must be unique per key; nonce reuse with the same key
+        A 12-byte nonce. Must be unique per key. Nonce reuse with the same key
         breaks security.
     plaintext : bytes
         The data to be encrypted.

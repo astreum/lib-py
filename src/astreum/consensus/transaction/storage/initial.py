@@ -62,7 +62,7 @@ def _typed_payload_size(
     """Payload size if *expr* is a builtin typed value (int, str, float), else None.
 
     A typed value is a bytes payload tagged by a builtin type symbol. On the
-    node that built it, it is one loaded composite; fetched cell by cell it
+    node that built it, it is one loaded composite. Fetched cell by cell it
     arrives as a pair link whose tail is only the hash of the type symbol.
     Both have the same hash and must be treated the same way, so the test is
     on the hash.
@@ -119,8 +119,8 @@ def _flat_size(expr: Expr, node: Any, contact: Any, block_hash: bytes | None = N
 def _single_cell(expr: Expr, node: Any, contact: Any, block_hash: bytes | None = None) -> Expr:
     """*expr* with its children replaced by their hashes (same hash).
 
-    The record walk slots every cell on its own, so each is stored on its own;
-    storing a loaded tree per cell would write its subtree once per ancestor.
+    The record walk slots every cell on its own, so each is stored on its own.
+    Storing a loaded tree per cell would write its subtree once per ancestor.
 
     Args:
         expr: The expression.
@@ -209,7 +209,7 @@ def storage_walk_fee(
     *,
     exclude: Iterable[bytes] = (),
 ) -> int | None:
-    """``calculate_storage_fee`` on ``storage_walk_size``; None if unresolved."""
+    """``calculate_storage_fee`` on ``storage_walk_size``. None if unresolved."""
     size = storage_walk_size(node, block, expr, exclude=exclude)
     if size is None:
         return None
@@ -227,7 +227,7 @@ def generate_initial_storage_record(
     Walk expr tree, slot new sub-exprs not yet registered in storage account data.
     Returns (StorageRecord, slot_hashes, found_exprs, storage_fee) for a fresh
     expr, or None if already registered.  slot_hashes lists each new sub-expr's
-    hash in walk order (depth-first, head before tail); the record commits to
+    hash in walk order (depth-first, head before tail). The record commits to
     it as ``slots_root``, the Merkle root over that list, and ``new_count`` is
     its length.  found_exprs contains hashes of sub-exprs already in storage
     data (shared refs).
@@ -299,7 +299,7 @@ def walk_record_slots(
 
     Visits the cells below *expr* depth-first, head before tail. A cell whose
     hash is a key in *lookup* (a storage trie) is found, not slotted, and its
-    subtree is skipped; every other cell is slotted, once. *expr* itself is the
+    subtree is skipped. Every other cell is slotted, once. *expr* itself is the
     record's key and is not slotted. Cells that are not loaded are fetched
     scoped to *expr*'s hash (the block), from *contact* if given.
 

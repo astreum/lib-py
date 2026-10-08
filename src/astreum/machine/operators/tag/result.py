@@ -23,7 +23,7 @@ def handle_stack_result(
 
     Args:
         machine: The machine instance used to continue evaluation.
-        stack: The current evaluation stack; modified in place.
+        stack: The current evaluation stack. Modified in place.
         env: The environment in which continuations are evaluated.
 
     Returns:

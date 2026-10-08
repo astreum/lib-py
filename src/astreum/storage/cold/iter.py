@@ -14,14 +14,14 @@ def iter_exprs_in_cold_storage(
 
     Yields ids one at a time from ``level_0/*.bin`` filename stems followed by
     every ``level_N/*_index`` entry (N >= 1). The lock is held only for each
-    segment read (never across the whole scan), so collate/merge — which
-    delete source files — cannot race the listing while other cold reads are
+    segment read (never across the whole scan), so collate/merge (which
+    delete source files) cannot race the listing while other cold reads are
     happening.
 
     Args:
         node: A Node instance providing ``config`` and ``cold_storage_lock``.
         table: The cold-storage table to iterate (``"exprs"`` or
-            ``"records"``); selects the on-disk subdirectory.
+            ``"records"``). Selects the on-disk subdirectory.
 
     Yields:
         The 32-byte content hash of each stored expression.

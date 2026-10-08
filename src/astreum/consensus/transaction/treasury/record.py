@@ -127,7 +127,7 @@ class TreasuryUserRecord:
             node: Storage node used to resolve any hash-only sub-exprs.
             head_hash: The 32-byte hash of the record's `link`-list head, as
                 produced by `to_expr`/`expr`.
-            block_hash: The block whose record holds the record's cells; its
+            block_hash: The block whose record holds the record's cells. Its
                 provider is asked for them, and a trie root held by a plain
                 hash is in it. A root written as a stored ref names its own.
 
@@ -179,7 +179,7 @@ class TreasuryUserRecord:
 
 
 def load_from_tree(cls: Any, node: Any, tree: Any, key: bytes, contact=None):
-    """The record of type *cls* stored at *key* in *tree*, read from the block that holds it; None if the key is absent or does not decode.
+    """The record of type *cls* stored at *key* in *tree*, read from the block that holds it. None if the key is absent or does not decode.
 
     Args:
         cls: The class to load.
@@ -200,7 +200,7 @@ def load_user_record(
 ) -> TreasuryUserRecord | None:
     """Return the `TreasuryUserRecord` stored at *key* in *tree*.
 
-    The tree is the treasury account's data trie; read from the block that holds it.
+    The tree is the treasury account's data trie. Read from the block that holds it.
     """
     return load_from_tree(TreasuryUserRecord, node, tree, key, contact)
 

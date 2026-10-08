@@ -15,7 +15,7 @@ def fetch_node_from_radix_tree(
 ) -> Optional[RadixNode]:
     """Return the node with hash *h* from cache or fetched from provider.
 
-    The *block* is the block whose record holds the node; None routes by hash.
+    The *block* is the block whose record holds the node. None routes by hash.
     """
     cached = tree.nodes.get(h)
     if cached is not None:

@@ -42,7 +42,7 @@ def encode_transaction_message(tx_exprs: List[Expr]) -> bytes:
     ``tx_exprs`` is the output of ``resolve_inner_exprs(node, transaction.expr())``
     with the header root first. Uses the storage_found length-prefixed list
     framing with the standard expr byte encoding. Every expr is emitted once
-    (dedup by hash) and builtin composite type symbols are skipped; builtin
+    (dedup by hash) and builtin composite type symbols are skipped. Builtin
     composite values are materialized as plain bytes exprs so the tree
     round-trips in-memory.
     """
@@ -192,7 +192,7 @@ def _link_tree(root: Expr, expr_map: dict[bytes, Expr]) -> None:
 def _list_items(head: Expr) -> List[Expr]:
     """Return the head of each link in the chain.
 
-    Storage-free analogue of resolve_list_exprs; works only on a fully-linked tree.
+    Storage-free analogue of resolve_list_exprs. Works only on a fully-linked tree.
     """
     result: List[Expr] = []
     current = head
@@ -206,7 +206,7 @@ def _list_items(head: Expr) -> List[Expr]:
 def _parse_transaction(root: Expr) -> "Transaction":
     """Parse a transaction from a fully-linked tree.
 
-    Storage-free analogue of get_transaction_from_storage; only structural/type
+    Storage-free analogue of get_transaction_from_storage. Only structural/type
     validation happens here.
     """
     from astreum.consensus.transaction.code import TransactionCode

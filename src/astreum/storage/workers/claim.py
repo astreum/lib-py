@@ -45,7 +45,7 @@ def _compute_pow_and_challenge(
     """Compute a PoW claim for the given record.
 
     The challenged slot's id is read from the record's slot list in the records
-    table (byte offset = index * 32); the tree over that list is built in
+    table (byte offset = index * 32). The tree over that list is built in
     memory and gives the slot's proof against ``record.slots_root``. Returns
     ``(storage_id, slot_expr_bytes, proof, nonce)`` or None if unavailable.
 
@@ -350,8 +350,8 @@ def _submit_claims(node: Node, entries: list[tuple]) -> None:
 def _submit_claim_group(node: Node, latest_block, entries: list[tuple]) -> bool:
     """Build and send one claim transaction.
 
-    Returns False to stop submitting (the cost cannot be computed yet);
-    an unprofitable or failed group is dropped and the next one still goes.
+    Returns False to stop submitting (the cost cannot be computed yet).
+    An unprofitable or failed group is dropped and the next one still goes.
 
     Args:
         node: A Node instance for sending transactions.
