@@ -25,7 +25,7 @@ class Meter:
         return self.eval + self.storage
 
     def remaining(self) -> int:
-        """Remaining budget before the limit is hit (large int if unbounded)."""
+        """Return remaining budget before the limit is hit."""
         if self.limit is None:
             return 1 << 62
         return max(0, self.limit - self.total)
