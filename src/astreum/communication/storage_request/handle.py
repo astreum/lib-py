@@ -158,7 +158,7 @@ def _serve_get(
     desired: int,
     block_hash: bytes | None = None,
 ) -> tuple[bool, str | None]:
-    """Serve one STORAGE_GET entry: paged ``STORAGE_FOUND``, a provider redirect, or a payment-required reply.
+    """Serve one STORAGE_GET entry.
 
     A scoped entry (*block_hash* given) is served the same way, by a local get
     of *expr_id*: the block only decides who is asked. A miss is redirected by

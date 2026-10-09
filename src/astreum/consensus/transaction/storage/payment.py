@@ -87,7 +87,7 @@ def _is_nil(e: Expr | None) -> bool:
 
 
 def _list_items(e: Expr | None, limit: int) -> list[Expr] | None:
-    """Items of a loaded link list, or None if it is not one (or is longer than *limit*).
+    """Items of a loaded link list, or None if not one or too long.
 
     Args:
         e: The expression.

@@ -23,7 +23,7 @@ SCOPED_FLAG = 0x80
 
 
 def max_get_entries(budget_bytes: int) -> int:
-    """Return how many entries fit in one STORAGE_GET datagram of at most *budget_bytes* on the wire (message framing and request code included).
+    """Return how many entries fit in one STORAGE_GET datagram.
 
     Counted at the scoped size, the worst case, so any batch fits.
 
@@ -37,7 +37,7 @@ def max_get_entries(budget_bytes: int) -> int:
 
 
 def max_batch_entries(budget_bytes: int) -> int:
-    """Return how many entries fit in one STORAGE_PUT datagram of at most *budget_bytes* on the wire (message framing and request code included).
+    """Return how many entries fit in one STORAGE_PUT datagram.
 
     Args:
         budget_bytes (int): The maximum byte budget for the datagram.

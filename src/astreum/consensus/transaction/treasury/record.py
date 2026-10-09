@@ -179,7 +179,7 @@ class TreasuryUserRecord:
 
 
 def load_from_tree(cls: Any, node: Any, tree: Any, key: bytes, contact=None):
-    """The record of type *cls* stored at *key* in *tree*, read from the block that holds it. None if the key is absent or does not decode.
+    """Load the record of type *cls* stored at *key* in *tree*.
 
     Args:
         cls: The class to load.
@@ -250,7 +250,7 @@ def _claimed_guarantees_to_expr(claimed_guarantees: list[tuple[bytes, bytes, int
 def _claimed_guarantees_from_expr(
     node: Any, claimed_guarantees_node: Expr, contact=None, block_hash=None
 ) -> list[tuple[bytes, bytes, int]] | None:
-    """Decode a claimed-guarantees `Expr` (as produced by `_claimed_guarantees_to_expr`).
+    """Decode a claimed-guarantees `Expr`.
 
     Args:
         node: Storage node used to resolve any hash-only sub-exprs.

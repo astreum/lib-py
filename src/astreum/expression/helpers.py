@@ -25,7 +25,7 @@ def _scope(block_hash) -> dict:
 
 
 def is_builtin_composite(expr: Expr) -> bool:
-    """Check if expr is a builtin composite represented as a link (e.g. int, str, float).
+    """Check if expr is a builtin composite (e.g. int, str, float).
 
     A link is a builtin composite iff:
     - base == "link"

@@ -4,7 +4,7 @@ from astreum.consensus.block.rate_window import windowed_rate_fraction
 
 
 def calculate_discount_rate(block: object, node=None, range_blocks: int = 0) -> float:
-    """Calculate the discount rate over a window of *range_blocks* (default 0 = all-time).
+    """Calculate the discount rate over a window of *range_blocks*.
 
     Args:
         block: The block to calculate from.
