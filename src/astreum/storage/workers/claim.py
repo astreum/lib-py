@@ -419,8 +419,7 @@ def claim_storage(node: Node) -> None:
             connected P2P communication layer.
 
     Returns:
-        None.  Runs indefinitely until ``communication_stop_event``
-        is set.
+        None.  Runs indefinitely until ``communication_stop_event`` fires.
     """
     stop = node.communication_stop_event
     last_checked_era = -1

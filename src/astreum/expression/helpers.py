@@ -29,7 +29,7 @@ def is_builtin_composite(expr: Expr) -> bool:
 
     A link is a builtin composite iff:
     - base == "link"
-    - it has a payload source (value is set, or head is a bytes expr)
+    - it has a payload source (value holds data, or head is a bytes expr)
     - tail is a symbol whose value is a known builtin composite type
     
     Args:

@@ -55,8 +55,8 @@ def find_transactions(
     All filter parameters are optional — pass ``ZERO32`` (all zeros) or
     the default to leave a field unconstrained.
 
-    When multiple filters are set, only transactions matching **all**
-    of them are returned (AND semantics).
+    When you set multiple filters, return only transactions matching **all**
+    of them (AND semantics).
 
     ``start_height`` — search backward from this height (default:
     the node's latest block).

@@ -21,7 +21,7 @@ def put_record_in_cold_storage(node: "Node", storage_id: bytes, slot_ids: list[b
 
     Args:
         node: A Node instance providing config and storage access.
-        storage_id: The 32-byte key the record is stored under (the
+        storage_id: The 32-byte key for the record (the
             record value's content hash).
         slot_ids: The 32-byte slot data ids in sequence order.
 
@@ -48,7 +48,7 @@ def get_record_from_cold_storage(node: "Node", storage_id: bytes) -> bytes | Non
 
     Args:
         node: A Node instance providing ``config`` and ``cold_storage_lock``.
-        storage_id: The 32-byte key the record is stored under.
+        storage_id: The 32-byte key for the record.
 
     Returns:
         The concatenated slot-id blob, or ``None`` if the record is

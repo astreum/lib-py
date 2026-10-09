@@ -200,7 +200,7 @@ def claim_guarantee(
 ) -> TreasuryGuarantee | None:
     """Claim an available guarantee in *guarantees_trie* by its posting transaction id.
 
-    A claim is permanent: once ``claimed_by`` is set it never resets, the
+    A claim is permanent: once you set ``claimed_by`` it never resets, the
     guarantee stays claimed in the guarantor's record forever. There is no "free"
     operation and no transaction code to release a claim.
 

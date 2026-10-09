@@ -119,7 +119,7 @@ def _flat_size(expr: Expr, node: Any, contact: Any, block_hash: bytes | None = N
 def _single_cell(expr: Expr, node: Any, contact: Any, block_hash: bytes | None = None) -> Expr:
     """*expr* with its children replaced by their hashes (same hash).
 
-    The record walk slots every cell on its own, so each is stored on its own.
+    The record walk slots every cell on its own, so the walk stores each on its own.
     Storing a loaded tree per cell would write its subtree once per ancestor.
 
     Args:
@@ -229,7 +229,7 @@ def generate_initial_storage_record(
     expr, or None if already registered.  slot_hashes lists each new sub-expr's
     hash in walk order (depth-first, head before tail). The record commits to
     it as ``slots_root``, the Merkle root over that list, and ``new_count`` is
-    its length.  found_exprs contains hashes of sub-exprs already in storage
+    its length.      found_exprs contains hashes of sub-exprs already present in storage
     data (shared refs).
 
     By default only sub-exprs loaded into ``expr`` are walked. With
@@ -241,7 +241,7 @@ def generate_initial_storage_record(
     (``_flat_size``), so every node derives the same record. The storage trie
     is followed like any other: a block's record covers the storage trie as of
     the block's start, which registers the previous records. The entries that
-    register this record are created in the next block and covered by its
+    register this record appear in the next block, covered by its
     record.
 
     ``collected``, if given, receives every slotted expr by hash, as a single
@@ -303,8 +303,8 @@ def walk_record_slots(
     record's key and is not slotted. Cells that are not loaded are fetched
     scoped to *expr*'s hash (the block), from *contact* if given.
 
-    ``collected`` receives each slotted cell by hash and ``on_cell(hash, cell)``
-    is called as each is reached, so a caller can store cells while it walks.
+    ``collected`` receives each slotted cell by hash and the callback runs as the walk
+    reaches each cell, so a caller can store cells while it walks.
     Raises ``UnresolvedRecordExpr`` if a cell cannot be fetched.
     """
     root_hash = expr.hash()

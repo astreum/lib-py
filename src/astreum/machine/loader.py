@@ -16,12 +16,12 @@ def assemble_env(
     """Resolve a target definition and its transitive dependencies into an Env.
 
     Parses the root ``.aex`` script, resolves imports across module
-    boundaries, and tree-shakes the definition graph so only the
-    definitions transitively referenced by ``target`` are included.
+    boundaries, and tree-shakes the definition graph to include only the
+    definitions transitively referenced by ``target``.
 
     Args:
         node: An Astreum Node instance (``None`` if only file-based imports
-            are used).
+            apply).
         script: Path to the root ``.aex`` script file (absolute or relative).
         target: Name of the definition to resolve.  May include dots for
             imported modules, e.g. ``"math.calc_sum"``.

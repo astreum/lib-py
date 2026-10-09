@@ -75,7 +75,7 @@ def _apply_tx_effects(
     the sender and records consensus artifacts (bloom, receipt, trie).
 
     When *nested* is True (tx.new): deducts only the transfer amount from the
-    sender (the contract). Execution and storage fees are returned for the
+    sender (the contract). Return execution and storage fees for the
     caller to charge to the parent meter. No consensus recording.
 
     Returns (receipt_status, execution_fee, storage_fee, collected_logs).

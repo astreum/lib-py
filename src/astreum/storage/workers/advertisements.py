@@ -160,14 +160,14 @@ def advertise_storage(astreum_node: "Node") -> None:
     at block creation via ``advertise_exprs(entries=...)``. The periodic
     re-advertise loop was removed.
 
-    The thread exits when ``communication_stop_event`` is set.
+    The thread exits when you set ``communication_stop_event``.
 
     Args:
         astreum_node: A Node instance with storage and communication infrastructure
             already initialized (``setup_storage`` must have been called).
 
     Returns:
-        None. Runs indefinitely until ``communication_stop_event`` is set.
+        None. Runs indefinitely until ``communication_stop_event`` fires.
     """
     price_interval = float(astreum_node.config.get("storage_request_price_interval") or 0)
     prune_interval = float(astreum_node.config.get("expr_request_ttl") or 0)

@@ -295,7 +295,7 @@ def request_storage(node: "Node") -> None:
         node: A Node instance with a request buffer and flush event.
 
     Returns:
-        None. Runs indefinitely until ``communication_stop_event`` is set.
+        None. Runs indefinitely until ``communication_stop_event`` fires.
     """
     stop = node.communication_stop_event
     event = node.storage_request_flush_event

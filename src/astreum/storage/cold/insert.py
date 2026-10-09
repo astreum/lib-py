@@ -64,7 +64,7 @@ def put_expr_in_cold_storage(
     levels that exceed their size limit (``base_size × 10^level``)
     are merged recursively.
 
-    Link children are stored before their parent to guarantee that
+    Store Link children before their parent to guarantee that
     all dependencies are on disk before the parent reference.
 
     Args:

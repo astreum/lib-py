@@ -168,8 +168,8 @@ def get_exprs_from_network(
     Returns:
         ``{expr_id: Expr | None}`` for every requested hash. ``None`` means the
         fetch timed out, nothing could be sent (no provider or peer), or the
-        node is disconnected. A ``RESOLUTION_SINGLE`` hash that is already
-        local is returned without a request.
+        node is disconnected. Return local for a ``RESOLUTION_SINGLE`` hash already
+        present without a request.
     """
     requested: dict[bytes, int] = {}
     for expr_id, resolution in entries:

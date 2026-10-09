@@ -49,8 +49,8 @@ def encode_found_pages(
 
     ``page`` is 1-based. A reply that fits one message is page ``1/1``. The
     root goes first in page 1. The rest are packed greedily in order. A
-    non-root expr too large for a page is skipped (``on_skip(expr,
-    encoded_len)`` is called). An oversized root raises ``ValueError``.
+    non-root expr too large for a page is skipped (call ``on_skip(expr,
+    encoded_len)``). An oversized root raises ``ValueError``.
 
     Args:
         exprs (List[Expr]): The list of expressions to encode (root first).

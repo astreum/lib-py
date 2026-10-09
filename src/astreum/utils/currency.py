@@ -110,8 +110,8 @@ def parse_astre_amount(text: str) -> int:
 def format_astre_amount(amount: int, style: str = "short") -> str:
     """Format an integer amount of base units as human-readable text.
 
-    The largest prefix for which the value is >= 1 is used. Trailing zeros
-    are trimmed. Round-trip is guaranteed:
+    Use the largest prefix for which the value is >= 1. Trim trailing zeros.
+    Round-trip is guaranteed:
     ``parse_astre_amount(format_astre_amount(n)) == n``.
 
     Args:
