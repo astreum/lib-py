@@ -15,7 +15,7 @@ from astreum.crypto.bloom_search import make_search_variants
 class TestBloomTree(unittest.TestCase):
 
     def test_empty_search(self):
-        results = bloom_search(None, os.urandom(128))
+        results = bloom_search(None, os.urandom(160))
         self.assertEqual(results, [])
 
     def test_single_block_insert_and_search(self):
@@ -41,7 +41,7 @@ class TestBloomTree(unittest.TestCase):
         tree.insert(0, variants)
         tree.set_leaf_start_hash(0, block_hash)
         # Random element should not match the known block hash
-        results = bloom_search(tree.root, os.urandom(128))
+        results = bloom_search(tree.root, os.urandom(160))
         self.assertNotIn(block_hash, results)
 
     def test_two_blocks_different_paths(self):

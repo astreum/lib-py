@@ -30,6 +30,9 @@ class Accounts:
         self._trie = RadixTree(root_hash=root_hash, contact=contact, root_block=block_hash)
         self._cache: Dict[bytes, Account] = {}
         self.pending_exprs: List[Expr] = []
+        # Addresses passed to set_account during the current top-level
+        # transaction. The transaction apply step filters it.
+        self.involved: set[bytes] = set()
 
     @property
     def root_hash(self) -> Optional[bytes]:
@@ -117,6 +120,7 @@ class Accounts:
         Returns: None
         """
         self._cache[address] = account
+        self.involved.add(address)
 
     def update_trie(self, node: Any) -> Optional[bytes]:
         """Update the trie with cached accounts.

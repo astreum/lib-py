@@ -259,46 +259,67 @@ def bloom_search(node: BloomNode | None, element: bytes) -> list[bytes]:
     return results
 
 
+def bloom_search_leaves(
+    root_hash: bytes, element: bytes, astreum_node, block_hash: bytes | None = None
+) -> list[BloomNode]:
+    """Search a sealed era's bloom tree from storage and return the leaves.
+
+    Args:
+        root_hash (bytes): Era root BloomNode expr hash.
+        element (bytes): Element to search.
+        astreum_node (Any): Astreum P2P/storage Node.
+        block_hash (bytes | None): Block holding the root.
+
+    Returns:
+        list[BloomNode]: Leaves whose filter may hold the element.
+    """
+    root = read_bloom_node(astreum_node, root_hash, block=block_hash, level=0)
+    if root is None:
+        return []
+
+    return _search_leaves(root, element, astreum_node)
+
+
 def bloom_search_storage(
     root_hash: bytes, element: bytes, astreum_node, block_hash: bytes | None = None
 ) -> list[bytes | None]:
     """Search a sealed era's bloom tree from storage.
 
     Args:
-        root_hash: Era root BloomNode expr hash.
-        element: Element to search.
-        astreum_node: Astreum P2P/storage Node.
-        block_hash: Block holding the root.
+        root_hash (bytes): Era root BloomNode expr hash.
+        element (bytes): Element to search.
+        astreum_node (Any): Astreum P2P/storage Node.
+        block_hash (bytes | None): Block holding the root.
 
     Returns:
-        list[bytes | None]: Description of the return value.
+        list[bytes | None]: The start_hash of each matching leaf.
     """
-    root = read_bloom_node(astreum_node, root_hash, block=block_hash, level=0)
-    if root is None:
-        return []
+    return [
+        leaf.start_hash
+        for leaf in bloom_search_leaves(root_hash, element, astreum_node, block_hash)
+    ]
 
-    return _search_storage(root, element, astreum_node)
 
-
-def _search_storage(
+def _search_leaves(
     bloom_node: BloomNode, element: bytes, astreum_node
-) -> list[bytes | None]:
+) -> list[BloomNode]:
     """Recursively search bloom tree from storage.
 
     Args:
-        bloom_node: Current bloom node.
-        element: Element to search.
-        astreum_node: Astreum node.
+        bloom_node (BloomNode): Current bloom node.
+        element (bytes): Element to search.
+        astreum_node (Any): Astreum node.
 
     Returns:
-        list[bytes | None]: Description of the return value.
+        list[BloomNode]: Matching leaves. A leaf with start_hash None means
+            "match but no block pointer".
     """
     if not bloom_test(bloom_node.filter, element):
         return []
     if bloom_node.is_leaf:
-        return [bloom_node.start_hash]  # None means "match but no block pointer"
+        return [bloom_node]
 
-    results: list[bytes | None] = []
+    results: list[BloomNode] = []
     for child_hash, child_block in (
         (bloom_node._left_hash, bloom_node._left_block),
         (bloom_node._right_hash, bloom_node._right_block),
@@ -308,5 +329,5 @@ def _search_storage(
                 astreum_node, child_hash, block=child_block, level=bloom_node.level + 1
             )
             if child is not None:
-                results.extend(_search_storage(child, element, astreum_node))
+                results.extend(_search_leaves(child, element, astreum_node))
     return results

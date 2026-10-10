@@ -162,7 +162,7 @@ class TestMakeSearchVariants(unittest.TestCase):
         result = make_search_variants(z, z, z, z)
         self.assertEqual(len(result), 7)
         for v in result:
-            self.assertEqual(len(v), 128)
+            self.assertEqual(len(v), 160)
 
     def test_keyed_returns_four(self):
         z = b"\x00" * 32
@@ -170,7 +170,7 @@ class TestMakeSearchVariants(unittest.TestCase):
         result = make_search_variants(z, z, z, key)
         self.assertEqual(len(result), 4)
         for v in result:
-            self.assertEqual(len(v), 128)
+            self.assertEqual(len(v), 160)
 
     def test_keyed_all_variants_have_tx_hash(self):
         z = b"\x00" * 32

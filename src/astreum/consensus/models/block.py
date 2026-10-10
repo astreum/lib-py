@@ -116,6 +116,8 @@ class Block:
         self.statistics = statistics or []
         self.bloom_tree = None
         self.pending_bloom_keys = set()
+        # Accounts whose 0|0|0|0|I element is in the bloom leaf of this block.
+        self.involved_accounts: set[bytes] = set()
         self.global_loaned = global_loaned
         self.global_defaulted = global_defaulted
         self.global_loan_count = global_loan_count
@@ -135,6 +137,7 @@ class Block:
             for addr, acct in self.accounts._cache.items()
         }
         saved_pending_exprs = list(self.pending_exprs)
+        saved_involved = set(self.accounts.involved)
         saved_global_loaned = self.global_loaned
         saved_global_defaulted = self.global_defaulted
         saved_global_loan_count = self.global_loan_count
@@ -144,6 +147,7 @@ class Block:
             saved_global_loaned,
             saved_global_defaulted,
             saved_global_loan_count,
+            saved_involved,
         )
 
     def restore(self, snapshot: tuple) -> None:
@@ -160,8 +164,10 @@ class Block:
             saved_global_loaned,
             saved_global_defaulted,
             saved_global_loan_count,
+            saved_involved,
         ) = snapshot
         self.accounts._cache = saved_cache
+        self.accounts.involved = saved_involved
         self.pending_exprs = saved_pending_exprs
         self.global_loaned = saved_global_loaned
         self.global_defaulted = saved_global_defaulted

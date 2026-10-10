@@ -380,7 +380,7 @@ class TestBloomRefs(unittest.TestCase):
     def setUp(self):
         self.chain = Chain()
         self.node = self.chain.node
-        self.elements = [os.urandom(128) for _ in range(3)]
+        self.elements = [os.urandom(160) for _ in range(3)]
         self.node_hashes: dict[bytes, set[bytes]] = {}
 
     def store(self, tree: BloomTree) -> None:
@@ -438,7 +438,7 @@ class TestBloomRefs(unittest.TestCase):
             )
             self.assertEqual(found, [b"\xbb" * 32])
             self.assertEqual(
-                bloom_search_storage(self.chain.roots[c], os.urandom(128), remote.node, block_hash=c),
+                bloom_search_storage(self.chain.roots[c], os.urandom(160), remote.node, block_hash=c),
                 [],
             )
             self.assertEqual(remote.wrong, [])

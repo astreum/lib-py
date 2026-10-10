@@ -4,7 +4,8 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from astreum.expression import Expr, RESOLUTION_FULL, ZERO32
 from astreum.storage.exprs import get_expr_list, prefetch_exprs_from_network
-from astreum.crypto.bloom_tree.tree import bloom_search_storage
+from astreum.crypto.bloom_filter import bloom_test
+from astreum.crypto.bloom_tree.tree import bloom_search_leaves
 
 if TYPE_CHECKING:
     from astreum.consensus.transaction.model import Transaction
@@ -17,6 +18,7 @@ def bloom_search_tx(astreum_node: Any, *,
                     sender: bytes = ZERO32,
                     receiver: bytes = ZERO32,
                     key: bytes = ZERO32,
+                    involved: bytes = ZERO32,
                     starting_block=None,
                     end_block_height: int = 0,
                     limit: int = 1) -> list["Transaction"]:
@@ -29,21 +31,32 @@ def bloom_search_tx(astreum_node: Any, *,
         sender: Sender address filter.
         receiver: Receiver address filter.
         key: Data key filter.
+        involved (bytes): Address of an account that a transaction changed
+            without being its sender or recipient. Cannot combine with other
+            filters.
         starting_block: Block to start search from.
         end_block_height: Minimum block height.
         limit: Maximum results.
 
     Returns:
         list["Transaction"]: List of matching transactions.
+
+    Raises:
+        ValueError: If involved is set together with another filter.
     """
     from astreum.consensus.transaction.from_storage import get_transaction_from_storage
     from astreum.consensus.block.encoding.decode import get_block_from_storage
+
+    if involved != ZERO32 and any(
+        f != ZERO32 for f in (tx_hash, sender, receiver, key)
+    ):
+        raise ValueError("involved cannot combine with tx_hash, sender, receiver or key")
 
     if starting_block is None:
         return []
 
     element = _build_element(tx_hash=tx_hash, sender=sender,
-                             receiver=receiver, key=key)
+                             receiver=receiver, key=key, involved=involved)
 
     results: list["Transaction"] = []
     searched_eras: set[int] = set()
@@ -60,10 +73,11 @@ def bloom_search_tx(astreum_node: Any, *,
                 current_block = current_block.previous_block
                 continue
 
-            era_results = bloom_search_storage(
+            era_results = bloom_search_leaves(
                 bloom_hash, element, astreum_node, block_hash=current_block.expr_id
             )
-            for leaf_hit in era_results:
+            for leaf in era_results:
+                leaf_hit = leaf.start_hash
                 if leaf_hit is not None:
                     try:
                         block = get_block_from_storage(astreum_node=astreum_node, block_hash=leaf_hit)
@@ -78,6 +92,16 @@ def bloom_search_tx(astreum_node: Any, *,
 
                 for tx in txs:
                     tx.block_hash = block_hash
+                    if involved != ZERO32:
+                        # A transaction does not list the accounts it changed.
+                        # The leaf filter holds one element per involved tx.
+                        tx_element = _build_element(tx_hash=tx.hash, involved=involved)
+                        if not bloom_test(leaf.filter, tx_element):
+                            continue
+                        results.append(tx)
+                        if len(results) >= limit:
+                            return results
+                        continue
                     if _tx_matches(tx, tx_hash=tx_hash, sender=sender,
                                    receiver=receiver, key=key):
                         results.append(tx)
@@ -164,8 +188,9 @@ def _tx_matches(tx: "Transaction", *,
 
 
 def _build_element(*, tx_hash=ZERO32, sender=ZERO32,
-                   receiver=ZERO32, key=ZERO32) -> bytes:
+                   receiver=ZERO32, key=ZERO32, involved=ZERO32) -> bytes:
     return (tx_hash or ZERO32).ljust(32, b"\x00")[:32] + \
            (sender or ZERO32).ljust(32, b"\x00")[:32] + \
            (receiver or ZERO32).ljust(32, b"\x00")[:32] + \
-           (key or ZERO32).ljust(32, b"\x00")[:32]
+           (key or ZERO32).ljust(32, b"\x00")[:32] + \
+           (involved or ZERO32).ljust(32, b"\x00")[:32]

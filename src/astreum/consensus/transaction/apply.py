@@ -11,7 +11,7 @@ from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.account import create_account
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS, Receipt
 from astreum.consensus.block.rate import calculate_storage_fee
-from astreum.crypto.bloom_search import make_search_variants
+from astreum.crypto.bloom_search import make_involved_variants, make_search_variants
 from astreum.consensus.transaction.code import TransactionCode
 from astreum.consensus.transaction.from_storage import get_transaction_from_storage
 from astreum.consensus.transaction.accounts.create import handle_expression_account_create
@@ -82,6 +82,10 @@ def _apply_tx_effects(
     """
     if transaction.chain_id != block.chain_id:
         raise ValueError("transaction chain_id does not match block chain_id")
+
+    if not nested:
+        # Only writes made by this transaction count as involved.
+        block.accounts.involved.clear()
 
     sender_account = block.accounts.get_account(address=transaction.sender, node=node)
     if sender_account is None:
@@ -465,6 +469,9 @@ def _apply_tx_effects(
             pass
 
     # Bloom Filter — top-level only.
+    # (account, elements) pairs for the involved accounts. The elements are
+    # priced here and inserted after the final status is known.
+    involved_batches: list[tuple[bytes, list[bytes]]] = []
     if not nested:
         bloom_inserts: list[bytes] = make_search_variants(
             tx_hash=transaction_hash,
@@ -477,6 +484,23 @@ def _apply_tx_effects(
 
         bloom_storage_fee = calculate_storage_fee(block, 2 * len(bloom_inserts))
         current_storage_fee += bloom_storage_fee
+
+        if receipt_status == STATUS_SUCCESS:
+            excluded = (
+                transaction.sender,
+                transaction.recipient,
+                STORAGE_ADDRESS,
+                TREASURY_ADDRESS,
+            )
+            for account_address in sorted(block.accounts.involved):
+                if account_address in excluded:
+                    continue
+                elements = make_involved_variants(transaction_hash, account_address)
+                if account_address in block.involved_accounts:
+                    # The block element is already in the leaf.
+                    elements = elements[1:]
+                involved_batches.append((account_address, elements))
+                current_storage_fee += calculate_storage_fee(block, 2 * len(elements))
         if sender_account.balance < (
             tx_fee + transfer_amount + current_data_fee
             + current_storage_fee
@@ -586,6 +610,12 @@ def _apply_tx_effects(
             # The receipt records the final status. 0 and 1 are the same size,
             # so its fee does not move.
             receipt = _build_receipt(current_storage_fee)
+
+    # Involved accounts — insert only when the final status is success.
+    if receipt_status == STATUS_SUCCESS:
+        for account_address, elements in involved_batches:
+            block.bloom_tree.insert(block.height % 1024, elements)
+            block.involved_accounts.add(account_address)
 
     # Balance deductions.
     if not affordability_failed:
