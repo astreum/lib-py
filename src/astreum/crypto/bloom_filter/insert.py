@@ -4,22 +4,39 @@ from blake3 import blake3
 
 from astreum.crypto.bloom_filter.main import BloomFilter
 
-K = 7  # number of hash functions per element (k = m/n * ln(2) ≈ 6.93, rounds to 7 for <1% FP)
+BITS_PER_ELEMENT = 16  # bits per element in every tier
+K = 11  # hash positions per element: round(BITS_PER_ELEMENT * ln 2)
+SLICE = 8  # bytes of the digest used for each position
 
 
-def _bloom_positions(element: bytes, bits: int) -> list[int]:
-    """Compute K bit positions via double hashing.
+def bloom_digest(element: bytes) -> bytes:
+    """Hash an element once for all tiers.
 
     Args:
         element: Element to hash.
-        bits: Number of bits in the filter.
 
     Returns:
-        list[int]: Description of the return value.
+        bytes: ``SLICE * K`` bytes of one blake3 output.
     """
-    h1 = int.from_bytes(blake3(element + b"\x00").digest()[:4], "big")
-    h2 = int.from_bytes(blake3(element + b"\x01").digest()[:4], "big")
-    return [(h1 + i * h2) % bits for i in range(K)]
+    return blake3(element).digest(length=SLICE * K)
+
+
+def _bloom_positions(digest: bytes, bits: int) -> list[int]:
+    """Compute K bit positions from a digest.
+
+    Each position is one ``SLICE``-byte part of the digest, modulo the tier size.
+
+    Args:
+        digest: Output of ``bloom_digest``.
+        bits: Number of bits in the tier.
+
+    Returns:
+        list[int]: K positions, each below ``bits``.
+    """
+    return [
+        int.from_bytes(digest[SLICE * i : SLICE * (i + 1)], "big") % bits
+        for i in range(K)
+    ]
 
 
 def _ensure_tier(bf: BloomFilter) -> int:
@@ -44,7 +61,7 @@ def _ensure_tier(bf: BloomFilter) -> int:
     while len(bf.tiers) <= tier_idx:
         new_idx = len(bf.tiers)
         tier_cap = 1 << new_idx
-        tier_bits = tier_cap * 10
+        tier_bits = tier_cap * BITS_PER_ELEMENT
         tier_bytes = (tier_bits + 7) // 8
         bf.tiers.append(bytearray(tier_bytes))
 
@@ -63,6 +80,6 @@ def bloom_insert(bf: BloomFilter, element: bytes) -> None:
     tier_idx = _ensure_tier(bf)
     tier = bf.tiers[tier_idx]
     bits = len(tier) * 8
-    for pos in _bloom_positions(element, bits):
+    for pos in _bloom_positions(bloom_digest(element), bits):
         tier[pos // 8] |= (1 << (pos % 8))
     bf.count += 1

@@ -40,9 +40,13 @@ class TestBloomTree(unittest.TestCase):
 
         tree.insert(0, variants)
         tree.set_leaf_start_hash(0, block_hash)
-        # Random element should not match the known block hash
-        results = bloom_search(tree.root, os.urandom(160))
-        self.assertNotIn(block_hash, results)
+        # Absent elements should almost never match the known block hash
+        probes = 2000
+        hits = sum(
+            block_hash in bloom_search(tree.root, os.urandom(160))
+            for _ in range(probes)
+        )
+        self.assertLess(hits / probes, 0.02)
 
     def test_two_blocks_different_paths(self):
         tree = BloomTree()
