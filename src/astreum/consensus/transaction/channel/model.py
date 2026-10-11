@@ -6,6 +6,7 @@ from typing import Optional
 from astreum.expression import Expr, NIL, resolve_list_exprs, link, int_
 from astreum.expression import ZERO32
 from astreum.storage.exprs import get_expr_list
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 @dataclass
@@ -60,18 +61,18 @@ class Channel:
         if not head_hash or head_hash == ZERO32:
             return None
         header = get_expr_list(node, head_hash, contact=contact)
-        if header is None or not header._tag == "link":
+        if header is None or not get_expr_builtin_tag(header) == "link":
             return None
         nodes, missed = resolve_list_exprs(node, header, contact=contact)
         if missed:
             return None
         if len(nodes) != 3:
             return None
-        if not nodes[0]._tag == "int":
+        if not get_expr_builtin_tag(nodes[0]) == "int":
             return None
-        if not nodes[1]._tag == "int":
+        if not get_expr_builtin_tag(nodes[1]) == "int":
             return None
-        if not nodes[2]._tag == "int":
+        if not get_expr_builtin_tag(nodes[2]) == "int":
             return None
         return cls(
             balance=nodes[0].value,

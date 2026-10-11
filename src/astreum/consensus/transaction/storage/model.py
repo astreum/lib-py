@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from astreum.expression import Expr, NIL, resolve_list_exprs, link, int_, bytes_
-from astreum.expression import ZERO32, get_expr_tag, get_expr_value
+from astreum.expression import ZERO32, get_expr_tag, get_expr_builtin_tag, get_expr_value
 from astreum.storage.exprs import get_expr
 
 
@@ -81,8 +81,8 @@ class StorageRecord:
                 continue
             seen.add(h)
             out.append(e)
-            if e._tag == "link":
-                for child in (e._tail, e._head):
+            if get_expr_builtin_tag(e) == "link":
+                for child in (e.tail, e.head):
                     if child is not None:
                         stack.append(child)
         return out
@@ -97,11 +97,11 @@ class StorageRecord:
         Returns:
             The hash bytes or ZERO32.
         """
-        if n._tag == "link":
-            if n._head_hash is not None:
-                return n._head_hash
-            if n._head is not None:
-                return n._head.hash()
+        if get_expr_builtin_tag(n) == "link":
+            if n.head_hash is not None:
+                return n.head_hash
+            if n.head is not None:
+                return n.head.hash()
         return ZERO32
 
     @classmethod
@@ -118,7 +118,7 @@ class StorageRecord:
         cls, node: Any, header: Optional[Expr], contact=None, block_hash=None
     ) -> StorageRecord | None:
         """Parse a record header already in hand (the layout lives here)."""
-        if header is None or not header._tag == "link":
+        if header is None or not get_expr_builtin_tag(header) == "link":
             return None
         nodes, missed = resolve_list_exprs(node, header, contact=contact, block_hash=block_hash)
         if missed:

@@ -9,14 +9,15 @@ if str(SRC_DIR) not in sys.path:
 
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
@@ -29,33 +30,33 @@ class TestSpecialFormQuote(unittest.TestCase):
     def test_quote_int(self):
         expr, _ = parse(tokenize("(' 42)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 42)
 
     def test_quote_symbol(self):
         expr, _ = parse(tokenize("(' hello)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "symbol")
+        self.assertEqual(get_expr_builtin_tag(result), "symbol")
         self.assertEqual(result.value, "hello")
 
     def test_quote_list(self):
         expr, _ = parse(tokenize("(' (1 2 3))"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
+        self.assertEqual(get_expr_builtin_tag(result), "link")
 
     def test_quote_no_arg(self):
         expr, _ = parse(tokenize("(')"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_special_form_still_works(self):
         expr, _ = parse(tokenize("(' (1 2 add))"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertEqual(result._head._tag, "int")
-        self.assertEqual(result._head.value, 1)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertEqual(get_expr_builtin_tag(result.head), "int")
+        self.assertEqual(result.head.value, 1)
 
 
 class TestQuoteOperator(unittest.TestCase):
@@ -67,26 +68,26 @@ class TestQuoteOperator(unittest.TestCase):
     def test_quote_wraps_unbound_variable_as_nil(self):
         expr, _ = parse(tokenize("(hello quote)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertEqual(result._head._tag, "symbol")
-        self.assertEqual(result._head.value, "'")
-        self.assertEqual(result._tail._tag, "link")
-        self.assertIsNone(result._tail._head)
-        self.assertIsNone(result._tail._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertEqual(get_expr_builtin_tag(result.head), "symbol")
+        self.assertEqual(result.head.value, "'")
+        self.assertEqual(get_expr_builtin_tag(result.tail), "link")
+        self.assertIsNone(result.tail.head)
+        self.assertIsNone(result.tail.tail)
 
     def test_quote_wraps_quoted_symbol(self):
         expr, _ = parse(tokenize("((' hello) quote)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertEqual(result._head._tag, "symbol")
-        self.assertEqual(result._head.value, "'")
-        self.assertEqual(result._tail._tag, "symbol")
-        self.assertEqual(result._tail.value, "hello")
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertEqual(get_expr_builtin_tag(result.head), "symbol")
+        self.assertEqual(result.head.value, "'")
+        self.assertEqual(get_expr_builtin_tag(result.tail), "symbol")
+        self.assertEqual(result.tail.value, "hello")
 
     def test_quote_then_eval(self):
         expr, _ = parse(tokenize("((' 42) eval)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 42)
 
 

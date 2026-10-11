@@ -12,7 +12,7 @@ def expr_equal(x: Any, y: Any) -> bool:
     x_tag = get_expr_tag(x)
     y_tag = get_expr_tag(y)
     if x_tag == "link" and y_tag == "link":
-        return expr_equal(x._head, y._head) and expr_equal(x._tail, y._tail)
+        return expr_equal(x.head, y.head) and expr_equal(x.tail, y.tail)
     if x_tag != y_tag:
         return False
     if x_tag == "int":

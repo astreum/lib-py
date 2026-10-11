@@ -40,6 +40,7 @@ from _helpers import (
     seed_storage_account,
     store_expr_tree,
 )
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 class TestGenerateInitialStorageRecord(unittest.TestCase):
@@ -66,7 +67,7 @@ class TestGenerateInitialStorageRecord(unittest.TestCase):
         self.assertEqual(len(set(slots)), 3)
         # in walk order: the head x, then the tail link (its x is already slotted)
         self.assertEqual(slots[0], x.hash())
-        self.assertEqual(slots[1], tree._tail.hash())
+        self.assertEqual(slots[1], tree.tail.hash())
 
     def test_subexpr_in_global_storage_goes_to_found(self):
         """Expr already in global radix tree → in found_exprs, not slotted."""
@@ -190,7 +191,7 @@ class TestRecordRoundTrip(unittest.TestCase):
         record._expr = None
         nodes, _ = resolve_list_exprs(self.node, record.expr())
         # [last_payment_block_hash, height, winner, creation, slots_root, count, size]
-        self.assertEqual([n._tag for n in nodes], ["link", "int", "bytes", "link", "bytes", "int", "int"])
+        self.assertEqual([get_expr_builtin_tag(n) for n in nodes], ["link", "int", "bytes", "link", "bytes", "int", "int"])
         self.assertEqual(nodes[2].value, record.last_payment_winner)
         self.assertEqual(nodes[4].value, record.slots_root)
 

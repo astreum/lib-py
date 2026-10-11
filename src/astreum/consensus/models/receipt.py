@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Optional
 
-from astreum.expression import Expr, NIL, get_expr_tag, get_expr_value, resolve_list_exprs, link, int_, symbol
+from astreum.expression import Expr, NIL, get_expr_tag, get_expr_builtin_tag, get_expr_value, resolve_list_exprs, link, int_, symbol
 from astreum.expression import ZERO32
 from astreum.storage.exprs import get_expr_list
 
@@ -135,20 +135,20 @@ class Receipt:
         header = get_expr_list(node, receipt_id, contact=contact, **scope)
         if header is None:
             raise ValueError("unable to load receipt from storage")
-        if not header._tag == "link":
+        if not get_expr_builtin_tag(header) == "link":
             raise ValueError("receipt header must be a Link")
-        if header._tail is None or header._tail._tag != "symbol" or header._tail.value != "receipt":
+        if header.tail is None or get_expr_builtin_tag(header.tail) != "symbol" or header.tail.value != "receipt":
             raise ValueError(
-                f"invalid receipt type tag (got {header._tail!r})"
+                f"invalid receipt type tag (got {header.tail!r})"
             )
 
-        inner = header._head
-        if inner is None and header._head_hash is not None:
+        inner = header.head
+        if inner is None and header.head_hash is not None:
             from astreum.storage.exprs import get_expr
 
-            inner = get_expr(node, header._head_hash, contact=contact, **scope)
-            header._head = inner
-        if inner is None or inner._tag != "link":
+            inner = get_expr(node, header.head_hash, contact=contact, **scope)
+            header.head = inner
+        if inner is None or get_expr_builtin_tag(inner) != "link":
             raise ValueError("receipt inner header must be a Link")
 
         inner_nodes, missed = resolve_list_exprs(node, inner, contact=contact, **scope)
@@ -162,7 +162,7 @@ class Receipt:
             )
 
         body = inner_nodes[0]
-        if not body._tag == "link":
+        if not get_expr_builtin_tag(body) == "link":
             raise ValueError("receipt body must be a Link chain")
 
         body_nodes, tx_hash, missed = _read_body(node, body, contact, scope)
@@ -188,15 +188,15 @@ class Receipt:
             raise ValueError("expected Int for data_fee")
         if not get_expr_tag(execution_fee_node, node, contact, block_hash) == "int":
             raise ValueError("expected Int for execution_fee")
-        if not logs_node._tag == "link":
+        if not get_expr_builtin_tag(logs_node) == "link":
             raise ValueError("expected Link for logs_hash")
         # No logs: the hash is ZERO32, which a stored cell reads back as NIL.
-        if logs_node._head_hash is not None:
-            logs_hash = logs_node._head_hash
-        elif logs_node._head is None or logs_node._head is NIL:
+        if logs_node.head_hash is not None:
+            logs_hash = logs_node.head_hash
+        elif logs_node.head is None or logs_node.head is NIL:
             logs_hash = ZERO32
         else:
-            logs_hash = logs_node._head.hash()
+            logs_hash = logs_node.head.hash()
         if not get_expr_tag(status_node, node, contact, block_hash) == "int":
             raise ValueError("expected Int for status")
         if not get_expr_tag(storage_fee_node, node, contact, block_hash) == "int":

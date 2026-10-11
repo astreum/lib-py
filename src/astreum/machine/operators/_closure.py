@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, List
 
 from astreum.expression import Expr, NIL, link, symbol, str_
 from astreum.machine import OpError
+from astreum.expression.helpers import get_expr_builtin_tag
 
 if TYPE_CHECKING:
     from astreum.machine.main import Machine
@@ -24,8 +25,8 @@ def handle_stack_closure(machine: "Machine", stack: List[Expr], env) -> None:
         raise OpError("stack underflow")
     params = stack.pop()
 
-    if params._tag != "link":
-        raise OpError(f"closure of {params._tag}")
+    if get_expr_builtin_tag(params) != "link":
+        raise OpError(f"closure of {get_expr_builtin_tag(params)}")
 
     machine.meter.charge_bytes(params.size() + body.size())
 

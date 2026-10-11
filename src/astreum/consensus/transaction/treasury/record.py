@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any, Optional
 
-from astreum.expression import Expr, NIL, resolve_list_exprs, link, int_, bytes_, get_expr_tag, get_expr_value
+from astreum.expression import Expr, NIL, resolve_list_exprs, link, int_, bytes_, get_expr_tag, get_expr_builtin_tag, get_expr_value
 from astreum.expression import ZERO32
 from astreum.expression.refs import pointer_item
 from astreum.storage.exprs import get_expr_list
@@ -141,7 +141,7 @@ class TreasuryUserRecord:
             return None
         scope = {} if block_hash is None else {"block_hash": block_hash}
         header = get_expr_list(node, head_hash, contact=contact, **scope)
-        if header is None or not header._tag == "link":
+        if header is None or not get_expr_builtin_tag(header) == "link":
             return None
         nodes, missed = resolve_list_exprs(node, header, contact=contact, **scope)
         if missed:
@@ -273,7 +273,7 @@ def _claimed_guarantees_from_expr(
         if sub_missed or len(sub_nodes) != 3:
             return None
         guarantor_node, guarantee_node, guarantee_amount_node = sub_nodes
-        if guarantor_node._tag != "bytes" or guarantee_node._tag != "bytes":
+        if get_expr_builtin_tag(guarantor_node) != "bytes" or get_expr_builtin_tag(guarantee_node) != "bytes":
             return None
         if get_expr_tag(guarantee_amount_node, node, contact, block_hash) != "int":
             return None
@@ -366,7 +366,7 @@ class TreasuryLoanRecord:
             return None
         scope = {} if block_hash is None else {"block_hash": block_hash}
         header = get_expr_list(node, head_hash, contact=contact, **scope)
-        if header is None or not header._tag == "link":
+        if header is None or not get_expr_builtin_tag(header) == "link":
             return None
         nodes, missed = resolve_list_exprs(node, header, contact=contact, **scope)
         if missed:
@@ -386,7 +386,7 @@ class TreasuryLoanRecord:
                 claimed_guarantees = decoded
                 continue
             if i == 10:
-                if n._tag != "bytes":
+                if get_expr_builtin_tag(n) != "bytes":
                     return None
                 owner = n.value
                 continue
@@ -499,7 +499,7 @@ class TreasuryGuarantee:
             return None
         scope = {} if block_hash is None else {"block_hash": block_hash}
         header = get_expr_list(node, head_hash, contact=contact, **scope)
-        if header is None or not header._tag == "link":
+        if header is None or not get_expr_builtin_tag(header) == "link":
             return None
         nodes, missed = resolve_list_exprs(node, header, contact=contact, **scope)
         if missed:

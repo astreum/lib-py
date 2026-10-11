@@ -10,24 +10,25 @@ if str(SRC_DIR) not in sys.path:
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.expression import NIL, int_, fp64_, bytes_, str_, symbol, link
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
 def _collect_link(value):
     out = []
-    while value._tag == "link" and value._head is not None:
-        out.append(value._head)
-        if value._tail is NIL or value._tail is None:
+    while get_expr_builtin_tag(value) == "link" and value.head is not None:
+        out.append(value.head)
+        if value.tail is NIL or value.tail is None:
             break
-        value = value._tail
+        value = value.tail
     return out
 
 
@@ -43,13 +44,13 @@ class TestCountOperator(unittest.TestCase):
         """(0xff00 count) -> 2 (bytes length)."""
         expr, _ = parse(tokenize("(0xff00 count)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 2)
 
     def test_count_empty_bytes(self):
         expr, _ = parse(tokenize("(0x count)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 0)
 
     # --- str ---
@@ -58,13 +59,13 @@ class TestCountOperator(unittest.TestCase):
         '''("café" count) -> 4 (codepoints; distinct from byte-size 5).'''
         expr, _ = parse(tokenize('("café" count)'))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 4)
 
     def test_count_empty_str(self):
         expr, _ = parse(tokenize('("" count)'))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 0)
 
     # --- link ---
@@ -73,21 +74,21 @@ class TestCountOperator(unittest.TestCase):
         """('(a b c d) count) -> 4 (list element count, not tree byte size)."""
         expr, _ = parse(tokenize("('(a b c d) count)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 4)
 
     def test_count_empty_link(self):
         """(() count) -> 0 (empty list)."""
         expr, _ = parse(tokenize("(() count)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 0)
 
     def test_count_link_with_nested_elements(self):
         """('((1 2) (3 4) (5)) count) -> 3 (each element counts once regardless of inner size)."""
         expr, _ = parse(tokenize("('((1 2) (3 4) (5)) count)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 3)
 
     # --- error: non-sequence tags ---
@@ -96,17 +97,17 @@ class TestCountOperator(unittest.TestCase):
         """(42 count) -> NIL (int has no element count)."""
         expr, _ = parse(tokenize("(42 count)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_count_underflow_returns_nil(self):
         """(count) -> NIL."""
         expr, _ = parse(tokenize("(count)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     # --- tagged count ---
 
@@ -114,33 +115,33 @@ class TestCountOperator(unittest.TestCase):
         expr, _ = parse(tokenize("(0xff00 count?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head.value, 2)
+        self.assertEqual(result.head.value, 2)
 
     def test_count_str_ok_tagged(self):
         expr, _ = parse(tokenize('("café" count?)'))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head.value, 4)
+        self.assertEqual(result.head.value, 4)
 
     def test_count_link_ok_tagged(self):
         expr, _ = parse(tokenize("('(a b c d) count?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head.value, 4)
+        self.assertEqual(result.head.value, 4)
 
     def test_count_err_tagged(self):
         """(42 count?) -> (err . "count of int")."""
         expr, _ = parse(tokenize("(42 count?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "count of int")
+        self.assertEqual(result.head.value, "count of int")
 
     def test_count_underflow_err_tagged(self):
         """(count?) -> (err . "stack underflow")."""
         expr, _ = parse(tokenize("(count?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "stack underflow")
+        self.assertEqual(result.head.value, "stack underflow")
 
 
 if __name__ == "__main__":

@@ -10,24 +10,25 @@ if str(SRC_DIR) not in sys.path:
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.expression import NIL, int_, fp64_, bytes_, str_, symbol, link
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
 def _collect_link(value):
     out = []
-    while value._tag == "link" and value._head is not None:
-        out.append(value._head)
-        if value._tail is NIL or value._tail is None:
+    while get_expr_builtin_tag(value) == "link" and value.head is not None:
+        out.append(value.head)
+        if value.tail is NIL or value.tail is None:
             break
-        value = value._tail
+        value = value.tail
     return out
 
 
@@ -47,13 +48,13 @@ class TestReverseOperator(unittest.TestCase):
         """(0x010203 reverse) -> 0x030201."""
         expr, _ = parse(tokenize("(0x010203 reverse)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "bytes")
+        self.assertEqual(get_expr_builtin_tag(result), "bytes")
         self.assertEqual(result.value, b"\x03\x02\x01")
 
     def test_reverse_empty_bytes(self):
         expr, _ = parse(tokenize("(0x reverse)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "bytes")
+        self.assertEqual(get_expr_builtin_tag(result), "bytes")
         self.assertEqual(result.value, b"")
 
     # --- str ---
@@ -62,20 +63,20 @@ class TestReverseOperator(unittest.TestCase):
         '''("abc" reverse) -> "cba".'''
         expr, _ = parse(tokenize('("abc" reverse)'))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "str")
+        self.assertEqual(get_expr_builtin_tag(result), "str")
         self.assertEqual(result.value, "cba")
 
     def test_reverse_str_codepoint_boundaries(self):
         '''("café" reverse) -> "éfac" — codepoint, not utf8-byte reversal.'''
         expr, _ = parse(tokenize('("café" reverse)'))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "str")
+        self.assertEqual(get_expr_builtin_tag(result), "str")
         self.assertEqual(result.value, "éfac")
 
     def test_reverse_empty_str(self):
         expr, _ = parse(tokenize('("" reverse)'))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "str")
+        self.assertEqual(get_expr_builtin_tag(result), "str")
         self.assertEqual(result.value, "")
 
     # --- link ---
@@ -84,7 +85,7 @@ class TestReverseOperator(unittest.TestCase):
         """('(1 2 3) reverse) -> '(3 2 1)."""
         expr, _ = parse(tokenize("('(1 2 3) reverse)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
+        self.assertEqual(get_expr_builtin_tag(result), "link")
         self.assertEqual([e.value for e in _collect_link(result)], [3, 2, 1])
 
     def test_reverse_empty_link(self):
@@ -97,16 +98,16 @@ class TestReverseOperator(unittest.TestCase):
     def test_reverse_int_returns_nil(self):
         expr, _ = parse(tokenize("(42 reverse)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_reverse_underflow_returns_nil(self):
         expr, _ = parse(tokenize("(reverse)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     # --- tagged reverse ---
 
@@ -114,31 +115,31 @@ class TestReverseOperator(unittest.TestCase):
         expr, _ = parse(tokenize("(0x010203 reverse?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head.value, b"\x03\x02\x01")
+        self.assertEqual(result.head.value, b"\x03\x02\x01")
 
     def test_reverse_str_ok_tagged(self):
         expr, _ = parse(tokenize('("abc" reverse?)'))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head.value, "cba")
+        self.assertEqual(result.head.value, "cba")
 
     def test_reverse_link_ok_tagged(self):
         expr, _ = parse(tokenize("('(1 2 3) reverse?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual([e.value for e in _collect_link(result._head)], [3, 2, 1])
+        self.assertEqual([e.value for e in _collect_link(result.head)], [3, 2, 1])
 
     def test_reverse_err_tagged(self):
         expr, _ = parse(tokenize("(42 reverse?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "reverse of int")
+        self.assertEqual(result.head.value, "reverse of int")
 
     def test_reverse_underflow_err_tagged(self):
         expr, _ = parse(tokenize("(reverse?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "stack underflow")
+        self.assertEqual(result.head.value, "stack underflow")
 
 
 if __name__ == "__main__":

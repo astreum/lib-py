@@ -6,7 +6,7 @@ from astreum.machine import OpError
 def handle_stack_tx_amount(machine, stack, env):
     value = int_(machine.tx.amount)
     stack.append(value)
-    machine.meter.charge_bytes(len(_encode_int(value._value)))
+    machine.meter.charge_bytes(len(_encode_int(value.value)))
 
 
 def handle_stack_tx_amount_with_result(machine, stack, env):

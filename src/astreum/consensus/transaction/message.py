@@ -14,6 +14,7 @@ from astreum.communication.storage_response.storage_found import (
     decode_found_page,
     encode_found_pages,
 )
+from astreum.expression.helpers import get_expr_builtin_tag
 
 if TYPE_CHECKING:
     from astreum.consensus.transaction.model import Transaction
@@ -242,19 +243,19 @@ def _parse_transaction(root: Expr) -> "Transaction":
         sender_node,
     ) = body_nodes
 
-    if amount_node._tag != "int":
+    if get_expr_builtin_tag(amount_node) != "int":
         raise ValueError("expected Int for amount")
-    if chain_id_node._tag != "int":
+    if get_expr_builtin_tag(chain_id_node) != "int":
         raise ValueError("expected Int for chain_id")
-    if code_node._tag != "int":
+    if get_expr_builtin_tag(code_node) != "int":
         raise ValueError("expected Int for code")
-    if cost_limit_node._tag != "int":
+    if get_expr_builtin_tag(cost_limit_node) != "int":
         raise ValueError("expected Int for cost_limit")
-    if counter_node._tag != "int":
+    if get_expr_builtin_tag(counter_node) != "int":
         raise ValueError("expected Int for counter")
-    if recipient_node._tag != "bytes":
+    if get_expr_builtin_tag(recipient_node) != "bytes":
         raise ValueError("expected Bytes for recipient")
-    if sender_node._tag != "bytes":
+    if get_expr_builtin_tag(sender_node) != "bytes":
         raise ValueError("expected Bytes for sender")
 
     tx_hash = root.hash()

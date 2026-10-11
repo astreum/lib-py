@@ -10,7 +10,7 @@ if str(SRC_DIR) not in sys.path:
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.machine.meter import MeterExceededError
-from astreum.expression import get_expr_tag
+from astreum.expression import get_expr_tag, get_expr_builtin_tag
 
 
 class TestOperatorOverride(unittest.TestCase):
@@ -23,28 +23,28 @@ class TestOperatorOverride(unittest.TestCase):
         """def shadows try in non-det mode: try resolves to 42, not the operator."""
         expr, _ = parse(tokenize("(42 'try def '(\"fail\") try)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 42)
 
     def test_ok_overridden_with_value(self):
         """def shadows ok in non-det mode: ok resolves to 99, not the constructor."""
         expr, _ = parse(tokenize("(99 'ok def 5 ok)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 99)
 
     def test_operator_override_runs_bound_program(self):
         """Dynamic mode evaluates a bound operator name: (0x01 'ok def 5 ok) -> 0x01."""
         expr, _ = parse(tokenize("(0x01 'ok def 5 ok)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "bytes")
+        self.assertEqual(get_expr_builtin_tag(result), "bytes")
         self.assertEqual(result.value, b"\x01")
 
     def test_quote_migration_recovers_push_semantics(self):
         """A quoted value restores push-semantics: ('('custom_msg) 'err def 5 err) -> custom_msg."""
         expr, _ = parse(tokenize("('('custom_msg) 'err def 5 err)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "symbol")
+        self.assertEqual(get_expr_builtin_tag(result), "symbol")
         self.assertEqual(result.value, "custom_msg")
 
     def test_self_reference_metered_machine(self):
@@ -67,14 +67,14 @@ class TestOperatorOverride(unittest.TestCase):
         expr, _ = parse(tokenize("(99 'ok def 5 ok)"))
         result = machine.run(expr=expr)
         self.assertEqual(get_expr_tag(result), "ok")
-        self.assertEqual(result._head._tag, "int")
-        self.assertEqual(result._head.value, 5)
+        self.assertEqual(get_expr_builtin_tag(result.head), "int")
+        self.assertEqual(result.head.value, 5)
 
     def test_noop_binding_leaves_stack_as_is(self):
         """A binding of nil evaluates as a no-op: ('(nil) 'err def 5 err) -> 5."""
         expr, _ = parse(tokenize("('(nil) 'err def 5 err)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 5)
 
 

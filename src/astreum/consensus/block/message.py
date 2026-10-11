@@ -62,19 +62,19 @@ def block_header_exprs(block_expr: Expr) -> List[Expr]:
         # refers to the encoded value as a separate bytes expr, which the
         # receiver needs to read the value back.
         if (
-            expr._head is None
+            expr.head is None
             and expr.value is not None
-            and expr._tail is not None
-            and expr._tail.base == "symbol"
+            and expr.tail is not None
+            and expr.tail.base == "symbol"
         ):
-            encoder = TAG_BYTE_ENCODINGS.get(expr._tail.value)
+            encoder = TAG_BYTE_ENCODINGS.get(expr.tail.value)
             if encoder is not None:
                 stack.append(bytes_(encoder(expr.value)))
         # Push tail first so the head is visited first.
-        if expr._tail is not None:
-            stack.append(expr._tail)
-        if expr._head is not None:
-            stack.append(expr._head)
+        if expr.tail is not None:
+            stack.append(expr.tail)
+        if expr.head is not None:
+            stack.append(expr.head)
     return result
 
 

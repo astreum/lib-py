@@ -16,6 +16,7 @@ from astreum.consensus.models.accounts import Accounts
 from astreum.expression import NIL, ZERO32, int_, fp64_, bytes_, str_, symbol, link
 from astreum.storage.radix import RadixTree, put_in_radix_tree
 from astreum.consensus.account import create_account
+from astreum.expression.helpers import get_expr_builtin_tag
 
 BLOCK = b"\xb1" * 32
 BLOCK_HEX = BLOCK.hex()
@@ -24,15 +25,15 @@ ZERO_HEX = "00" * 32
 
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
 def _is_nil(result):
-    return result._tag == "link" and result._head is None and result._tail is None
+    return get_expr_builtin_tag(result) == "link" and result.head is None and result.tail is None
 
 
 class FakeNode:
@@ -65,8 +66,8 @@ def store(node, expr):
     while stack:
         e = stack.pop()
         node.hot_storage[e.hash()] = e
-        if e._tag == "link":
-            stack.extend(c for c in (e._head, e._tail) if c is not None)
+        if get_expr_builtin_tag(e) == "link":
+            stack.extend(c for c in (e.head, e.tail) if c is not None)
 
 
 def machine_with_blocks(node, *blocks):
@@ -94,7 +95,7 @@ class TestRefOperator(unittest.TestCase):
         expr, _ = parse(tokenize(f"(0x{'01' * 32} ref?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "stack underflow")
+        self.assertEqual(result.head.value, "stack underflow")
 
     def test_ref_zero32_returns_nil(self):
         expr, _ = parse(tokenize(f"(0x{BLOCK_HEX} 0x{ZERO_HEX} ref)"))
@@ -117,7 +118,7 @@ class TestRefOperator(unittest.TestCase):
         node = FakeNode()
         node.hot_storage[stored.hash()] = stored
         result = Machine(node=node).run(expr=_ref_expr(stored.hash()))
-        self.assertEqual(result._tag, "symbol")
+        self.assertEqual(get_expr_builtin_tag(result), "symbol")
         self.assertEqual(result.value, "hello")
 
     def test_ref_asks_the_block_for_the_expr(self):
@@ -153,38 +154,38 @@ class TestRefOperator(unittest.TestCase):
         node = FakeNode()
         node.hot_storage[stored.hash()] = stored
         result = Machine(node=node, mode="deterministic").run(expr=_ref_expr(stored.hash()))
-        self.assertEqual(result._tag, "bytes")
+        self.assertEqual(get_expr_builtin_tag(result), "bytes")
         self.assertEqual(result.value, b"\x01\x02\x03")
 
     def test_ref_zero32_ok(self):
         expr, _ = parse(tokenize(f"(0x{BLOCK_HEX} 0x{ZERO_HEX} ref?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertTrue(_is_nil(result._head))
+        self.assertTrue(_is_nil(result.head))
 
     def test_ref_non_bytes_err(self):
         expr, _ = parse(tokenize(f'(0x{BLOCK_HEX} "not-a-hash" ref?)'))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "ref requires 32-byte hash, got str")
+        self.assertEqual(result.head.value, "ref requires 32-byte hash, got str")
 
     def test_ref_short_bytes_err(self):
         expr, _ = parse(tokenize(f"(0x{BLOCK_HEX} 0xdead ref?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "ref requires 32-byte hash, got 2 bytes")
+        self.assertEqual(result.head.value, "ref requires 32-byte hash, got 2 bytes")
 
     def test_ref_bad_block_err(self):
         expr, _ = parse(tokenize(f"(0xdead 0x{'01' * 32} ref?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "ref requires 32-byte block id, got 2 bytes")
+        self.assertEqual(result.head.value, "ref requires 32-byte block id, got 2 bytes")
 
     def test_ref_no_node_err(self):
         expr, _ = parse(tokenize(f"(0x{BLOCK_HEX} 0x{'01' * 32} ref?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "ref requires a node connection")
+        self.assertEqual(result.head.value, "ref requires a node connection")
 
 
 class TestRefBlocks(unittest.TestCase):
@@ -212,14 +213,14 @@ class TestRefBlocks(unittest.TestCase):
             errors.append(machine.run(expr=expr))
         for result in errors:
             self.assertTrue(_is_tagged(result, "err"))
-            self.assertEqual(result._head.value, "ref: unknown block")
+            self.assertEqual(result.head.value, "ref: unknown block")
 
     def test_a_block_header_is_read_as_its_own_block(self):
         header = link(bytes_(b"h"), link(bytes_(b"e"), NIL))
         store(self.node, header)
         machine = machine_with_blocks(self.node, header.hash())
         result = machine.run(expr=_ref_expr(header.hash(), block=header.hash()))
-        self.assertEqual(result._tag, "link")
+        self.assertEqual(get_expr_builtin_tag(result), "link")
 
 
 class TestRefThunks(unittest.TestCase):
@@ -232,11 +233,11 @@ class TestRefThunks(unittest.TestCase):
         store(node, tail)
         node.hot_storage[cell.hash()] = cell
         result = Machine(node=node).run(expr=_ref_expr(cell.hash()))
-        self.assertEqual(result._tag, "link")
-        for thunk, child in ((result._head, head), (result._tail, tail)):
-            self.assertEqual(thunk._head.value, BLOCK)
-            self.assertEqual(thunk._tail._head.value, child.hash())
-            self.assertEqual(thunk._tail._tail.value, "ref")
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        for thunk, child in ((result.head, head), (result.tail, tail)):
+            self.assertEqual(thunk.head.value, BLOCK)
+            self.assertEqual(thunk.tail.head.value, child.hash())
+            self.assertEqual(thunk.tail.tail.value, "ref")
 
     def test_thunk_evaluates_to_the_child(self):
         tail = bytes_(b"tail")
@@ -246,7 +247,7 @@ class TestRefThunks(unittest.TestCase):
         for e in (head, tail, cell):
             node.hot_storage[e.hash()] = e
         pair = Machine(node=node).run(expr=_ref_expr(cell.hash()))
-        again = Machine(node=node).run(expr=pair._head)
+        again = Machine(node=node).run(expr=pair.head)
         self.assertEqual(again.value, b"head")
 
 
@@ -267,16 +268,16 @@ class TestStoredRefs(unittest.TestCase):
     def test_ref_follows_one_level_and_thunks_carry_the_new_block(self):
         machine = machine_with_blocks(self.node, BLOCK, self.OLD)
         result = machine.run(expr=_ref_expr(self.pointer.hash()))
-        self.assertEqual(result._head._head.value, self.OLD)
-        self.assertEqual(result._head._tail._head.value, self.target_head.hash())
-        self.assertEqual(result._tail._head.value, self.OLD)
+        self.assertEqual(result.head.head.value, self.OLD)
+        self.assertEqual(result.head.tail.head.value, self.target_head.hash())
+        self.assertEqual(result.tail.head.value, self.OLD)
 
     def test_the_new_block_is_checked_too(self):
         machine = machine_with_blocks(self.node, BLOCK)  # OLD is not a key
         expr, _ = parse(tokenize(f"(0x{BLOCK_HEX} 0x{self.pointer.hash().hex()} ref?)"))
         result = machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "ref: unknown block")
+        self.assertEqual(result.head.value, "ref: unknown block")
 
     def test_a_ref_to_a_ref_is_returned_as_data(self):
         outer = stored_ref(BLOCK, self.pointer.hash())
@@ -285,15 +286,15 @@ class TestStoredRefs(unittest.TestCase):
         result = machine.run(expr=_ref_expr(outer.hash()))
         # Followed once: the cell of the inner ref, handed back as thunks over
         # its own children, not followed again.
-        self.assertEqual(result._head._head.value, BLOCK)
-        self.assertEqual(result._head._tail._head.value, self.pointer._head.hash())
+        self.assertEqual(result.head.head.value, BLOCK)
+        self.assertEqual(result.head.tail.head.value, self.pointer.head.hash())
 
     def test_an_ordinary_cell_is_not_mistaken_for_a_ref(self):
         ordinary = link(bytes_(b"x" * 32), link(bytes_(b"y" * 32), link(symbol("nope"), NIL)))
         store(self.node, ordinary)
         machine = machine_with_blocks(self.node, BLOCK)
         result = machine.run(expr=_ref_expr(ordinary.hash()))
-        self.assertEqual(result._head._head.value, BLOCK)
+        self.assertEqual(result.head.head.value, BLOCK)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 from typing import List
 
-from astreum.expression import Expr, NIL, get_expr_tag, link, str_, symbol
+from astreum.expression import Expr, NIL, get_expr_tag, get_expr_builtin_tag, link, str_, symbol
 from astreum.machine import OpError
 
 
@@ -10,8 +10,8 @@ def handle_stack_init(machine, stack: List[Expr], env) -> None:
     tag_expr = stack.pop()
     value_expr = stack.pop()
 
-    if tag_expr._tag != "symbol":
-        raise OpError(f"init requires a symbol tag, got {tag_expr._tag}")
+    if get_expr_builtin_tag(tag_expr) != "symbol":
+        raise OpError(f"init requires a symbol tag, got {get_expr_builtin_tag(tag_expr)}")
 
     tag = tag_expr.value
 

@@ -10,24 +10,25 @@ if str(SRC_DIR) not in sys.path:
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.expression import NIL, int_, fp64_, bytes_, str_, symbol, link
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
 def _collect_link(value):
     out = []
-    while value._tag == "link" and value._head is not None:
-        out.append(value._head)
-        if value._tail is NIL or value._tail is None:
+    while get_expr_builtin_tag(value) == "link" and value.head is not None:
+        out.append(value.head)
+        if value.tail is NIL or value.tail is None:
             break
-        value = value._tail
+        value = value.tail
     return out
 
 
@@ -43,34 +44,34 @@ class TestFindOperator(unittest.TestCase):
         """('(1 2 3 4) '(2 % 0 is_eq) find) -> link(2, some)."""
         expr, _ = parse(tokenize("('(1 2 3 4) '(2 % 0 is_eq) find)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertEqual(result._head.value, 2)
-        self.assertEqual(result._tail._tag, "symbol")
-        self.assertEqual(result._tail.value, "some")
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertEqual(result.head.value, 2)
+        self.assertEqual(get_expr_builtin_tag(result.tail), "symbol")
+        self.assertEqual(result.tail.value, "some")
 
     def test_find_first_among_others_returns_first_only(self):
         """('(2 4 6) '(2 % 0 is_eq) find) -> link(2, some) (not 4 or 6 — first match)."""
         expr, _ = parse(tokenize("('(2 4 6) '(2 % 0 is_eq) find)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._head.value, 2)
+        self.assertEqual(result.head.value, 2)
 
     def test_find_no_match(self):
         """('(1 3 5) '(2 % 0 is_eq) find) -> link(str_("not found"), none)."""
         expr, _ = parse(tokenize("('(1 3 5) '(2 % 0 is_eq) find)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._head._tag, "str")
-        self.assertEqual(result._head.value, "not found")
-        self.assertEqual(result._tail.value, "none")
+        self.assertEqual(get_expr_builtin_tag(result.head), "str")
+        self.assertEqual(result.head.value, "not found")
+        self.assertEqual(result.tail.value, "none")
 
     def test_find_empty_returns_none(self):
         expr, _ = parse(tokenize("(() '(2 % 0 is_eq) find)"))
         result = self.machine.run(expr=expr)
         self.assertIsNotNone(result)
-        self.assertEqual(result._tag, "link")
-        self.assertEqual(result._head._tag, "str")
-        self.assertEqual(result._head.value, "not found")
-        self.assertEqual(result._tail._tag, "symbol")
-        self.assertEqual(result._tail.value, "none")
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertEqual(get_expr_builtin_tag(result.head), "str")
+        self.assertEqual(result.head.value, "not found")
+        self.assertEqual(get_expr_builtin_tag(result.tail), "symbol")
+        self.assertEqual(result.tail.value, "none")
 
     # --- short-circuit: walker must stop on first match ---
 
@@ -90,30 +91,30 @@ class TestFindOperator(unittest.TestCase):
         # Predicate: element-bytes vs constant bytes.
         expr, _ = parse(tokenize("(0x0102 '(0x02 is_eq) find)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._head.value, b"\x02")
-        self.assertEqual(result._tail.value, "some")
+        self.assertEqual(result.head.value, b"\x02")
+        self.assertEqual(result.tail.value, "some")
 
     # --- error: non-closure fn or non-sequence ---
 
     def test_find_non_closure_fn(self):
         expr, _ = parse(tokenize("('(1 2 3) 42 find)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_find_non_sequence(self):
         expr, _ = parse(tokenize("(42 '(0 is_eq) find)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
 
     def test_find_underflow_returns_nil(self):
         expr, _ = parse(tokenize("(find)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     # --- tagged find ---
 
@@ -121,15 +122,15 @@ class TestFindOperator(unittest.TestCase):
         expr, _ = parse(tokenize("('(1 2 3 4) '(2 % 0 is_eq) find?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head._head.value, 2)
-        self.assertEqual(result._head._tail.value, "some")
+        self.assertEqual(result.head.head.value, 2)
+        self.assertEqual(result.head.tail.value, "some")
 
     def test_find_none_tagged(self):
         expr, _ = parse(tokenize("('(1 3 5) '(0 is_eq) find?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head._head.value, "not found")
-        self.assertEqual(result._head._tail.value, "none")
+        self.assertEqual(result.head.head.value, "not found")
+        self.assertEqual(result.head.tail.value, "none")
 
     def test_find_type_err_tagged(self):
         expr, _ = parse(tokenize("('(1 2 3) 42 find?)"))
@@ -145,7 +146,7 @@ class TestFindOperator(unittest.TestCase):
         ))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "some"))
-        self.assertEqual(result._head.value, 2)
+        self.assertEqual(result.head.value, 2)
 
     def test_find_apply_style_lex_closure_no_match(self):
         """Apply-style predicate with no match -> not-found none."""
@@ -154,14 +155,14 @@ class TestFindOperator(unittest.TestCase):
         ))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "none"))
-        self.assertEqual(result._head.value, "not found")
+        self.assertEqual(result.head.value, "not found")
 
     def test_find_apply_style_dyn_closure_sees_caller_env(self):
         """dyn-tagged predicate finds first elem above caller-bound threshold."""
         expr, _ = parse(tokenize("(2 'threshold def '(((a threshold >) . (a)) . dyn) 'f def '(1 2 3 4) '((f) apply) find)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "some"))
-        self.assertEqual(result._head.value, 3)
+        self.assertEqual(result.head.value, 3)
 
     def test_find_apply_style_pure_closure_isolated(self):
         """Pure fn (parent=None): threshold unbound -> predicate yields NIL
@@ -169,14 +170,14 @@ class TestFindOperator(unittest.TestCase):
         expr, _ = parse(tokenize("(2 'threshold def '(((a threshold >) . (a)) . pure) 'f def '(1 2 3 4) '((f) apply) find)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "none"))
-        self.assertEqual(result._head.value, "not found")
+        self.assertEqual(result.head.value, "not found")
 
     def test_find_eval_style_spec_runs_bound_program(self):
         """'(p eval) — head pushes the bound predicate, eval runs it on the element."""
         expr, _ = parse(tokenize("(('(2 % 0 is_eq)) 'p def '(1 2 3 4) '(p eval) find)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "some"))
-        self.assertEqual(result._head.value, 2)
+        self.assertEqual(result.head.value, 2)
 
     def test_find_apply_spec_two_params_underflows(self):
         """A 2-param apply-style spec underflows per element -> NIL each -> not found."""
@@ -185,7 +186,7 @@ class TestFindOperator(unittest.TestCase):
         ))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "none"))
-        self.assertEqual(result._head.value, "not found")
+        self.assertEqual(result.head.value, "not found")
 
     def test_find_raw_tagged_closure_rejected(self):
         """A raw tagged fn value is not a program -> OpError -> NIL. Apply-wrap it."""

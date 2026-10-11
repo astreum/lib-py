@@ -48,6 +48,7 @@ from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.models.accounts import Accounts
 from astreum.consensus.models.block import Block
 from astreum.consensus.block.create import create_block
+from astreum.expression.helpers import get_expr_builtin_tag
 
 # Expr concrete types (Expr is a namespace class, not a base class).
 _EXPR_TYPES = (Expr,)
@@ -112,11 +113,11 @@ def _walk_exprs(expr: Expr) -> list[Expr]:
             return
         visited.add(h)
         result.append(e)
-        if e._tag == "link":
-            if e._head is not None:
-                _walk(e._head)
-            if e._tail is not None:
-                _walk(e._tail)
+        if get_expr_builtin_tag(e) == "link":
+            if e.head is not None:
+                _walk(e.head)
+            if e.tail is not None:
+                _walk(e.tail)
 
     _walk(expr)
     return result

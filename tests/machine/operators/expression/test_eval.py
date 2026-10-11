@@ -9,14 +9,15 @@ if str(SRC_DIR) not in sys.path:
 
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
@@ -27,54 +28,54 @@ class TestEvalOperator(unittest.TestCase):
     def test_underflow_bare(self):
         expr, _ = parse(tokenize("(eval)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_underflow_tagged(self):
         expr, _ = parse(tokenize("(eval?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head._tag, "str")
-        self.assertEqual(result._head.value, "stack underflow")
+        self.assertEqual(get_expr_builtin_tag(result.head), "str")
+        self.assertEqual(result.head.value, "stack underflow")
 
     def test_success_bare(self):
         expr, _ = parse(tokenize("('(1 2 +) eval)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 3)
 
     def test_success_tagged(self):
         expr, _ = parse(tokenize("('(1 2 +) eval?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head._tag, "int")
-        self.assertEqual(result._head.value, 3)
+        self.assertEqual(get_expr_builtin_tag(result.head), "int")
+        self.assertEqual(result.head.value, 3)
 
     def test_eval_result_of_computation(self):
         expr, _ = parse(tokenize("(1 2 + eval)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 3)
 
     def test_eval_inherits_stack(self):
         expr, _ = parse(tokenize("(5 '(2 +) eval)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 7)
 
     def test_eval_chained(self):
         expr, _ = parse(tokenize("('(1 2 +) eval 3 +)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 6)
 
     def test_eval_quoted_unbound_symbol(self):
         expr, _ = parse(tokenize("((' x) eval)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
 
 if __name__ == "__main__":

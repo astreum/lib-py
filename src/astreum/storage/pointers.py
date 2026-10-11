@@ -14,6 +14,7 @@ from typing import Any, Optional
 from astreum.expression import Expr, ZERO32, get_referenced_hash
 from astreum.expression.refs import stored_ref_target
 from astreum.storage.exprs import get_expr
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def cell_reader(node: Any, block_hash: Optional[bytes], contact: Any = None):
@@ -33,8 +34,8 @@ def cell_reader(node: Any, block_hash: Optional[bytes], contact: Any = None):
     scope = {} if block_hash is None else {"block_hash": block_hash}
 
     def part(cell: Expr, side: str) -> Optional[Expr]:
-        child = cell._head if side == "head" else cell._tail
-        h = cell._head_hash if side == "head" else cell._tail_hash
+        child = cell.head if side == "head" else cell.tail
+        h = cell.head_hash if side == "head" else cell.tail_hash
         if child is not None:
             return child
         if h is None or h == ZERO32 or node is None:
@@ -92,6 +93,6 @@ def read_field(
     target = stored_ref_target(cell, _reader(node, block_hash, contact))
     if target is not None:
         return target[1], target[0]
-    if cell._tag != "link":
+    if get_expr_builtin_tag(cell) != "link":
         return None
     return get_referenced_hash(cell), block_hash

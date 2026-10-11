@@ -20,6 +20,7 @@ from astreum.consensus.transaction.treasury.utils import (
     _release_guarantees,
     _trie_exprs,
 )
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 LOAN_TRANSACTION_ID_SIZE = 32
@@ -60,10 +61,10 @@ def handle_treasury_close(
     if treasury_account is None:
         return STATUS_FAILED
 
-    if transaction.data._tag != "link" or transaction.data._head is None:
+    if get_expr_builtin_tag(transaction.data) != "link" or transaction.data.head is None:
         return STATUS_FAILED
-    data_head = transaction.data._head
-    if data_head._tag != "bytes":
+    data_head = transaction.data.head
+    if get_expr_builtin_tag(data_head) != "bytes":
         return STATUS_FAILED
     loan_transaction_id = data_head.value
     if len(loan_transaction_id) != LOAN_TRANSACTION_ID_SIZE:

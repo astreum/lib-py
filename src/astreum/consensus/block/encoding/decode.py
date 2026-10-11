@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from astreum.expression import Expr, NIL, resolve_list_exprs, get_expr_tag, get_expr_value
+from astreum.expression import Expr, NIL, resolve_list_exprs, get_expr_tag, get_expr_builtin_tag, get_expr_value
 from astreum.storage.exprs import get_expr_list
 from astreum.consensus.models.block import Block
 from astreum.consensus.block.create import create_block
@@ -36,20 +36,20 @@ def get_block_from_storage(
     header = get_expr_list(astreum_node, block_hash, contact=contact, block_hash=block_hash)
     if header is None:
         raise ValueError("unable to load block header from storage")
-    if not header._tag == "link":
+    if not get_expr_builtin_tag(header) == "link":
         raise ValueError("block header must be a Link")
-    if header._tail is None or header._tail._tag != "symbol" or header._tail.value != "block":
+    if header.tail is None or get_expr_builtin_tag(header.tail) != "symbol" or header.tail.value != "block":
         raise ValueError(
-            f"invalid block type tag (got {header._tail!r})"
+            f"invalid block type tag (got {header.tail!r})"
         )
 
-    inner = header._head
-    if inner is None and header._head_hash is not None:
+    inner = header.head
+    if inner is None and header.head_hash is not None:
         from astreum.storage.exprs import get_expr
-        inner = get_expr(astreum_node, header._head_hash, contact=contact, block_hash=block_hash)
+        inner = get_expr(astreum_node, header.head_hash, contact=contact, block_hash=block_hash)
         if inner is not None:
-            header._head = inner
-    if inner is None or inner._tag != "link":
+            header.head = inner
+    if inner is None or get_expr_builtin_tag(inner) != "link":
         raise ValueError("block inner header must be a Link")
 
     inner_nodes, missed = resolve_list_exprs(astreum_node, inner, contact=contact, block_hash=block_hash)
@@ -63,10 +63,10 @@ def get_block_from_storage(
         )
 
     body, sig = inner_nodes
-    if not sig._tag == "bytes":
+    if not get_expr_builtin_tag(sig) == "bytes":
         raise ValueError("invalid block signature: expected Bytes")
     signature_bytes = sig.value
-    if not body._tag == "link":
+    if not get_expr_builtin_tag(body) == "link":
         raise ValueError("block body must be a Link chain")
 
     body_nodes, missed = resolve_list_exprs(astreum_node, body, contact=contact, block_hash=block_hash)
@@ -165,20 +165,20 @@ def get_block_from_storage(
 
     block = create_block(
         chain_id=get_expr_value(chain_id_node, astreum_node, contact, block_hash),
-        previous_block_hash=prev_node._head_hash,
+        previous_block_hash=prev_node.head_hash,
         previous_block=None,
         height=get_expr_value(height_node, astreum_node, contact, block_hash),
         timestamp=get_expr_value(timestamp_node, astreum_node, contact, block_hash),
-        accounts_hash=accounts_node._head_hash,
+        accounts_hash=accounts_node.head_hash,
         total_transaction_fee=get_expr_value(total_transaction_fee_node, astreum_node, contact, block_hash),
         total_storage_fee=get_expr_value(total_storage_fee_node, astreum_node, contact, block_hash),
-        transactions_hash=transactions_node._head_hash,
-        receipts_hash=receipts_node._head_hash,
+        transactions_hash=transactions_node.head_hash,
+        receipts_hash=receipts_node.head_hash,
         difficulty=get_expr_value(difficulty_node, astreum_node, contact, block_hash),
         validator_public_key_bytes=get_expr_value(validator_node, astreum_node, contact, block_hash),
         nonce=get_expr_value(nonce_node, astreum_node, contact, block_hash),
-        bloom_hash=bloom_hash_node._head_hash,
-        previous_era_hash=previous_era_hash_node._head_hash,
+        bloom_hash=bloom_hash_node.head_hash,
+        previous_era_hash=previous_era_hash_node.head_hash,
         signature=signature_bytes,
         expr_id=block_hash,
         body_hash=body.hash(),

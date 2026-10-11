@@ -6,7 +6,7 @@ from astreum.machine import OpError
 def handle_stack_block_height(machine, stack, env):
     value = int_(machine.block.height)
     stack.append(value)
-    machine.meter.charge_bytes(len(_encode_int(value._value)))
+    machine.meter.charge_bytes(len(_encode_int(value.value)))
 
 
 def handle_stack_block_height_with_result(machine, stack, env):

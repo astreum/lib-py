@@ -5,6 +5,7 @@ from typing import Optional, Union
 from astreum.expression import Expr
 from astreum.storage.exprs.cascade import get_expr
 from astreum.storage.exprs.local import get_expr_from_local_storage
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def get_expr_full(node, expr_id: bytes, contact=None, block_hash=None) -> Optional[Expr]:
@@ -30,22 +31,22 @@ def get_expr_full(node, expr_id: bytes, contact=None, block_hash=None) -> Option
     expr = get_expr(node, expr_id, contact=contact, **scope)
     if expr is None:
         return None
-    if not expr._tag == "link":
+    if not get_expr_builtin_tag(expr) == "link":
         return expr
 
-    if expr._head is None and expr._head_hash is not None:
-        head = get_expr_full(node, expr._head_hash, contact=contact, **scope)
+    if expr.head is None and expr.head_hash is not None:
+        head = get_expr_full(node, expr.head_hash, contact=contact, **scope)
         if head is None:
             return None
-        expr._head = head
-        expr._head_hash = None
+        expr.head = head
+        expr.head_hash = None
 
-    if expr._tail is None and expr._tail_hash is not None:
-        tail = get_expr_full(node, expr._tail_hash, contact=contact, **scope)
+    if expr.tail is None and expr.tail_hash is not None:
+        tail = get_expr_full(node, expr.tail_hash, contact=contact, **scope)
         if tail is None:
             return None
-        expr._tail = tail
-        expr._tail_hash = None
+        expr.tail = tail
+        expr.tail_hash = None
 
     return expr
 
@@ -73,26 +74,26 @@ def get_expr_full_from_local_storage(node, root: Union[bytes, Expr]) -> Optional
         expr = get_expr_from_local_storage(node, root)
         if expr is None:
             return None
-    if expr._tag != "link":
+    if get_expr_builtin_tag(expr) != "link":
         return expr
 
     def _resolve(e: Expr) -> Expr:
         changed = True
         while changed:
             changed = False
-            if e._tag != "link":
+            if get_expr_builtin_tag(e) != "link":
                 break
-            if e._head is None and e._head_hash is not None:
-                head = get_expr_from_local_storage(node, e._head_hash)
+            if e.head is None and e.head_hash is not None:
+                head = get_expr_from_local_storage(node, e.head_hash)
                 if head is not None:
-                    e._head = _resolve(head)
-                    e._head_hash = None
+                    e.head = _resolve(head)
+                    e.head_hash = None
                     changed = True
-            if e._tail is None and e._tail_hash is not None:
-                tail = get_expr_from_local_storage(node, e._tail_hash)
+            if e.tail is None and e.tail_hash is not None:
+                tail = get_expr_from_local_storage(node, e.tail_hash)
                 if tail is not None:
-                    e._tail = _resolve(tail)
-                    e._tail_hash = None
+                    e.tail = _resolve(tail)
+                    e.tail_hash = None
                     changed = True
         return e
 

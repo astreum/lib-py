@@ -1,6 +1,6 @@
 from typing import List
 
-from astreum.expression import Expr, NIL, bytes_, get_expr_tag, link, str_, symbol
+from astreum.expression import Expr, NIL, bytes_, get_expr_tag, get_expr_builtin_tag, link, str_, symbol
 from astreum.machine import OpError
 
 
@@ -18,11 +18,11 @@ def _concat_str(a, b):
 def _collect_elems(value):
     elems = []
     current = value
-    while current._tag == "link" and current._head is not None:
-        elems.append(current._head)
-        if current._tail is NIL or current._tail is None:
+    while get_expr_builtin_tag(current) == "link" and current.head is not None:
+        elems.append(current.head)
+        if current.tail is NIL or current.tail is None:
             break
-        current = current._tail
+        current = current.tail
     return elems
 
 

@@ -8,6 +8,7 @@ from astreum.machine.operators.expression._scoped import (
     follow_stored_ref,
     pop_scoped_args,
 )
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _ref_thunk(block_id: bytes, h: bytes) -> Expr:
@@ -35,26 +36,26 @@ def handle_stack_ref(machine, stack: List[Expr], env) -> None:
     check_block(machine, "ref", block_id)
     resolved = fetch(machine, "ref", block_id, expr_id)
 
-    if resolved._tag == "link":
-        if (resolved._head is None and resolved._tail is None
-                and resolved._head_hash is None and resolved._tail_hash is None):
+    if get_expr_builtin_tag(resolved) == "link":
+        if (resolved.head is None and resolved.tail is None
+                and resolved.head_hash is None and resolved.tail_hash is None):
             raise OpError("ref: expression not found")
 
         block_id, resolved = follow_stored_ref(machine, "ref", block_id, resolved)
 
-    if resolved._tag == "link":
-        if (resolved._head is None and resolved._tail is None
-                and resolved._head_hash is None and resolved._tail_hash is None):
+    if get_expr_builtin_tag(resolved) == "link":
+        if (resolved.head is None and resolved.tail is None
+                and resolved.head_hash is None and resolved.tail_hash is None):
             stack.append(NIL)
             return
 
-        head_h = resolved._head_hash
+        head_h = resolved.head_hash
         if head_h is None:
-            head_h = resolved._head.hash() if resolved._head is not None else ZERO32
+            head_h = resolved.head.hash() if resolved.head is not None else ZERO32
 
-        tail_h = resolved._tail_hash
+        tail_h = resolved.tail_hash
         if tail_h is None:
-            tail_h = resolved._tail.hash() if resolved._tail is not None else ZERO32
+            tail_h = resolved.tail.hash() if resolved.tail is not None else ZERO32
 
         machine.meter.charge_bytes(70)
         stack.append(link(_ref_thunk(block_id, head_h), _ref_thunk(block_id, tail_h)))

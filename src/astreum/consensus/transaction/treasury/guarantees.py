@@ -16,6 +16,7 @@ from astreum.consensus.transaction.treasury.record import (
     TreasuryUserRecord,
 )
 from astreum.consensus.transaction.treasury.utils import _trie_exprs
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _extend_pending_exprs(block: object, exprs: list) -> None:
@@ -42,10 +43,10 @@ def _data_nodes(data) -> list:
     """
     result = []
     current = data
-    while current is not None and getattr(current, "_tag", None) == "link":
-        if current._head is not None:
-            result.append(current._head)
-        current = current._tail
+    while current is not None and get_expr_builtin_tag(current) == "link":
+        if current.head is not None:
+            result.append(current.head)
+        current = current.tail
     return result
 
 
@@ -122,10 +123,10 @@ def handle_treasury_guarantee(
         return STATUS_FAILED
     amount_node, duration_node, price_node, expiry_node = nodes
     if (
-        amount_node._tag != "int"
-        or duration_node._tag != "int"
-        or price_node._tag != "int"
-        or expiry_node._tag != "int"
+        get_expr_builtin_tag(amount_node) != "int"
+        or get_expr_builtin_tag(duration_node) != "int"
+        or get_expr_builtin_tag(price_node) != "int"
+        or get_expr_builtin_tag(expiry_node) != "int"
     ):
         return STATUS_FAILED
 

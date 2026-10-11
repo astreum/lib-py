@@ -62,11 +62,11 @@ def _put(node, expr) -> None:
         e = stack.pop()
         if e is None or e.base != "link":
             continue
-        if e._head is None and e.value is not None and e._tail is not None and e._tail.base == "symbol":
-            encoder = TAG_BYTE_ENCODINGS.get(e._tail.value)
+        if e.head is None and e.value is not None and e.tail is not None and e.tail.base == "symbol":
+            encoder = TAG_BYTE_ENCODINGS.get(e.tail.value)
             if encoder is not None:
                 put_expr_in_hot_storage(node, bytes_(encoder(e.value)))
-        stack.extend([e._head, e._tail])
+        stack.extend([e.head, e.tail])
 
 
 def _store_node() -> SimpleNamespace:

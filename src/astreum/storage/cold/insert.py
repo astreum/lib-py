@@ -83,10 +83,10 @@ def put_expr_in_cold_storage(
     """
     # Descend into Link children first so they're stored before the parent
     if expr.base == "link":
-        if expr._head is not None:
-            put_expr_in_cold_storage(node, expr._head, table=table, size_attr=size_attr, key=key)
-        if expr._tail is not None:
-            put_expr_in_cold_storage(node, expr._tail, table=table, size_attr=size_attr, key=key)
+        if expr.head is not None:
+            put_expr_in_cold_storage(node, expr.head, table=table, size_attr=size_attr, key=key)
+        if expr.tail is not None:
+            put_expr_in_cold_storage(node, expr.tail, table=table, size_attr=size_attr, key=key)
         # A builtin composite (int, str, float) needs its encoded value stored
         # as a separate bytes expr so head_hash can be resolved later.
         payload = builtin_composite_payload(expr)

@@ -10,7 +10,7 @@ if str(SRC_DIR) not in sys.path:
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.machine.environment import Env, env_to_radix_tree
-from astreum.expression import NIL, int_, symbol, get_expr_tag
+from astreum.expression import NIL, int_, symbol, get_expr_tag, get_expr_builtin_tag
 
 
 class TestEnvHash(unittest.TestCase):
@@ -109,7 +109,7 @@ class TestEnvHash(unittest.TestCase):
             "5 f apply)"
         ))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 15)
 
     def test_post_capture_def_unbound_in_closure(self):

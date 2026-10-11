@@ -1,6 +1,6 @@
 from typing import List
 
-from astreum.expression import Expr, NIL, bytes_, get_expr_tag, link, str_, symbol
+from astreum.expression import Expr, NIL, bytes_, get_expr_tag, get_expr_builtin_tag, link, str_, symbol
 from astreum.machine import OpError
 from astreum.machine.operators.sequence._step import _step_for
 
@@ -44,13 +44,13 @@ def _map_str(machine, fn, env, value, step):
 def _map_link(machine, fn, env, value, step):
     elems = []
     current = value
-    while current._tag == "link" and current._head is not None:
-        machine.meter.charge_bytes(current._head.size())
-        result = step(machine, fn, env, [current._head])
+    while get_expr_builtin_tag(current) == "link" and current.head is not None:
+        machine.meter.charge_bytes(current.head.size())
+        result = step(machine, fn, env, [current.head])
         elems.append(result)
-        if current._tail is NIL or current._tail is None:
+        if current.tail is NIL or current.tail is None:
             break
-        current = current._tail
+        current = current.tail
     cost = sum(e.size() for e in elems)
     machine.meter.charge_bytes(cost + len(elems))
     out = NIL

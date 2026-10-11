@@ -30,6 +30,7 @@ from astreum.expression import Expr, NIL, ZERO32, bytes_, int_, link
 from astreum.expression.expr import TAG_BYTE_ENCODINGS, _get_head_hash, _get_tail_hash
 from astreum.storage.radix import get_radix_node_expr, put_in_radix_tree
 from astreum.storage.radix.node import radix_node_hash
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def flat(expr):
@@ -52,8 +53,8 @@ def store_flat(node, expr):
     while stack:
         current = stack.pop()
         node.hot_storage[current.hash()] = flat(current)
-        if current._tag == "link":
-            for child in (current._head, current._tail):
+        if get_expr_builtin_tag(current) == "link":
+            for child in (current.head, current.tail):
                 if child is not None:
                     stack.append(child)
 
@@ -92,7 +93,7 @@ class TestFollowRefs(unittest.TestCase):
             self.node, self.block, root, follow_refs=True
         )
         self.assertIn(inner.hash(), slots)
-        self.assertIn(inner._tail.hash(), slots)
+        self.assertIn(inner.tail.hash(), slots)
         self.assertIn(int_(255).hash(), slots)
         self.assertEqual(len(set(slots)), len(slots))
 
@@ -108,10 +109,10 @@ class TestFollowRefs(unittest.TestCase):
 
     def test_an_unavailable_reference_raises(self):
         inner, root = self._tries()
-        del self.node.hot_storage[inner._tail.hash()]
+        del self.node.hot_storage[inner.tail.hash()]
         with self.assertRaises(UnresolvedRecordExpr) as caught:
             generate_initial_storage_record(self.node, self.block, root, follow_refs=True)
-        self.assertEqual(caught.exception.expr_id, inner._tail.hash())
+        self.assertEqual(caught.exception.expr_id, inner.tail.hash())
 
     def test_nil_references_are_skipped(self):
         target = link(int_(1), NIL)
@@ -204,7 +205,7 @@ class TestFollowRefs(unittest.TestCase):
         for expr_id, expr in collected.items():
             self.assertEqual(expr.hash(), expr_id)
             # No loaded subtree (a number's payload is part of its own cell).
-            for child in (expr._head, expr._tail):
+            for child in (expr.head, expr.tail):
                 self.assertTrue(child is None or child.base != "link")
 
     def test_the_record_commits_to_the_walk_order(self):

@@ -22,6 +22,7 @@ from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.validation.validator import current_validator
 from astreum.crypto.bloom_search import ERA_SIZE
 from astreum.crypto.bloom_tree import BloomTree
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _hex(value: Optional[bytes]) -> str:
@@ -93,16 +94,16 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
             return None
         result = []
         current = expr
-        while current is not None and current._tag == "link":
-            if current._head_hash is None:
+        while current is not None and get_expr_builtin_tag(current) == "link":
+            if current.head_hash is None:
                 node.logger.debug(
                     "Block verify list node missing head_hash head=%s block=%s",
                     _hex(head),
                     _hex(block.expr_id),
                 )
                 return None
-            result.append(current._head_hash)
-            current = current._tail
+            result.append(current.head_hash)
+            current = current.tail
         return result
 
     prev_hash = block.previous_block_hash or ZERO32

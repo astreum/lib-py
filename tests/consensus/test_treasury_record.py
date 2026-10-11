@@ -16,6 +16,7 @@ from astreum.consensus.transaction.treasury.record import (
 )
 from astreum.expression import Expr, ZERO32, resolve_list_exprs
 from astreum.consensus.constants import TREASURY_ADDRESS
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 class _FakeNode:
@@ -60,25 +61,25 @@ class TestTreasuryRecord(unittest.TestCase):
         self.assertFalse(missed)
         self.assertEqual(len(nodes), 7)
 
-        self.assertEqual(nodes[0]._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(nodes[0]), "int")
         self.assertEqual(nodes[0].value, 7)  # balance
 
-        self.assertEqual(nodes[1]._tag, "link")
-        self.assertEqual(nodes[1]._head_hash, loans_root_hash)  # loans_root_hash ref
+        self.assertEqual(get_expr_builtin_tag(nodes[1]), "link")
+        self.assertEqual(nodes[1].head_hash, loans_root_hash)  # loans_root_hash ref
 
-        self.assertEqual(nodes[2]._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(nodes[2]), "int")
         self.assertEqual(nodes[2].value, 3)  # total_interest_paid
 
-        self.assertEqual(nodes[3]._tag, "link")
-        self.assertEqual(nodes[3]._head_hash, guarantees_root_hash)  # guarantees_root_hash ref
+        self.assertEqual(get_expr_builtin_tag(nodes[3]), "link")
+        self.assertEqual(nodes[3].head_hash, guarantees_root_hash)  # guarantees_root_hash ref
 
-        self.assertEqual(nodes[4]._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(nodes[4]), "int")
         self.assertEqual(nodes[4].value, 11)  # loaned
 
-        self.assertEqual(nodes[5]._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(nodes[5]), "int")
         self.assertEqual(nodes[5].value, 5)  # defaulted
 
-        self.assertEqual(nodes[6]._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(nodes[6]), "int")
         self.assertEqual(nodes[6].value, 13)  # guaranteed
 
     def test_from_storage_round_trip(self):
@@ -263,7 +264,7 @@ class TestTreasuryGuarantee(unittest.TestCase):
         self.assertEqual(nodes[2].value, 50)  # price
         self.assertEqual(nodes[3].value, 100)  # expiry
         # claimed_by (unclaimed): an address, a bytes value, not a hash link
-        self.assertEqual(nodes[4]._tag, "bytes")
+        self.assertEqual(get_expr_builtin_tag(nodes[4]), "bytes")
         self.assertEqual(nodes[4].value, ZERO32)
 
     def test_round_trip_unclaimed(self):

@@ -4,7 +4,7 @@ from typing import Any
 
 from blake3 import blake3
 
-from astreum.expression import Expr, get_expr_tag, get_expr_value, resolve_list_exprs, int_, bytes_, link
+from astreum.expression import Expr, get_expr_tag, get_expr_builtin_tag, get_expr_value, resolve_list_exprs, int_, bytes_, link
 from astreum.expression.expr import _encode_int
 from astreum.expression.encoding import decode_expr_from_bytes
 from astreum.expression import ZERO32, NIL
@@ -81,8 +81,8 @@ def _is_nil(e: Expr | None) -> bool:
         True if nil, else False.
     """
     return e is None or e is NIL or (
-        e._tag == "link" and e._head is None and e._tail is None
-        and e._head_hash in (None, ZERO32) and e._tail_hash in (None, ZERO32)
+        get_expr_builtin_tag(e) == "link" and e.head is None and e.tail is None
+        and e.head_hash in (None, ZERO32) and e.tail_hash in (None, ZERO32)
     )
 
 
@@ -98,12 +98,12 @@ def _list_items(e: Expr | None, limit: int) -> list[Expr] | None:
     """
     items: list[Expr] = []
     while not _is_nil(e):
-        if e._tag != "link" or e._head is None:
+        if get_expr_builtin_tag(e) != "link" or e.head is None:
             return None
-        items.append(e._head)
+        items.append(e.head)
         if len(items) > limit:
             return None
-        e = e._tail
+        e = e.tail
     return items
 
 
@@ -126,7 +126,7 @@ def _parse_claim(
     if items is None or len(items) != 4:
         return None
     storage_id_e, slot_e, proof_e, nonce_e = items
-    if storage_id_e._tag != "bytes" or slot_e._tag != "bytes":
+    if get_expr_builtin_tag(storage_id_e) != "bytes" or get_expr_builtin_tag(slot_e) != "bytes":
         return None
     try:
         # A fetched int holds its payload by hash.
@@ -136,7 +136,7 @@ def _parse_claim(
     except ValueError:
         return None
     proof_items = _list_items(proof_e, MAX_PROOF_LEN)
-    if proof_items is None or any(i._tag != "bytes" for i in proof_items):
+    if proof_items is None or any(get_expr_builtin_tag(i) != "bytes" for i in proof_items):
         return None
     proof = [i.value for i in proof_items]
     return storage_id_e.value, slot_e.value, proof, nonce

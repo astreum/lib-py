@@ -1,6 +1,6 @@
 from typing import List
 
-from astreum.expression import Expr, NIL, bytes_, get_expr_tag, link, str_, symbol
+from astreum.expression import Expr, NIL, bytes_, get_expr_tag, get_expr_builtin_tag, link, str_, symbol
 from astreum.machine import OpError
 
 
@@ -30,16 +30,16 @@ def _index_link(value, k):
         )
     current = value
     walked = 0
-    while current._tag == "link" and current._head is not None:
+    while get_expr_builtin_tag(current) == "link" and current.head is not None:
         if walked == k:
-            head = current._head
+            head = current.head
             return head, head.size()
         walked += 1
-        if current._tail is NIL or current._tail is None:
+        if current.tail is NIL or current.tail is None:
             raise OpError(
                 f"index {k} out of bounds for link of length {walked}"
             )
-        current = current._tail
+        current = current.tail
 
     raise OpError(
         f"index {k} out of bounds for link of length {walked}"

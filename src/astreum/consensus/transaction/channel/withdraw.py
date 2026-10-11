@@ -9,6 +9,7 @@ from astreum.expression import ZERO32
 from astreum.storage.radix import get_from_radix_tree, put_in_radix_tree
 from astreum.consensus.transaction.channel.model import Channel
 from astreum.consensus.transaction.channel.update import get_channel_from_storage
+from astreum.expression.helpers import get_expr_builtin_tag
 
 COUNTER_SIZE = 8
 AMOUNT_SIZE = 8
@@ -43,10 +44,10 @@ def _data_nodes(data) -> list:
     """
     result = []
     current = data
-    while current is not None and getattr(current, "_tag", None) == "link":
-        if current._head is not None:
-            result.append(current._head)
-        current = current._tail
+    while current is not None and get_expr_builtin_tag(current) == "link":
+        if current.head is not None:
+            result.append(current.head)
+        current = current.tail
     return result
 
 
@@ -61,7 +62,7 @@ def handle_channel_withdraw(
     if len(nodes) != 3:
         return False
     counter_node, amount_node, sig_node = nodes
-    if counter_node._tag != "int" or amount_node._tag != "int" or sig_node._tag != "bytes":
+    if get_expr_builtin_tag(counter_node) != "int" or get_expr_builtin_tag(amount_node) != "int" or get_expr_builtin_tag(sig_node) != "bytes":
         return False
     requested_counter = counter_node.value
     requested_amount = amount_node.value

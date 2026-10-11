@@ -10,14 +10,15 @@ if str(SRC_DIR) not in sys.path:
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.expression import NIL
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
@@ -32,14 +33,14 @@ class TestMatchOperator(unittest.TestCase):
         """((42 ok) 'ok '(1 +) '(drop -1) match) -> 43."""
         expr, _ = parse(tokenize("((42 ok) 'ok '(1 +) '(drop -1) match)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 43)
 
     def test_match_err_success(self):
         """((42 err) 'err '(1 +) '(drop -1) match) -> 43."""
         expr, _ = parse(tokenize("((42 err) 'err '(1 +) '(drop -1) match)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 43)
 
     # (some/none tests removed — those operators were never implemented)
@@ -50,21 +51,21 @@ class TestMatchOperator(unittest.TestCase):
         """((42 err) 'ok '(1 +) '(head) match) -> 42 (fail-cl gets val)."""
         expr, _ = parse(tokenize("((42 err) 'ok '(1 +) '(head) match)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 42)
 
     def test_match_tag_mismatch_drop_val(self):
         """((42 err) 'ok '(1 +) '(drop 0) match) -> 0 (fail-cl drops val, pushes 0)."""
         expr, _ = parse(tokenize("((42 err) 'ok '(1 +) '(drop 0) match)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 0)
 
     def test_match_untagged_val_goes_to_fail_cl(self):
         """(42 'ok '(1 +) '(drop 42) match) -> 42 (untagged always fails, val pushed to fail-cl)."""
         expr, _ = parse(tokenize("(42 'ok '(1 +) '(drop 42) match)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 42)
 
     # --- cascade: fail-cl does inner match via dup ---
@@ -73,7 +74,7 @@ class TestMatchOperator(unittest.TestCase):
         """((42 err) 'ok '(1 +) '('err '(drop 0) '(drop -1) match) match) -> 0."""
         expr, _ = parse(tokenize("((42 err) 'ok '(1 +) '('err '(drop 0) '(drop -1) match) match)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 0)
 
     def test_match_cascade_all_fail(self):
@@ -81,7 +82,7 @@ class TestMatchOperator(unittest.TestCase):
         src = """((42 some) 'ok '(1 +) '('err '(drop 0) '(drop -1) match) match)"""
         expr, _ = parse(tokenize(src))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, -1)
 
     # --- string tag names ---
@@ -90,7 +91,7 @@ class TestMatchOperator(unittest.TestCase):
         """((42 ok) "ok" '(1 +) '(drop -1) match) -> 43."""
         expr, _ = parse(tokenize('((42 ok) "ok" \'(1 +) \'(drop -1) match)'))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 43)
 
     # --- underflow ---
@@ -115,7 +116,7 @@ class TestMatchDeterministic(unittest.TestCase):
         machine = Machine(node=None, mode="deterministic")
         expr, _ = parse(tokenize("((42 ok) 'ok '(1 +) '(drop -1) match)"))
         result = machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 43)
 
     def test_match_deterministic_fail(self):
@@ -123,7 +124,7 @@ class TestMatchDeterministic(unittest.TestCase):
         machine = Machine(node=None, mode="deterministic")
         expr, _ = parse(tokenize("((42 err) 'ok '(1 +) '(head) match)"))
         result = machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 42)
 
 

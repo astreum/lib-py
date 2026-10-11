@@ -10,24 +10,25 @@ if str(SRC_DIR) not in sys.path:
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.expression import NIL, int_, fp64_, bytes_, str_, symbol, link
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
 def _collect_link(value):
     out = []
-    while value._tag == "link" and value._head is not None:
-        out.append(value._head)
-        if value._tail is NIL or value._tail is None:
+    while get_expr_builtin_tag(value) == "link" and value.head is not None:
+        out.append(value.head)
+        if value.tail is NIL or value.tail is None:
             break
-        value = value._tail
+        value = value.tail
     return out
 
 
@@ -43,7 +44,7 @@ class TestMapOperator(unittest.TestCase):
         """(0xff00 '(0x01 ^) map) -> 0xfe01."""
         expr, _ = parse(tokenize("(0xff00 '(0x01 ^) map)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "bytes")
+        self.assertEqual(get_expr_builtin_tag(result), "bytes")
         self.assertEqual(result.value, b"\xfe\x01")
 
     def test_map_bytes_identity(self):
@@ -53,13 +54,13 @@ class TestMapOperator(unittest.TestCase):
         # dup pushes a copy; without explicit consume, the fn stack has dup so
         # the elem gets effectively duplicated per element — but for bytes, "dup"
         # on a bytes element returns the elem itself. Confirm bytes is preserved.
-        self.assertEqual(result._tag, "bytes")
+        self.assertEqual(get_expr_builtin_tag(result), "bytes")
         self.assertEqual(result.value, b"\xde\xad")
 
     def test_map_empty_bytes(self):
         expr, _ = parse(tokenize("(0x '(dup) map)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "bytes")
+        self.assertEqual(get_expr_builtin_tag(result), "bytes")
         self.assertEqual(result.value, b"")
 
     # --- str ---
@@ -68,13 +69,13 @@ class TestMapOperator(unittest.TestCase):
         """('"abc" '(dup) map) -> "abc" (preserves type via dup)."""
         expr, _ = parse(tokenize('("abc" \'(dup) map)'))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "str")
+        self.assertEqual(get_expr_builtin_tag(result), "str")
         self.assertEqual(result.value, "abc")
 
     def test_map_empty_str(self):
         expr, _ = parse(tokenize('("" \'(dup) map)'))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "str")
+        self.assertEqual(get_expr_builtin_tag(result), "str")
         self.assertEqual(result.value, "")
 
     # --- link ---
@@ -98,9 +99,9 @@ class TestMapOperator(unittest.TestCase):
         # '(1) body yields constant 1 (int), incompatible with bytes.
         expr, _ = parse(tokenize("(0xff00 '(1) map)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_map_wrong_element_type_for_link_returns_symbolic_tail(self):
         # fn returns link(...) — incompatible (per plan, link element can be any Expr).
@@ -114,23 +115,23 @@ class TestMapOperator(unittest.TestCase):
     def test_map_non_closure_fn_returns_nil(self):
         expr, _ = parse(tokenize("(0xff00 42 map)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_map_non_sequence_returns_nil(self):
         expr, _ = parse(tokenize("(42 '(dup) map)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_map_underflow_returns_nil(self):
         expr, _ = parse(tokenize("(map)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     # --- tagged map ---
 
@@ -138,7 +139,7 @@ class TestMapOperator(unittest.TestCase):
         expr, _ = parse(tokenize("('(1 2 3) '(1 +) map?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual([e.value for e in _collect_link(result._head)], [2, 3, 4])
+        self.assertEqual([e.value for e in _collect_link(result.head)], [2, 3, 4])
 
     def test_map_err_tagged(self):
         expr, _ = parse(tokenize("(0xff00 42 map?)"))
@@ -149,7 +150,7 @@ class TestMapOperator(unittest.TestCase):
         expr, _ = parse(tokenize("(map?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "stack underflow")
+        self.assertEqual(result.head.value, "stack underflow")
 
     # --- program fn: eval-style and apply-style specs ---
 
@@ -166,14 +167,14 @@ class TestMapOperator(unittest.TestCase):
         """0xff00 with an apply-style spec -> 0xfe01."""
         expr, _ = parse(tokenize("((('(a) '(a 0x01 ^) closure) 'f def) 0xff00 '((f) apply) map)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "bytes")
+        self.assertEqual(get_expr_builtin_tag(result), "bytes")
         self.assertEqual(result.value, b"\xfe\x01")
 
     def test_map_apply_style_lex_closure_on_str(self):
         '''"abc" with an apply-style spec -> "abc" (identity preserves str).'''
         expr, _ = parse(tokenize("(('(a) '(a) closure) 'f def \"abc\" '((f) apply) map)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "str")
+        self.assertEqual(get_expr_builtin_tag(result), "str")
         self.assertEqual(result.value, "abc")
 
     def test_map_apply_style_dyn_closure_sees_caller_env(self):
@@ -190,7 +191,7 @@ class TestMapOperator(unittest.TestCase):
         result = self.machine.run(expr=expr)
         collected = _collect_link(result)
         self.assertEqual(len(collected), 3)
-        self.assertTrue(all(e._head is None for e in collected))
+        self.assertTrue(all(e.head is None for e in collected))
 
     def test_map_eval_style_spec_runs_bound_program(self):
         """'(r eval) — head pushes the bound program, eval runs it on the element."""
@@ -205,7 +206,7 @@ class TestMapOperator(unittest.TestCase):
         result = self.machine.run(expr=expr)
         collected = _collect_link(result)
         self.assertEqual(len(collected), 3)
-        self.assertTrue(all(e._head is None for e in collected))
+        self.assertTrue(all(e.head is None for e in collected))
 
     def test_map_raw_tagged_closure_rejected(self):
         """A raw tagged fn value is not a program -> OpError -> NIL. Apply-wrap it."""
@@ -218,7 +219,7 @@ class TestMapOperator(unittest.TestCase):
         expr, _ = parse(tokenize("(('(a) '(a 1 +) closure) 'f def '(1 2 3) '((f) apply) map?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual([e.value for e in _collect_link(result._head)], [2, 3, 4])
+        self.assertEqual([e.value for e in _collect_link(result.head)], [2, 3, 4])
 
 
 if __name__ == "__main__":

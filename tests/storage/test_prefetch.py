@@ -77,8 +77,8 @@ class TestBloomSearchPrefetch(unittest.TestCase):
         from astreum.crypto.bloom_search import search
 
         tx_list = link(None, link(None, NIL))
-        tx_list._head_hash = H[0]
-        tx_list._tail._head_hash = H[1]
+        tx_list.head_hash = H[0]
+        tx_list.tail.head_hash = H[1]
         block = SimpleNamespace(transactions_hash=b"\x09" * 32)
         order = []
 
@@ -98,7 +98,7 @@ class TestBloomSearchPrefetch(unittest.TestCase):
         from astreum.crypto.bloom_search import search
 
         tx_list = link(None, NIL)
-        tx_list._head_hash = H[0]
+        tx_list.head_hash = H[0]
         block = SimpleNamespace(transactions_hash=b"\x09" * 32, expr_id=b"\xb7" * 32)
         calls = {}
 

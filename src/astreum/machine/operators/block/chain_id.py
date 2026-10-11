@@ -6,7 +6,7 @@ from astreum.machine import OpError
 def handle_stack_block_chain_id(machine, stack, env):
     value = int_(machine.block.chain_id)
     stack.append(value)
-    machine.meter.charge_bytes(len(_encode_int(value._value)))
+    machine.meter.charge_bytes(len(_encode_int(value.value)))
 
 
 def handle_stack_block_chain_id_with_result(machine, stack, env):

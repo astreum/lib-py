@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, List, Optional
 
 from astreum.consensus.constants import STORAGE_ADDRESS
-from astreum.expression import Expr, NIL, ZERO32, get_expr_tag
+from astreum.expression import Expr, NIL, ZERO32, get_expr_tag, get_expr_builtin_tag
 from astreum.machine import OpError
 from astreum.storage.exprs import get_expr
 from astreum.storage.radix import get_from_radix_tree
@@ -77,9 +77,9 @@ def _is_nil(expr: Optional[Expr], h: Optional[bytes]) -> bool:
     if expr is None:
         return h is None or h == ZERO32
     return expr is NIL or (
-        expr._tag == "link"
-        and expr._head is None and expr._tail is None
-        and expr._head_hash is None and expr._tail_hash is None
+        get_expr_builtin_tag(expr) == "link"
+        and expr.head is None and expr.tail is None
+        and expr.head_hash is None and expr.tail_hash is None
     )
 
 
@@ -88,8 +88,8 @@ def _part(machine, block_id: bytes, cell: Expr, side: str) -> Optional[Expr]:
 
     A cell reached by plain hash is in the block of the cell that holds it.
     """
-    child = cell._head if side == "head" else cell._tail
-    h = cell._head_hash if side == "head" else cell._tail_hash
+    child = cell.head if side == "head" else cell.tail
+    h = cell.head_hash if side == "head" else cell.tail_hash
     if child is not None:
         return child
     if h is None or h == ZERO32:
@@ -105,24 +105,24 @@ def stored_ref_target(machine, block_id: bytes, cell: Expr) -> Optional[tuple[by
     Link(symbol("ref"), NIL)))``, else None. Stops at the first part that does
     not fit, so an ordinary cell costs at most a couple of fetches.
     """
-    if cell._tag != "link":
+    if get_expr_builtin_tag(cell) != "link":
         return None
     block_leaf = _part(machine, block_id, cell, "head")
-    if block_leaf is None or block_leaf._tag != "bytes" or len(block_leaf.value) != 32:
+    if block_leaf is None or get_expr_builtin_tag(block_leaf) != "bytes" or len(block_leaf.value) != 32:
         return None
     second = _part(machine, block_id, cell, "tail")
-    if second is None or second._tag != "link":
+    if second is None or get_expr_builtin_tag(second) != "link":
         return None
     id_leaf = _part(machine, block_id, second, "head")
-    if id_leaf is None or id_leaf._tag != "bytes" or len(id_leaf.value) != 32:
+    if id_leaf is None or get_expr_builtin_tag(id_leaf) != "bytes" or len(id_leaf.value) != 32:
         return None
     third = _part(machine, block_id, second, "tail")
-    if third is None or third._tag != "link":
+    if third is None or get_expr_builtin_tag(third) != "link":
         return None
     marker = _part(machine, block_id, third, "head")
-    if marker is None or marker._tag != "symbol" or marker.value != "ref":
+    if marker is None or get_expr_builtin_tag(marker) != "symbol" or marker.value != "ref":
         return None
-    if not _is_nil(third._tail, third._tail_hash):
+    if not _is_nil(third.tail, third.tail_hash):
         return None
     return block_leaf.value, id_leaf.value
 

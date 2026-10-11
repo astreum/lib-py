@@ -40,7 +40,7 @@ class TestReceipt(unittest.TestCase):
 
     def test_body_has_seven_fields(self):
         node = _FakeNode()
-        body = _receipt(node=node).expr()._head._head
+        body = _receipt(node=node).expr().head.head
         nodes, missed = resolve_list_exprs(node, body)
         self.assertFalse(missed)
         self.assertEqual(len(nodes), 7)
@@ -48,15 +48,15 @@ class TestReceipt(unittest.TestCase):
     def test_body_order_and_values(self):
         r = _receipt()
         cells = []
-        cell = r.expr()._head._head
-        while cell is not None and cell._tail is not None:
-            cells.append(cell._head)
-            cell = cell._tail
+        cell = r.expr().head.head
+        while cell is not None and cell.tail is not None:
+            cells.append(cell.head)
+            cell = cell.tail
         self.assertEqual(
             [c.value for c in cells],
             [r.data_fee, r.execution_fee, None, r.status, r.storage_fee, r.transaction_fee],
         )
-        self.assertEqual(cell._head_hash, r.transaction_hash)
+        self.assertEqual(cell.head_hash, r.transaction_hash)
 
     def test_from_storage_names_the_transaction_whether_or_not_it_is_stored(self):
         for stored in (False, True):
@@ -83,7 +83,7 @@ class TestReceipt(unittest.TestCase):
     def test_eight_field_body_is_rejected(self):
         node = _FakeNode()
         r = _receipt(node=node)
-        body = r.expr()._head._head
+        body = r.expr().head.head
         old = link(int_(0), body)  # the retired leading mint field
         from astreum.expression import NIL, symbol
 

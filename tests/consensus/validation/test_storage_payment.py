@@ -56,6 +56,7 @@ from _helpers import (
     store_expr_tree,
     store_tx,
 )
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 # ---------- helpers ----------
@@ -505,8 +506,8 @@ def _all_cells(expr):
         if e is None:
             continue
         out.append(e)
-        if e._tag == "link":
-            stack.extend((e._head, e._tail))
+        if get_expr_builtin_tag(e) == "link":
+            stack.extend((e.head, e.tail))
     return out
 
 

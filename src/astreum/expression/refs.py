@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from astreum.expression.expr import Expr, NIL, ZERO32, bytes_, link, symbol
+from astreum.expression.helpers import get_expr_builtin_tag
 
 # ``part(cell, "head" | "tail")``: the loaded head or tail of *cell*, fetching
 # it if only its hash is known; None if absent.
@@ -62,9 +63,9 @@ def _is_nil(expr: Optional[Expr], h: Optional[bytes]) -> bool:
     if expr is None:
         return h is None or h == ZERO32
     return expr is NIL or (
-        expr._tag == "link"
-        and expr._head is None and expr._tail is None
-        and expr._head_hash is None and expr._tail_hash is None
+        get_expr_builtin_tag(expr) == "link"
+        and expr.head is None and expr.tail is None
+        and expr.head_hash is None and expr.tail_hash is None
     )
 
 
@@ -78,7 +79,7 @@ def local_part(cell: Expr, side: str) -> Optional[Expr]:
     Returns:
         The head or tail expression if loaded, else None.
     """
-    return cell._head if side == "head" else cell._tail
+    return cell.head if side == "head" else cell.tail
 
 
 def stored_ref_target(cell: Expr, part: PartReader = local_part) -> Optional[tuple[bytes, bytes]]:
@@ -96,25 +97,25 @@ def stored_ref_target(cell: Expr, part: PartReader = local_part) -> Optional[tup
     Returns:
         Tuple of (block_id, expr_id) if cell is a stored ref, else None.
     """
-    if cell._tag != "link":
+    if get_expr_builtin_tag(cell) != "link":
         return None
-    if _is_nil(cell._tail, cell._tail_hash):
+    if _is_nil(cell.tail, cell.tail_hash):
         return None
     block_leaf = part(cell, "head")
-    if block_leaf is None or block_leaf._tag != "bytes" or len(block_leaf.value) != 32:
+    if block_leaf is None or get_expr_builtin_tag(block_leaf) != "bytes" or len(block_leaf.value) != 32:
         return None
     second = part(cell, "tail")
-    if second is None or second._tag != "link":
+    if second is None or get_expr_builtin_tag(second) != "link":
         return None
     id_leaf = part(second, "head")
-    if id_leaf is None or id_leaf._tag != "bytes" or len(id_leaf.value) != 32:
+    if id_leaf is None or get_expr_builtin_tag(id_leaf) != "bytes" or len(id_leaf.value) != 32:
         return None
     third = part(second, "tail")
-    if third is None or third._tag != "link":
+    if third is None or get_expr_builtin_tag(third) != "link":
         return None
     marker = part(third, "head")
-    if marker is None or marker._tag != "symbol" or marker.value != "ref":
+    if marker is None or get_expr_builtin_tag(marker) != "symbol" or marker.value != "ref":
         return None
-    if not _is_nil(third._tail, third._tail_hash):
+    if not _is_nil(third.tail, third.tail_hash):
         return None
     return block_leaf.value, id_leaf.value

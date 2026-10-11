@@ -1,6 +1,6 @@
 from typing import List
 
-from astreum.expression import Expr, NIL, bytes_, get_expr_tag, link, str_, symbol
+from astreum.expression import Expr, NIL, bytes_, get_expr_tag, get_expr_builtin_tag, link, str_, symbol
 from astreum.machine import OpError
 
 
@@ -12,11 +12,11 @@ def _seq_length(tag, value):
     if tag == "link":
         n = 0
         current = value
-        while current._tag == "link" and current._head is not None:
+        while get_expr_builtin_tag(current) == "link" and current.head is not None:
             n += 1
-            if current._tail is NIL or current._tail is None:
+            if current.tail is NIL or current.tail is None:
                 break
-            current = current._tail
+            current = current.tail
         return n
     return 0
 
@@ -42,11 +42,11 @@ def handle_stack_zip(machine, stack: List[Expr], env) -> None:
         if tag == "link":
             current = value
             walked = 0
-            while current._tag == "link" and current._head is not None:
+            while get_expr_builtin_tag(current) == "link" and current.head is not None:
                 if walked == i:
-                    return current._head
+                    return current.head
                 walked += 1
-                current = current._tail
+                current = current.tail
             return NIL
         return NIL
 

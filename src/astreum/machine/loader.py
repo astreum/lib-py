@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib import request as _urllib_request
 
-from astreum.expression import get_expr_tag
+from astreum.expression import get_expr_tag, get_expr_builtin_tag
 from astreum.machine import Env, Expr, parse, tokenize
 
 
@@ -127,11 +127,11 @@ def _link_to_list(link: Expr) -> List[Expr]:
         List of expressions in the chain.
     """
     result: List[Expr] = []
-    while link._tag == "link":
-        if link._head is None and link._tail is None:
+    while get_expr_builtin_tag(link) == "link":
+        if link.head is None and link.tail is None:
             break
-        result.append(link._head)
-        link = link._tail
+        result.append(link.head)
+        link = link.tail
     return result
 
 
@@ -386,16 +386,16 @@ def _walk_body(
                 visited=visited, cache=cache,
             )
 
-    elif expr._tag == "link":
-        if expr._head is not None:
+    elif get_expr_builtin_tag(expr) == "link":
+        if expr.head is not None:
             _walk_body(
-                expr._head, module_id=module_id, prefix_chain=prefix_chain,
+                expr.head, module_id=module_id, prefix_chain=prefix_chain,
                 defs=defs, imports=imports, env_data=env_data,
                 visited=visited, cache=cache, node=node,
             )
-        if expr._tail is not None:
+        if expr.tail is not None:
             _walk_body(
-                expr._tail, module_id=module_id, prefix_chain=prefix_chain,
+                expr.tail, module_id=module_id, prefix_chain=prefix_chain,
                 defs=defs, imports=imports, env_data=env_data,
                 visited=visited, cache=cache, node=node,
             )

@@ -1,6 +1,6 @@
 from typing import List
 
-from astreum.expression import Expr, NIL, bytes_, get_expr_tag, link, str_, symbol
+from astreum.expression import Expr, NIL, bytes_, get_expr_tag, get_expr_builtin_tag, link, str_, symbol
 from astreum.machine import OpError
 
 
@@ -21,14 +21,14 @@ def _reverse_str(value):
 def _reverse_link(value):
     elems = []
     current = value
-    while current._tag == "link" and current._head is not None:
-        head_cost = current._head.size()
-        if current._tail is NIL or current._tail is None:
-            elems.append(current._head)
+    while get_expr_builtin_tag(current) == "link" and current.head is not None:
+        head_cost = current.head.size()
+        if current.tail is NIL or current.tail is None:
+            elems.append(current.head)
             current = NIL
             break
-        elems.append(current._head)
-        current = current._tail
+        elems.append(current.head)
+        current = current.tail
 
     cost = sum(e.size() for e in elems)
     result = NIL

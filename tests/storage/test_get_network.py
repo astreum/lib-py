@@ -130,8 +130,8 @@ class TestCollectMissingHashes(unittest.TestCase):
         root = _make_link(int_(3), middle)
 
         # Mutate leaf to have unresolved tail hash (simulate partial fetch)
-        leaf._tail = None
-        leaf._tail_hash = b"\xcd" * 32
+        leaf.tail = None
+        leaf.tail_hash = b"\xcd" * 32
 
         missing = _collect_missing_hashes(root, RESOLUTION_LIST)
         # Should find leaf's unresolved tail hash

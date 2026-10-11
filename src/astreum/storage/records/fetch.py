@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 from astreum.crypto.merkle import create_merkle_tree
 from astreum.storage.cold.insert import put_expr_in_cold_storage
 from astreum.storage.exprs import get_expr
+from astreum.expression.helpers import get_expr_builtin_tag
 from astreum.storage.radix import RadixTree
 from astreum.storage.records.table import put_record_in_cold_storage
 
@@ -26,7 +27,7 @@ def parse_record(node: "Node", value: Any) -> "StorageRecord | None":
     Returns:
         The parsed StorageRecord, or None if the value is not a record.
     """
-    if value is None or getattr(value, "_tag", None) != "link":
+    if value is None or get_expr_builtin_tag(value) != "link":
         return None
     from astreum.consensus.transaction.storage.model import StorageRecord
 

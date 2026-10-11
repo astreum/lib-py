@@ -11,6 +11,7 @@ if str(SRC_DIR) not in sys.path:
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.expression import NIL
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 class TestTxLogOperator(unittest.TestCase):
@@ -39,16 +40,16 @@ class TestTxLogOperator(unittest.TestCase):
     def test_bare_pushes_nil(self):
         expr, _ = parse(tokenize("('value tx.log)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_appends_value_to_logs(self):
         expr, _ = parse(tokenize("('value tx.log)"))
         self.machine.run(expr=expr)
         self.assertEqual(len(self.machine.logs), 1)
         logged = self.machine.logs[0]
-        self.assertEqual(logged._tag, "symbol")
+        self.assertEqual(get_expr_builtin_tag(logged), "symbol")
         self.assertEqual(logged.value, "value")
 
     def test_meter_charges_storage(self):

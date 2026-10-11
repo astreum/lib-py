@@ -7,6 +7,7 @@ from typing import Optional
 
 from astreum.storage.exprs.local import get_expr_from_local_storage
 from astreum.expression import Expr, ZERO32, RESOLUTION_SINGLE, RESOLUTION_LIST, RESOLUTION_FULL
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _is_builtin_type_hash(h: bytes) -> bool:
@@ -36,25 +37,25 @@ def _collect_missing_hashes(expr: Expr, resolution: int) -> list[bytes]:
     missing: list[bytes] = []
     if resolution == RESOLUTION_LIST:
         current = expr
-        while current is not None and current._tag == "link":
-            if current._tail_hash is not None:
-                missing.append(current._tail_hash)
+        while current is not None and get_expr_builtin_tag(current) == "link":
+            if current.tail_hash is not None:
+                missing.append(current.tail_hash)
                 break
-            current = current._tail
+            current = current.tail
     elif resolution == RESOLUTION_FULL:
         stack = [expr]
         while stack:
             e = stack.pop()
-            if e._tag != "link":
+            if get_expr_builtin_tag(e) != "link":
                 continue
-            if e._head is not None:
-                stack.append(e._head)
-            elif e._head_hash is not None:
-                missing.append(e._head_hash)
-            if e._tail is not None:
-                stack.append(e._tail)
-            elif e._tail_hash is not None and not _is_builtin_type_hash(e._tail_hash):
-                missing.append(e._tail_hash)
+            if e.head is not None:
+                stack.append(e.head)
+            elif e.head_hash is not None:
+                missing.append(e.head_hash)
+            if e.tail is not None:
+                stack.append(e.tail)
+            elif e.tail_hash is not None and not _is_builtin_type_hash(e.tail_hash):
+                missing.append(e.tail_hash)
     return missing
 
 

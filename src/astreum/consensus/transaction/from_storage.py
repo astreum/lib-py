@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from astreum.expression import Expr, get_expr_tag, get_expr_value, resolve_inner_exprs, resolve_list_exprs
+from astreum.expression import Expr, get_expr_tag, get_expr_builtin_tag, get_expr_value, resolve_inner_exprs, resolve_list_exprs
 from astreum.storage.exprs import get_expr_list
 from astreum.consensus.transaction.code import TransactionCode
 
@@ -22,15 +22,15 @@ def get_transaction_from_storage(
     header = get_expr_list(node, transaction_id, contact=contact, **scope)
     if header is None:
         raise ValueError("unable to load transaction from storage")
-    if not header._tag == "link":
+    if not get_expr_builtin_tag(header) == "link":
         raise ValueError("transaction header must be a Link")
-    if header._tail is None or header._tail._tag != "symbol" or header._tail.value != "transaction":
+    if header.tail is None or get_expr_builtin_tag(header.tail) != "symbol" or header.tail.value != "transaction":
         raise ValueError(
-            f"invalid transaction type tag (got {header._tail!r})"
+            f"invalid transaction type tag (got {header.tail!r})"
         )
 
-    inner = header._head
-    if inner is None or inner._tag != "link":
+    inner = header.head
+    if inner is None or get_expr_builtin_tag(inner) != "link":
         raise ValueError("transaction inner header must be a Link")
 
     inner_nodes, missed = resolve_list_exprs(node, inner, contact=contact, **scope)
@@ -44,10 +44,10 @@ def get_transaction_from_storage(
         )
 
     body, sig = inner_nodes
-    if not sig._tag == "bytes":
+    if not get_expr_builtin_tag(sig) == "bytes":
         raise ValueError("invalid transaction signature: expected Bytes")
     signature_bytes = sig.value
-    if not body._tag == "link":
+    if not get_expr_builtin_tag(body) == "link":
         raise ValueError("transaction body must be a Link chain")
 
     body_nodes, missed = resolve_list_exprs(node, body, contact=contact, **scope)
@@ -81,9 +81,9 @@ def get_transaction_from_storage(
         raise ValueError("expected Int for cost_limit")
     if not get_expr_tag(counter_node, node, contact, block_hash) == "int":
         raise ValueError("expected Int for counter")
-    if not recipient_node._tag == "bytes":
+    if not get_expr_builtin_tag(recipient_node) == "bytes":
         raise ValueError("expected Bytes for recipient")
-    if not sender_node._tag == "bytes":
+    if not get_expr_builtin_tag(sender_node) == "bytes":
         raise ValueError("expected Bytes for sender")
 
     # The handlers read the data whole: a transaction fetched cell by cell has

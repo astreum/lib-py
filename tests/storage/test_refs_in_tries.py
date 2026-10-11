@@ -44,6 +44,7 @@ from astreum.storage.radix import (
     put_in_radix_tree,
 )
 from astreum.storage.radix.node import radix_node_hash
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def flat(expr):
@@ -181,13 +182,13 @@ class TestRadixRefs(unittest.TestCase):
         stack = [cell]
         while stack:
             c = stack.pop()
-            if c._tag != "link":
+            if get_expr_builtin_tag(c) != "link":
                 continue
             target = stored_ref_target(c)
             if target is not None:
                 found.append(target)
                 continue
-            for part in (c._head, c._tail):
+            for part in (c.head, c.tail):
                 if part is not None:
                     stack.append(part)
         self.assertIn((self.a, [h for h, blk in refs if blk == self.a][0]), found)
@@ -318,9 +319,9 @@ class TestAccountRefs(unittest.TestCase):
         self.assertEqual(account.data_block, self.first)
         account.balance += 5
         accounts.update_trie(self.node)
-        target = stored_ref_target(account.expr()._head)
+        target = stored_ref_target(account.expr().head)
         self.assertEqual(target, (self.first, data_root))
-        self.assertEqual(account.expr()._tail._tail._tail._head.hash(), Expr("link", head_hash=ZERO32).hash())
+        self.assertEqual(account.expr().tail.tail.tail.head.hash(), Expr("link", head_hash=ZERO32).hash())
 
     def test_a_changed_data_trie_is_written_in_place(self):
         accounts = Accounts(root_hash=self.accounts0.root_hash, block_hash=self.first)
@@ -328,7 +329,7 @@ class TestAccountRefs(unittest.TestCase):
         put_in_radix_tree(account.data, self.node, b"z" * 32, int_(77))
         accounts.update_trie(self.node)
         self.assertIsNone(account.data_block)
-        self.assertIsNone(stored_ref_target(account.expr()._head))
+        self.assertIsNone(stored_ref_target(account.expr().head))
 
     def test_an_account_only_read_is_not_written_back(self):
         accounts = Accounts(root_hash=self.accounts0.root_hash, block_hash=self.first)

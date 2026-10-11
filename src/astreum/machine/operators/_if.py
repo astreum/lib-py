@@ -40,7 +40,7 @@ def is_truthy(expr: Expr) -> bool:
     if tag in FLOAT_TAGS:
         return _expr_to_fp64(expr) != 0.0
     if tag == "link":
-        return expr._head is not None
+        return expr.head is not None
     return tag not in ("err", "none")
 
 

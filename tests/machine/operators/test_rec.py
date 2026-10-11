@@ -10,14 +10,15 @@ if str(SRC_DIR) not in sys.path:
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.expression import NIL, int_, fp64_, bytes_, str_, symbol, link
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
@@ -33,14 +34,14 @@ class TestRecOperator(unittest.TestCase):
         """(5 '(dup 0 is_eq) '(drop 1) '(dup 1 -) '(swap *) rec) -> Int(120)."""
         expr, _ = parse(tokenize("(5 '(dup 0 is_eq) '(drop 1) '(dup 1 -) '(swap *) rec)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 120)
 
     def test_bare_sum(self):
         """(5 '(dup 0 is_eq) '(drop 0) '(dup 1 -) '(+) rec) -> Int(15)."""
         expr, _ = parse(tokenize("(5 '(dup 0 is_eq) '(drop 0) '(dup 1 -) '(+) rec)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 15)
 
     # --- bare underflow -> NIL ---
@@ -64,8 +65,8 @@ class TestRecOperator(unittest.TestCase):
         expr, _ = parse(tokenize("(5 '(dup 0 is_eq) '(drop 1) '(dup 1 -) '(swap *) rec?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head._tag, "int")
-        self.assertEqual(result._head.value, 120)
+        self.assertEqual(get_expr_builtin_tag(result.head), "int")
+        self.assertEqual(result.head.value, 120)
 
     # --- tagged underflow -> (err ...) ---
 
@@ -74,8 +75,8 @@ class TestRecOperator(unittest.TestCase):
         expr, _ = parse(tokenize("(rec?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head._tag, "str")
-        self.assertEqual(result._head.value, "stack underflow")
+        self.assertEqual(get_expr_builtin_tag(result.head), "str")
+        self.assertEqual(result.head.value, "stack underflow")
 
     # --- deep recursion — iterative fix prevents RecursionError ---
 
@@ -85,7 +86,7 @@ class TestRecOperator(unittest.TestCase):
             tokenize("(2000 '(dup 0 is_eq) '(drop 0) '(dup 1 -) '(+) rec)")
         )
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 2001000)
 
 

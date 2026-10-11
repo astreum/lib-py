@@ -34,6 +34,7 @@ from _helpers import (
     seed_storage_account,
     store_tx,
 )
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _parse(program):
@@ -186,7 +187,7 @@ class TestCodeAccountCall(unittest.TestCase):
 
         acct = self.block.accounts.get_account(recipient, self.node)
         stored = get_from_radix_tree(acct.data, self.node, b"\xde\xad\xbe\xef")
-        self.assertEqual(stored._tag, "bytes")
+        self.assertEqual(get_expr_builtin_tag(stored), "bytes")
         self.assertEqual(stored.value, b"\xca\xfe\xba\xbe")
 
         storage_account = self.block.accounts.get_account(STORAGE_ADDRESS, self.node)

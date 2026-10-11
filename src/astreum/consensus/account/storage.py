@@ -6,6 +6,7 @@ from astreum.expression import Expr, get_referenced_hash, resolve_list_exprs
 from astreum.storage.exprs import get_expr_list
 from astreum.consensus.account.create import create_account
 from astreum.consensus.account.model import Account
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def get_account_from_storage(node: Any, expr_id: bytes, contact=None) -> Account:
@@ -25,7 +26,7 @@ def get_account_from_storage(node: Any, expr_id: bytes, contact=None) -> Account
     header = get_expr_list(node, expr_id, contact=contact)
     if header is None:
         raise ValueError("unable to load account from storage")
-    if not header._tag == "link":
+    if not get_expr_builtin_tag(header) == "link":
         raise ValueError("account header must be a Link")
 
     header_nodes, missed = resolve_list_exprs(node, header, contact=contact)
@@ -40,15 +41,15 @@ def get_account_from_storage(node: Any, expr_id: bytes, contact=None) -> Account
 
     data_node, counter_node, code_node, channels_node, balance_node = header_nodes
 
-    if not data_node._tag == "link":
+    if not get_expr_builtin_tag(data_node) == "link":
         raise ValueError("expected Link for data_hash")
-    if not counter_node._tag == "int":
+    if not get_expr_builtin_tag(counter_node) == "int":
         raise ValueError("expected Int for counter")
-    if not code_node._tag == "link":
+    if not get_expr_builtin_tag(code_node) == "link":
         raise ValueError("expected Link for code_hash")
-    if not channels_node._tag == "link":
+    if not get_expr_builtin_tag(channels_node) == "link":
         raise ValueError("expected Link for channels_hash")
-    if not balance_node._tag == "int":
+    if not get_expr_builtin_tag(balance_node) == "int":
         raise ValueError("expected Int for balance")
 
     account = create_account(

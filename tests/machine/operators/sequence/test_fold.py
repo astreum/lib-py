@@ -10,14 +10,15 @@ if str(SRC_DIR) not in sys.path:
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.expression import NIL, int_, fp64_, bytes_, str_, symbol, link
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
@@ -33,7 +34,7 @@ class TestFoldOperator(unittest.TestCase):
         """('(1 2 3) 0 '(+) fold) -> 6."""
         expr, _ = parse(tokenize("('(1 2 3) 0 '(+) fold)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 6)
 
     def test_fold_int_sum_left_associative(self):
@@ -54,7 +55,7 @@ class TestFoldOperator(unittest.TestCase):
         """(() 99 '(+) fold) -> 99 (acc untouched)."""
         expr, _ = parse(tokenize("(() 99 '(+) fold)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 99)
 
     def test_fold_empty_bytes_returns_acc(self):
@@ -73,14 +74,14 @@ class TestFoldOperator(unittest.TestCase):
         """(0x010203 0 '(int +) fold) -> 6. body per element: int-byte, then add to acc."""
         expr, _ = parse(tokenize("(0x010203 0 '(int +) fold)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 6)
 
     def test_fold_bytes_xor_with_seed(self):
         """(0xff00 0x00 '(^) fold) -> 0xff (xor 0x00 with each 0xff, 0x00 = 0xff)."""
         expr, _ = parse(tokenize("(0xff00 0x00 '(^) fold)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "bytes")
+        self.assertEqual(get_expr_builtin_tag(result), "bytes")
         self.assertEqual(result.value, b"\xff")
 
     # --- str fold ---
@@ -89,7 +90,7 @@ class TestFoldOperator(unittest.TestCase):
         """fold over str, counting codepoints with '(drop 1 +)."""
         expr, _ = parse(tokenize('("abc" 0 \'(drop 1 +) fold)'))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 3)
 
     def test_fold_str_with_bytes_acc(self):
@@ -104,22 +105,22 @@ class TestFoldOperator(unittest.TestCase):
     def test_fold_non_closure_fn(self):
         expr, _ = parse(tokenize("('(1 2 3) 0 42 fold)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_fold_non_sequence_returns_nil(self):
         expr, _ = parse(tokenize("(42 0 '(+) fold)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
 
     def test_fold_underflow_returns_nil(self):
         expr, _ = parse(tokenize("(fold)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     # --- tagged fold ---
 
@@ -127,7 +128,7 @@ class TestFoldOperator(unittest.TestCase):
         expr, _ = parse(tokenize("('(1 2 3) 0 '(+) fold?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head.value, 6)
+        self.assertEqual(result.head.value, 6)
 
     def test_fold_err_tagged(self):
         expr, _ = parse(tokenize("('(1 2 3) 0 42 fold?)"))
@@ -138,7 +139,7 @@ class TestFoldOperator(unittest.TestCase):
         expr, _ = parse(tokenize("(fold?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "stack underflow")
+        self.assertEqual(result.head.value, "stack underflow")
 
     # --- program fn: eval-style and apply-style specs ---
 
@@ -152,7 +153,7 @@ class TestFoldOperator(unittest.TestCase):
         """
         expr, _ = parse(tokenize("(('(a) '(a 1 +) closure) 'f def '(1 2 3) 0 '((f) apply) fold)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 4)
 
     def test_fold_apply_style_two_params_binds_acc_and_elem(self):
@@ -164,7 +165,7 @@ class TestFoldOperator(unittest.TestCase):
         """
         expr, _ = parse(tokenize("((('(a b) '(a b +) closure) 'f def) '(1 2 3) 0 '((f) apply) fold)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 6)
 
     def test_fold_apply_style_lex_closure_uses_captured_env(self):
@@ -177,14 +178,14 @@ class TestFoldOperator(unittest.TestCase):
         """
         expr, _ = parse(tokenize("(10 'x def ('(a) '(a x +) closure) 'f def '(1 2 3) 0 '((f) apply) fold)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 13)
 
     def test_fold_apply_style_dyn_closure_sees_caller_env(self):
         """dyn-tagged fold fn reads x from caller env at apply time."""
         expr, _ = parse(tokenize("(10 'x def '(((a x +) . (a)) . dyn) 'f def '(1 2 3) 0 '((f) apply) fold)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 13)
 
     def test_fold_apply_style_pure_closure_isolated(self):
@@ -199,7 +200,7 @@ class TestFoldOperator(unittest.TestCase):
         """'(f eval) — head pushes the bound program, eval runs it on [acc, elem]."""
         expr, _ = parse(tokenize("(('(+)) 'f def '(1 2 3) 0 '(f eval) fold)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 6)
 
     def test_fold_raw_tagged_closure_rejected(self):

@@ -1,6 +1,6 @@
 from typing import List
 
-from astreum.expression import Expr, NIL, bytes_, get_expr_tag, link, str_, symbol
+from astreum.expression import Expr, NIL, bytes_, get_expr_tag, get_expr_builtin_tag, link, str_, symbol
 from astreum.machine import OpError
 
 
@@ -40,19 +40,19 @@ def _split_link(value, k):
 
     prefix_tail = value
     walked = 0
-    while walked < k and prefix_tail._tag == "link" and prefix_tail._head is not None:
+    while walked < k and get_expr_builtin_tag(prefix_tail) == "link" and prefix_tail.head is not None:
         walked += 1
         if walked == k:
-            suffix = prefix_tail._tail
+            suffix = prefix_tail.tail
             if suffix is None:
                 suffix = NIL
-            prefix_tail._tail = NIL
+            prefix_tail.tail = NIL
             return link(value, suffix), value.size() + suffix.size()
-        if prefix_tail._tail is NIL or prefix_tail._tail is None:
+        if prefix_tail.tail is NIL or prefix_tail.tail is None:
             raise OpError(
                 f"split index {k} out of bounds for link of length {walked}"
             )
-        prefix_tail = prefix_tail._tail
+        prefix_tail = prefix_tail.tail
 
     if walked == k:
         return link(value, prefix_tail), value.size() + prefix_tail.size()

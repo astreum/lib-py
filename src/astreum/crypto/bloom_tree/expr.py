@@ -7,6 +7,7 @@ from astreum.crypto.bloom_tree.node import BloomNode
 from astreum.crypto.bloom_filter.main import BloomFilter
 from astreum.crypto.bloom_filter.expr import bloom_to_expr as _filter_to_expr
 from astreum.storage.pointers import cell_reader, read_field
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _ref(value: bytes | None) -> Expr:
@@ -75,9 +76,9 @@ def _is_nil(cell: Expr | None) -> bool:
         cell is None
         or cell is NIL
         or (
-            cell._tag == "link"
-            and cell._head is None and cell._tail is None
-            and cell._head_hash is None and cell._tail_hash is None
+            get_expr_builtin_tag(cell) == "link"
+            and cell.head is None and cell.tail is None
+            and cell.head_hash is None and cell.tail_hash is None
         )
     )
 
@@ -86,7 +87,7 @@ def _int_value(cell: Expr, part) -> int:
     if cell.value is not None:
         return cell.value
     head = part(cell, "head")
-    if head is None or head._tag != "bytes":
+    if head is None or get_expr_builtin_tag(head) != "bytes":
         raise ValueError("bloom filter count is not an int")
     return TAG_BYTE_DECODINGS["int"](head.value)
 

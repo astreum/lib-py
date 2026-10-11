@@ -10,24 +10,25 @@ if str(SRC_DIR) not in sys.path:
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.expression import NIL, int_, fp64_, bytes_, str_, symbol, link
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
 def _collect_link(value):
     out = []
-    while value._tag == "link" and value._head is not None:
-        out.append(value._head)
-        if value._tail is NIL or value._tail is None:
+    while get_expr_builtin_tag(value) == "link" and value.head is not None:
+        out.append(value.head)
+        if value.tail is NIL or value.tail is None:
             break
-        value = value._tail
+        value = value.tail
     return out
 
 
@@ -76,13 +77,13 @@ class TestFilterOperator(unittest.TestCase):
         # Body '(dup)': push elem, dup it. Trues per `is_truthy`.
         expr, _ = parse(tokenize("(0x01000100 '(dup) filter)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "bytes")
+        self.assertEqual(get_expr_builtin_tag(result), "bytes")
         self.assertEqual(result.value, b"\x01\x01")
 
     def test_filter_empty_bytes(self):
         expr, _ = parse(tokenize("(0x '(dup) filter)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "bytes")
+        self.assertEqual(get_expr_builtin_tag(result), "bytes")
         self.assertEqual(result.value, b"")
 
     # --- str ---
@@ -91,7 +92,7 @@ class TestFilterOperator(unittest.TestCase):
         '''("abc" '(dup) filter) -> "abc" — for str, is_truthy always true.'''
         expr, _ = parse(tokenize('("abc" \'(dup) filter)'))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "str")
+        self.assertEqual(get_expr_builtin_tag(result), "str")
         self.assertEqual(result.value, "abc")
 
     # --- error / bad input ---
@@ -99,22 +100,22 @@ class TestFilterOperator(unittest.TestCase):
     def test_filter_non_closure_fn(self):
         expr, _ = parse(tokenize("('(1 2 3) 42 filter)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_filter_non_sequence(self):
         expr, _ = parse(tokenize("(42 '(0 is_eq) filter)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
 
     def test_filter_underflow_returns_nil(self):
         expr, _ = parse(tokenize("(filter)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     # --- tagged filter ---
 
@@ -122,7 +123,7 @@ class TestFilterOperator(unittest.TestCase):
         expr, _ = parse(tokenize("('(1 2 3 4) '(2 % 0 is_eq) filter?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual([e.value for e in _collect_link(result._head)], [2, 4])
+        self.assertEqual([e.value for e in _collect_link(result.head)], [2, 4])
 
     def test_filter_err_tagged(self):
         expr, _ = parse(tokenize("('(1 2 3) 42 filter?)"))
@@ -133,7 +134,7 @@ class TestFilterOperator(unittest.TestCase):
         expr, _ = parse(tokenize("(filter?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "stack underflow")
+        self.assertEqual(result.head.value, "stack underflow")
 
     # --- program fn: eval-style and apply-style specs ---
 

@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, List
 
 from astreum.machine.environment import Env
-from astreum.expression import Expr, NIL, get_expr_tag, link, str_, symbol
+from astreum.expression import Expr, NIL, get_expr_tag, get_expr_builtin_tag, link, str_, symbol
 from astreum.machine import OpError
 
 if TYPE_CHECKING:
@@ -21,7 +21,7 @@ def handle_stack_spawn(
 
     actor_name = name_expr.value
 
-    if body._tag != "link":
+    if get_expr_builtin_tag(body) != "link":
         machine.meter.charge_bytes(1)
         raise OpError("spawn body must be a link")
 

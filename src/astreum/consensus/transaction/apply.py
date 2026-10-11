@@ -40,6 +40,7 @@ from astreum.consensus.transaction.treasury.guarantees import handle_treasury_gu
 from astreum.consensus.transaction.treasury.buy import handle_treasury_buy
 from astreum.consensus.transaction.treasury.claim import handle_treasury_claim
 from astreum.consensus.transaction.fees import settle_fees
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 # Transaction codes whose handler credits the sender mid-flow (so a pre-check on
@@ -58,10 +59,10 @@ def _data_nodes(data: Expr) -> list[Expr]:
     """
     result = []
     current = data
-    while current is not None and current._tag == "link":
-        if current._head is not None:
-            result.append(current._head)
-        current = current._tail
+    while current is not None and get_expr_builtin_tag(current) == "link":
+        if current.head is not None:
+            result.append(current.head)
+        current = current.tail
     return result
 
 
@@ -228,14 +229,14 @@ def _apply_tx_effects(
                         transfer_amount = 0
                     else:
                         cp_node = nodes[-1]
-                        if cp_node._tag != "bytes":
+                        if get_expr_builtin_tag(cp_node) != "bytes":
                             receipt_status = STATUS_FAILED
                             transfer_amount = 0
                         else:
                             counterparty = cp_node.value
                             window = (
                                 nodes[0].value
-                                if len(nodes) == 2 and nodes[0]._tag == "int"
+                                if len(nodes) == 2 and get_expr_builtin_tag(nodes[0]) == "int"
                                 else None
                             )
                             channel_update_success = handle_channel_update(
@@ -272,7 +273,7 @@ def _apply_tx_effects(
                 receipt_status = STATUS_FAILED
             elif receipt_status == STATUS_SUCCESS:
                 nodes = _data_nodes(transaction.data)
-                if len(nodes) != 1 or nodes[0]._tag != "bytes":
+                if len(nodes) != 1 or get_expr_builtin_tag(nodes[0]) != "bytes":
                     receipt_status = STATUS_FAILED
                 else:
                     channel_close_success = handle_channel_close(
@@ -400,15 +401,15 @@ def _apply_tx_effects(
                     transfer_amount = 0
                 if receipt_status == STATUS_SUCCESS:
                     nodes = _data_nodes(transaction.data)
-                    if len(nodes) != 1 or nodes[0]._tag != "link" or (
-                        nodes[0]._head_hash is None and nodes[0]._head is None
+                    if len(nodes) != 1 or get_expr_builtin_tag(nodes[0]) != "link" or (
+                        nodes[0].head_hash is None and nodes[0].head is None
                     ):
                         receipt_status = STATUS_FAILED
                     else:
                         expr_list_id = (
-                            nodes[0]._head_hash
-                            if nodes[0]._head_hash is not None
-                            else nodes[0]._head.hash()
+                            nodes[0].head_hash
+                            if nodes[0].head_hash is not None
+                            else nodes[0].head.hash()
                         )
                         initial_contract_storage_fee = handle_storage_initial_contract(
                             node=node,

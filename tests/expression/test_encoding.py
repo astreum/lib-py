@@ -10,7 +10,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from astreum.expression import (
-    Expr, int_, bytes_, symbol, link, get_expr_tag,
+    Expr, int_, bytes_, symbol, link, get_expr_tag, get_expr_builtin_tag,
 )
 from astreum.expression.floats import (
     e4m3_, e5m2_, fp16_, bf16_, fp32_, fp64_,
@@ -29,18 +29,18 @@ class TestExprEncodeDecode(unittest.TestCase):
         tail = int_(42)
         e = link(head, tail)
         r = _roundtrip(e)
-        self.assertEqual(r._tag, "link")
-        self.assertEqual(r._head_hash, head.hash())
-        self.assertEqual(r._tail_hash, tail.hash())
+        self.assertEqual(get_expr_builtin_tag(r), "link")
+        self.assertEqual(r.head_hash, head.hash())
+        self.assertEqual(r.tail_hash, tail.hash())
 
     def test_roundtrip_link_with_head_hash(self):
         hh = b"\xaa" * 32
         th = b"\xbb" * 32
         e = Expr("link", head_hash=hh, tail_hash=th)
         r = _roundtrip(e)
-        self.assertEqual(r._tag, "link")
-        self.assertEqual(r._head_hash, hh)
-        self.assertEqual(r._tail_hash, th)
+        self.assertEqual(get_expr_builtin_tag(r), "link")
+        self.assertEqual(r.head_hash, hh)
+        self.assertEqual(r.tail_hash, th)
 
     def test_roundtrip_int(self):
         e = int_(42)
@@ -63,20 +63,20 @@ class TestExprEncodeDecode(unittest.TestCase):
     def test_roundtrip_bytes(self):
         e = bytes_(b"deadbeef")
         r = _roundtrip(e)
-        self.assertEqual(r._tag, "bytes")
-        self.assertEqual(r._value, b"deadbeef")
+        self.assertEqual(get_expr_builtin_tag(r), "bytes")
+        self.assertEqual(r.value, b"deadbeef")
 
     def test_roundtrip_bytes_empty(self):
         e = bytes_(b"")
         r = _roundtrip(e)
-        self.assertEqual(r._tag, "bytes")
-        self.assertEqual(r._value, b"")
+        self.assertEqual(get_expr_builtin_tag(r), "bytes")
+        self.assertEqual(r.value, b"")
 
     def test_roundtrip_symbol(self):
         e = symbol("hello_world")
         r = _roundtrip(e)
-        self.assertEqual(r._tag, "symbol")
-        self.assertEqual(r._value, "hello_world")
+        self.assertEqual(get_expr_builtin_tag(r), "symbol")
+        self.assertEqual(r.value, "hello_world")
 
     def test_roundtrip_float_types_stored(self):
         for ctor, name in [
@@ -105,8 +105,8 @@ class TestExprEncodeDecode(unittest.TestCase):
         mid = link(inner, int_(0))
         outer = link(mid, int_(1))
         r = _roundtrip(outer)
-        self.assertEqual(r._head_hash, mid.hash())
-        self.assertEqual(r._tail_hash, int_(1).hash())
+        self.assertEqual(r.head_hash, mid.hash())
+        self.assertEqual(r.tail_hash, int_(1).hash())
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from astreum.expression import Expr, NIL, resolve_inner_exprs, resolve_list_exprs, get_expr_tag
+from astreum.expression import Expr, NIL, resolve_inner_exprs, resolve_list_exprs, get_expr_tag, get_expr_builtin_tag
 from astreum.expression import ZERO32
 from astreum.storage.radix import (
     RadixTree,
@@ -51,10 +51,10 @@ def _data_nodes(data) -> list:
     """
     result = []
     current = data
-    while current is not None and getattr(current, "_tag", None) == "link":
-        if current._head is not None:
-            result.append(current._head)
-        current = current._tail
+    while current is not None and get_expr_builtin_tag(current) == "link":
+        if current.head is not None:
+            result.append(current.head)
+        current = current.tail
     return result
 
 
@@ -433,7 +433,7 @@ def handle_treasury_borrow(
     if len(nodes) != 4:
         return STATUS_FAILED
     loan_type_node, interval_node, count_node, guarantee_refs_node = nodes
-    if loan_type_node._tag != "int" or interval_node._tag != "int" or count_node._tag != "int":
+    if get_expr_builtin_tag(loan_type_node) != "int" or get_expr_builtin_tag(interval_node) != "int" or get_expr_builtin_tag(count_node) != "int":
         return STATUS_FAILED
     request = TreasuryBorrowRequest(
         loan_type=LoanType(loan_type_node.value),

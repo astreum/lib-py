@@ -5,6 +5,7 @@ from typing import Optional, Union
 from astreum.expression import Expr, ZERO32
 from astreum.storage.exprs.cascade import get_expr
 from astreum.storage.exprs.local import get_expr_from_local_storage
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def get_expr_list(
@@ -39,20 +40,20 @@ def get_expr_list(
             return None
 
     current = expr
-    while current is not None and current._tag == "link":
-        if current._tail_hash is not None:
-            if current._tail_hash == ZERO32:
-                current._tail = None
-                current._tail_hash = None
+    while current is not None and get_expr_builtin_tag(current) == "link":
+        if current.tail_hash is not None:
+            if current.tail_hash == ZERO32:
+                current.tail = None
+                current.tail_hash = None
             else:
                 resolved = get_expr(
-                    node, current._tail_hash, contact=contact, **scope
+                    node, current.tail_hash, contact=contact, **scope
                 )
                 if resolved is None:
                     return None
-                current._tail = resolved
-                current._tail_hash = None
-        current = current._tail
+                current.tail = resolved
+                current.tail_hash = None
+        current = current.tail
     return expr
 
 
@@ -81,13 +82,13 @@ def get_expr_list_from_local_storage(node, root: Union[bytes, Expr]) -> Optional
             return None
 
     current = expr
-    while current is not None and current._tag == "link":
-        if current._tail_hash is not None:
-            resolved = get_expr_from_local_storage(node, current._tail_hash)
+    while current is not None and get_expr_builtin_tag(current) == "link":
+        if current.tail_hash is not None:
+            resolved = get_expr_from_local_storage(node, current.tail_hash)
             if resolved is None:
                 break
-            current._tail = resolved
-            current._tail_hash = None
-        current = current._tail
+            current.tail = resolved
+            current.tail_hash = None
+        current = current.tail
 
     return expr

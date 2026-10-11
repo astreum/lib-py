@@ -10,6 +10,7 @@ from astreum.machine.operators.expression._scoped import (
     stored_ref_target,
 )
 from astreum.storage.exprs import get_expr
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _child(machine, block_id: bytes, cell: Expr, side: str):
@@ -18,8 +19,8 @@ def _child(machine, block_id: bytes, cell: Expr, side: str):
     Returns None for nothing. Either a loaded child, or one fetched from
     *block_id*, then loaded in turn.
     """
-    child = cell._head if side == "head" else cell._tail
-    h = cell._head_hash if side == "head" else cell._tail_hash
+    child = cell.head if side == "head" else cell.tail
+    h = cell.head_hash if side == "head" else cell.tail_hash
     if child is None:
         if h is None or h == ZERO32:
             return None
@@ -35,7 +36,7 @@ def _resolve(machine, block_id: bytes, cell: Expr, follow: bool = True) -> Expr:
     Built as a new expr: the cell may be a shared one in storage, and following
     a ref gives it a different hash.
     """
-    if cell._tag != "link":
+    if get_expr_builtin_tag(cell) != "link":
         return cell
     head = _child(machine, block_id, cell, "head")
     tail = _child(machine, block_id, cell, "tail")
@@ -45,7 +46,7 @@ def _resolve(machine, block_id: bytes, cell: Expr, follow: bool = True) -> Expr:
     if follow and stored_ref_target(machine, block_id, rebuilt) is not None:
         next_block, target = follow_stored_ref(machine, "load", block_id, rebuilt)
         # One level: the target is loaded but not itself taken for a ref.
-        if target._tag == "link":
+        if get_expr_builtin_tag(target) == "link":
             return _resolve(machine, next_block, target, follow=False)
         return target
     return rebuilt

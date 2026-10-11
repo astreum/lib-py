@@ -46,7 +46,7 @@ def handle_stack_match(
     val = stack.pop()
 
     if get_expr_tag(val) == succ_tag.value:
-        stack.append(val._head)
+        stack.append(val.head)
         return _evaluation(machine, succ_cl, stack, env)
     else:
         stack.append(val)

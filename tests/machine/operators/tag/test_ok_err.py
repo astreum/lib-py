@@ -10,12 +10,13 @@ if str(SRC_DIR) not in sys.path:
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.expression import NIL
+from astreum.expression.helpers import get_expr_builtin_tag
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
@@ -30,24 +31,24 @@ class TestOkOperator(unittest.TestCase):
         expr, _ = parse(tokenize("(42 ok)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head._tag, "int")
-        self.assertEqual(result._head.value, 42)
+        self.assertEqual(get_expr_builtin_tag(result.head), "int")
+        self.assertEqual(result.head.value, 42)
 
     def test_ok_wraps_str(self):
         """("hello" ok) -> ("hello" . ok)."""
         expr, _ = parse(tokenize('("hello" ok)'))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head._tag, "str")
-        self.assertEqual(result._head.value, "hello")
+        self.assertEqual(get_expr_builtin_tag(result.head), "str")
+        self.assertEqual(result.head.value, "hello")
 
     def test_ok_underflow(self):
         """bare (ok) -> OpError caught, pushes NIL."""
         expr, _ = parse(tokenize("(ok)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
 
 class TestErrOperator(unittest.TestCase):
@@ -61,16 +62,16 @@ class TestErrOperator(unittest.TestCase):
         expr, _ = parse(tokenize('("bad" err)'))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head._tag, "str")
-        self.assertEqual(result._head.value, "bad")
+        self.assertEqual(get_expr_builtin_tag(result.head), "str")
+        self.assertEqual(result.head.value, "bad")
 
     def test_err_underflow(self):
         """bare (err) -> OpError caught, pushes NIL."""
         expr, _ = parse(tokenize("(err)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
 
 if __name__ == "__main__":

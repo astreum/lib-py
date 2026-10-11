@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, List
 
 from astreum.machine.environment import Env
 from astreum.machine.operators._tags import FUNCTION_TAGS
-from astreum.expression import Expr, NIL, get_expr_tag, link, str_, symbol
+from astreum.expression import Expr, NIL, get_expr_tag, get_expr_builtin_tag, link, str_, symbol
 from astreum.machine import OpError
 
 if TYPE_CHECKING:
@@ -41,17 +41,17 @@ def handle_stack_apply(machine: "Machine", stack: List[Expr], env) -> None:
     if get_expr_tag(fn_val) not in FUNCTION_TAGS:
         raise OpError(f"apply of {get_expr_tag(fn_val)}")
 
-    inner = fn_val._head
-    body = inner._head
-    params = inner._tail
-    tag = fn_val._tail.value
+    inner = fn_val.head
+    body = inner.head
+    params = inner.tail
+    tag = fn_val.tail.value
 
     if tag == "lex":
-        env_ref = body._head
+        env_ref = body.head
         if get_expr_tag(env_ref) != "env":
             raise OpError("closure of non-env capture")
-        env_hash = env_ref._head_hash
-        body = body._tail
+        env_hash = env_ref.head_hash
+        body = body.tail
         parent = machine.library[env_hash]
     elif tag == "dyn":
         parent = env
@@ -62,11 +62,11 @@ def handle_stack_apply(machine: "Machine", stack: List[Expr], env) -> None:
 
     param_names = []
     p = params
-    while p is not None and p._tag == "link" and p._head is not None:
-        if get_expr_tag(p._head) != "symbol":
-            raise OpError(f"apply of non-symbol param {get_expr_tag(p._head)}")
-        param_names.append(p._head.value)
-        p = p._tail
+    while p is not None and get_expr_builtin_tag(p) == "link" and p.head is not None:
+        if get_expr_tag(p.head) != "symbol":
+            raise OpError(f"apply of non-symbol param {get_expr_tag(p.head)}")
+        param_names.append(p.head.value)
+        p = p.tail
 
     cost = sum(stack[-1 - i].size() for i in range(len(param_names)))
     machine.meter.charge_bytes(cost)

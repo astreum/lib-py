@@ -1,6 +1,6 @@
 from typing import List
 
-from astreum.expression import Expr, NIL, get_expr_tag, int_, link, str_, symbol
+from astreum.expression import Expr, NIL, get_expr_tag, get_expr_builtin_tag, int_, link, str_, symbol
 from astreum.machine import OpError
 
 
@@ -22,13 +22,13 @@ def _count_link(value):
         return int_(0), 0
     n = 0
     current = value
-    while current._tag == "link" and current._head is not None:
+    while get_expr_builtin_tag(current) == "link" and current.head is not None:
         n += 1
-        head_cost = current._head.size()
-        if current._tail is NIL or current._tail is None:
+        head_cost = current.head.size()
+        if current.tail is NIL or current.tail is None:
             current = NIL
             break
-        current = current._tail
+        current = current.tail
     return int_(n), n
 
 

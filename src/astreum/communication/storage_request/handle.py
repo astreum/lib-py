@@ -29,6 +29,7 @@ from astreum.storage.requests import DEFAULT_STORAGE_FOUND_MAX_PAGES
 from astreum.storage.records import get_record_from_cold_storage
 from astreum.communication.util import xor_distance
 from astreum.storage.providers import provider_id_for_payload, provider_payload_for_id
+from astreum.expression.helpers import get_expr_builtin_tag
 
 if TYPE_CHECKING:
     from astreum.communication import Node
@@ -45,9 +46,9 @@ def _collect_for_resolution(expr, desired: int) -> list:
     Returns:
         list: A list of collected expressions.
     """
-    if desired >= RESOLUTION_FULL and expr._tag == "link":
+    if desired >= RESOLUTION_FULL and get_expr_builtin_tag(expr) == "link":
         return collect_full(expr)
-    if desired >= RESOLUTION_LIST and expr._tag == "link":
+    if desired >= RESOLUTION_LIST and get_expr_builtin_tag(expr) == "link":
         return collect_list(expr)
     return [expr]
 

@@ -6,6 +6,7 @@ from astreum.expression import Expr, RESOLUTION_FULL, ZERO32
 from astreum.storage.exprs import get_expr_list, prefetch_exprs_from_network
 from astreum.crypto.bloom_filter import bloom_test
 from astreum.crypto.bloom_tree.tree import bloom_search_leaves
+from astreum.expression.helpers import get_expr_builtin_tag
 
 if TYPE_CHECKING:
     from astreum.consensus.transaction.model import Transaction
@@ -137,11 +138,11 @@ def _load_block_txs(node: Any, block) -> list["Transaction"]:
 
     tx_hashes: list[bytes] = []
     current = expr
-    while current is not None and current._tag == "link":
-        if current._head_hash is None:
+    while current is not None and get_expr_builtin_tag(current) == "link":
+        if current.head_hash is None:
             break
-        tx_hashes.append(current._head_hash)
-        current = current._tail
+        tx_hashes.append(current.head_hash)
+        current = current.tail
 
     # Fetch the missing tx trees in one batch, not one request per transaction.
     prefetch_exprs_from_network(node, tx_hashes, RESOLUTION_FULL, **scope)
@@ -181,7 +182,7 @@ def _tx_matches(tx: "Transaction", *,
         return False
     if receiver != ZERO32 and tx.recipient != receiver:
         return False
-    tx_data_bytes = tx.data.value if tx.data._tag == "bytes" else b""
+    tx_data_bytes = tx.data.value if get_expr_builtin_tag(tx.data) == "bytes" else b""
     if key != ZERO32 and tx_data_bytes != key:
         return False
     return True

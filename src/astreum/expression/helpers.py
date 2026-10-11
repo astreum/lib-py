@@ -5,6 +5,7 @@ from struct import unpack
 from astreum.expression.expr import (
     Expr, NIL, ZERO32, bytes_, link,
     _decode_int,
+    _BUILTIN_TYPE_HASH,
     BUILTIN_COMPOSITE_TYPE_NAMES,
     TAG_BYTE_ENCODINGS,
     TYPE_SYMBOLS,
@@ -92,11 +93,41 @@ def get_referenced_hash(expr: Expr) -> bytes:
     Returns:
         The hash of the referenced expression.
     """
-    if expr._head_hash is not None:
-        return expr._head_hash
-    if expr._head is not None:
-        return expr._head.hash()
+    if expr.head_hash is not None:
+        return expr.head_hash
+    if expr.head is not None:
+        return expr.head.hash()
     return ZERO32
+
+
+def get_expr_builtin_tag(expr: Expr) -> str:
+    """Get the builtin tag of an expression without any I/O.
+
+    Terminals (symbol, bytes) return their base. A link whose tail is a
+    builtin composite type symbol (int, str, or a float tag) returns that
+    type name. This holds when the tail is loaded and when only the
+    ``tail_hash`` of a builtin type is known. Every other link returns
+    "link", including links with a custom tag such as "block" or "ok".
+    This function never fetches and never raises.
+
+    Args:
+        expr: The expression to get the builtin tag from.
+
+    Returns:
+        "symbol", "bytes", a builtin composite type name, or "link".
+    """
+    if expr.base != "link":
+        return expr.base
+    tail = expr.tail
+    if tail is not None:
+        if tail.base == "symbol" and tail.value in BUILTIN_COMPOSITE_TYPE_NAMES:
+            return tail.value
+        return "link"
+    if expr.tail_hash is not None:
+        name = _BUILTIN_TYPE_HASH.get(expr.tail_hash)
+        if name in BUILTIN_COMPOSITE_TYPE_NAMES:
+            return name
+    return "link"
 
 
 def get_expr_tag(expr: Expr, node=None, contact=None, block_hash=None):

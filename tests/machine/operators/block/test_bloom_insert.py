@@ -15,6 +15,7 @@ from astreum.crypto.bloom_tree import BloomTree
 from astreum.crypto.bloom_search.variants import make_search_variants
 from astreum.consensus.transaction.bloom.pending import finalize_pending_bloom_inserts
 from astreum.consensus.models.receipt import STATUS_SUCCESS, STATUS_FAILED
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _make_tx(hash_val=None, sender=None, recipient=None):
@@ -55,12 +56,12 @@ def _setup_machine(block=None, tx=None):
 def _tagged_err(result):
     return (
         result is not None
-        and result._tag == "link"
-        and result._tail is not None
-        and result._tail._tag == "symbol"
-        and result._tail.value == "err"
-        and result._head is not None
-        and result._head._tag == "str"
+        and get_expr_builtin_tag(result) == "link"
+        and result.tail is not None
+        and get_expr_builtin_tag(result.tail) == "symbol"
+        and result.tail.value == "err"
+        and result.head is not None
+        and get_expr_builtin_tag(result.head) == "str"
     )
 
 
@@ -80,7 +81,7 @@ class TestBlockBloomInsertHandler(unittest.TestCase):
         machine = _setup_machine()
         hex_val = b"\x01" + b"\x00" * 31
         expr = self._parse_expr(hex_val)
-        key = expr._head.hash()
+        key = expr.head.hash()
         expected = _variant_hashes(machine.tx, key)
         machine.run(expr=expr)
         self.assertEqual(machine.tx.pending_bloom_inserts, expected)
@@ -106,8 +107,8 @@ class TestBlockBloomInsertHandler(unittest.TestCase):
         h2 = b"\x02" + b"\x00" * 31
         e1 = self._parse_expr(h1)
         e2 = self._parse_expr(h2)
-        k1 = e1._head.hash()
-        k2 = e2._head.hash()
+        k1 = e1.head.hash()
+        k2 = e2.head.hash()
         machine.run(expr=e1)
         machine.run(expr=e2)
         expected_inserts = _variant_hashes(machine.tx, k1) | _variant_hashes(machine.tx, k2)
@@ -129,7 +130,7 @@ class TestBlockBloomInsertHandler(unittest.TestCase):
         machine = _setup_machine()
         hex_val = b"\x01" + b"\x00" * 31
         expr = self._parse_expr(hex_val)
-        machine.block.pending_bloom_keys.add(expr._head.hash())
+        machine.block.pending_bloom_keys.add(expr.head.hash())
         machine.run(expr=expr)
         self.assertEqual(machine.tx.pending_bloom_keys, set())
         self.assertEqual(machine.tx.pending_bloom_inserts, set())
@@ -142,7 +143,7 @@ class TestBlockBloomInsertErrors(unittest.TestCase):
         expr, _ = parse(tokenize("(block.bloom.insert?)"))
         result = machine.run(expr=expr)
         self.assertTrue(_tagged_err(result))
-        self.assertIn("stack underflow", result._head.value)
+        self.assertIn("stack underflow", result.head.value)
 
     def test_no_tx_returns_err(self):
         machine = Machine(node=None, meter_limit=10_000_000)
@@ -153,7 +154,7 @@ class TestBlockBloomInsertErrors(unittest.TestCase):
         expr, _ = parse(tokenize(f"({key_hex} block.bloom.insert?)"))
         result = machine.run(expr=expr)
         self.assertTrue(_tagged_err(result))
-        self.assertIn("transaction context not available", result._head.value)
+        self.assertIn("transaction context not available", result.head.value)
 
 
 class TestMakeSearchVariants(unittest.TestCase):

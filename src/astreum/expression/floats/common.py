@@ -61,19 +61,21 @@ def _expr_to_fp64(expr) -> float:
     Raises:
         ValueError: If expr is not a float type.
     """
-    tag = expr._tag
+    from astreum.expression.helpers import get_expr_builtin_tag
+
+    tag = get_expr_builtin_tag(expr)
     if tag == "fp64":
-        return expr._value
+        return expr.value
     if tag == "e4m3":
-        return _E4M3_TABLE[expr._value[0]]
+        return _E4M3_TABLE[expr.value[0]]
     if tag == "e5m2":
-        return _E5M2_TABLE[expr._value[0]]
+        return _E5M2_TABLE[expr.value[0]]
     if tag == "fp16":
-        return _unpack_fp16(expr._value)[0]
+        return _unpack_fp16(expr.value)[0]
     if tag == "bf16":
-        return _BF16_TABLE[_unpack_u16(expr._value)[0]]
+        return _BF16_TABLE[_unpack_u16(expr.value)[0]]
     if tag == "fp32":
-        return _unpack_fp32(expr._value)[0]
+        return _unpack_fp32(expr.value)[0]
     raise ValueError(f"Not a float type: {tag}")
 
 

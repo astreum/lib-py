@@ -68,6 +68,7 @@ from astreum.storage.radix import (  # noqa: E402
 )
 from astreum.storage.records import fetch_and_store_record, get_record_from_cold_storage  # noqa: E402
 from tests.consensus.validation.test_verify_stake_halving import _free_port  # noqa: E402
+from astreum.expression.helpers import get_expr_builtin_tag
 
 STAKE = 8
 SEED_ID = b"\x5e" * 32  # a record the genesis storage trie already holds
@@ -428,9 +429,9 @@ class TestEndToEnd(unittest.TestCase):
         from astreum.storage.exprs import get_expr_list
 
         cell, hashes = get_expr_list(self.node, tx_list), []
-        while cell is not None and cell._tag == "link":
-            hashes.append(cell._head_hash)
-            cell = cell._tail
+        while cell is not None and get_expr_builtin_tag(cell) == "link":
+            hashes.append(cell.head_hash)
+            cell = cell.tail
         self.assertEqual(hashes, [tx.hash for _, tx in self.first])
 
     def test_receipts_say_which_transactions_were_paid(self) -> None:

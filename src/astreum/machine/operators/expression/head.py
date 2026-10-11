@@ -2,18 +2,19 @@ from typing import List
 
 from astreum.expression import Expr, NIL, link, str_, symbol
 from astreum.machine import OpError
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def handle_stack_head(machine, stack: List[Expr], env) -> None:
     pair = stack.pop()
-    if pair._tag != "link":
-        raise OpError(f"head of {pair._tag}")
-    if pair._head is None:
+    if get_expr_builtin_tag(pair) != "link":
+        raise OpError(f"head of {get_expr_builtin_tag(pair)}")
+    if pair.head is None:
         machine.meter.charge_bytes(1)
         stack.append(NIL)
     else:
         machine.meter.charge_bytes(1)
-        stack.append(pair._head)
+        stack.append(pair.head)
 
 
 def handle_stack_head_with_result(machine, stack, env):

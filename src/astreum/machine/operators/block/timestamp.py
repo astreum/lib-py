@@ -6,7 +6,7 @@ from astreum.machine import OpError
 def handle_stack_block_timestamp(machine, stack, env):
     value = int_(machine.block.timestamp)
     stack.append(value)
-    machine.meter.charge_bytes(len(_encode_int(value._value)))
+    machine.meter.charge_bytes(len(_encode_int(value.value)))
 
 
 def handle_stack_block_timestamp_with_result(machine, stack, env):

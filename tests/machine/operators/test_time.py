@@ -13,6 +13,7 @@ from astreum.machine.tokenizer import tokenize
 from astreum.expression import NIL
 
 import unittest
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 class TestTimeOperator(unittest.TestCase):
@@ -22,36 +23,36 @@ class TestTimeOperator(unittest.TestCase):
     def test_time_returns_int(self):
         expr, _ = parse(tokenize("(time)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
-        self.assertIsInstance(result._value, int)
+        self.assertEqual(get_expr_builtin_tag(result), "int")
+        self.assertIsInstance(result.value, int)
 
     def test_time_approx_now(self):
         before = int(time.time())
         expr, _ = parse(tokenize("(time)"))
         result = self.machine.run(expr=expr)
         after = int(time.time())
-        self.assertGreaterEqual(result._value, before)
-        self.assertLessEqual(result._value, after + 1)
+        self.assertGreaterEqual(result.value, before)
+        self.assertLessEqual(result.value, after + 1)
 
     def test_clock_returns_int(self):
         expr, _ = parse(tokenize("(clock)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
-        self.assertIsInstance(result._value, int)
+        self.assertEqual(get_expr_builtin_tag(result), "int")
+        self.assertIsInstance(result.value, int)
 
     def test_clock_approx_now(self):
         before = time.perf_counter_ns()
         expr, _ = parse(tokenize("(clock)"))
         result = self.machine.run(expr=expr)
         after = time.perf_counter_ns()
-        self.assertGreaterEqual(result._value, before)
-        self.assertLessEqual(result._value, after + 1_000_000)
+        self.assertGreaterEqual(result.value, before)
+        self.assertLessEqual(result.value, after + 1_000_000)
 
     def test_clock_is_monotonic(self):
         expr, _ = parse(tokenize("(clock)"))
         first = self.machine.run(expr=expr)
         second = self.machine.run(expr=expr)
-        self.assertGreaterEqual(second._value, first._value)
+        self.assertGreaterEqual(second.value, first.value)
 
 
 class TestTimeDeterministic(unittest.TestCase):

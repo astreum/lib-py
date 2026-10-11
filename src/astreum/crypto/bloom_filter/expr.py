@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from astreum.expression import Expr, NIL, link, int_, bytes_
 from astreum.crypto.bloom_filter.main import BloomFilter
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def bloom_to_expr(bf: BloomFilter) -> Expr:
@@ -44,20 +45,20 @@ def bloom_from_expr(expr: Expr) -> BloomFilter:
     Returns:
         BloomFilter: Description of the return value.
     """
-    head = expr._head
+    head = expr.head
     if head is None or head is NIL:
         start_hash = None
     else:
-        start_hash = expr._head_hash
+        start_hash = expr.head_hash
 
-    count = expr._tail._head.value
+    count = expr.tail.head.value
 
     tiers: list[bytearray] = []
-    current = expr._tail._tail
-    while current._tag == "link" and current is not NIL:
-        tiers.append(bytearray(current._head.value))
-        current = current._tail
-    if current._tag == "bytes":
+    current = expr.tail.tail
+    while get_expr_builtin_tag(current) == "link" and current is not NIL:
+        tiers.append(bytearray(current.head.value))
+        current = current.tail
+    if get_expr_builtin_tag(current) == "bytes":
         tiers.append(bytearray(current.value))
 
     bf = BloomFilter()

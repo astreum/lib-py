@@ -11,14 +11,15 @@ from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.expression import NIL, int_, fp64_, bytes_, str_, symbol, link
 from astreum.machine.operators._if import is_truthy
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
@@ -84,50 +85,50 @@ class TestIfOperator(unittest.TestCase):
         """(1 99 42 if) -> Int(99)."""
         expr, _ = parse(tokenize("(1 99 42 if)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
-        self.assertEqual(result._value, 99)
+        self.assertEqual(get_expr_builtin_tag(result), "int")
+        self.assertEqual(result.value, 99)
 
     def test_bare_int_falsy(self):
         """(0 99 42 if) -> Int(42)."""
         expr, _ = parse(tokenize("(0 99 42 if)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
-        self.assertEqual(result._value, 42)
+        self.assertEqual(get_expr_builtin_tag(result), "int")
+        self.assertEqual(result.value, 42)
 
     def test_bare_fp64_truthy(self):
         """(1.5 99 42 if) -> Int(99)."""
         expr, _ = parse(tokenize("(1.5 99 42 if)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
-        self.assertEqual(result._value, 99)
+        self.assertEqual(get_expr_builtin_tag(result), "int")
+        self.assertEqual(result.value, 99)
 
     def test_bare_fp64_falsy(self):
         """(0.0 99 42 if) -> Int(42)."""
         expr, _ = parse(tokenize("(0.0 99 42 if)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
-        self.assertEqual(result._value, 42)
+        self.assertEqual(get_expr_builtin_tag(result), "int")
+        self.assertEqual(result.value, 42)
 
     def test_bare_bytes_truthy(self):
         """(0x01 99 42 if) -> Int(99)."""
         expr, _ = parse(tokenize("(0x01 99 42 if)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
-        self.assertEqual(result._value, 99)
+        self.assertEqual(get_expr_builtin_tag(result), "int")
+        self.assertEqual(result.value, 99)
 
     def test_bare_bytes_falsy(self):
         """(0x 99 42 if) -> Int(42)."""
         expr, _ = parse(tokenize("(0x 99 42 if)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
-        self.assertEqual(result._value, 42)
+        self.assertEqual(get_expr_builtin_tag(result), "int")
+        self.assertEqual(result.value, 42)
 
     def test_bare_nil_falsy(self):
         """('x 99 42 if) -> Int(42) (unbound -> NIL -> falsy)."""
         expr, _ = parse(tokenize("('x 99 42 if)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
-        self.assertEqual(result._value, 42)
+        self.assertEqual(get_expr_builtin_tag(result), "int")
+        self.assertEqual(result.value, 42)
 
     # --- bare errors -> NIL ---
 
@@ -144,16 +145,16 @@ class TestIfOperator(unittest.TestCase):
         expr, _ = parse(tokenize("(1 99 42 if?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head._tag, "int")
-        self.assertEqual(result._head._value, 99)
+        self.assertEqual(get_expr_builtin_tag(result.head), "int")
+        self.assertEqual(result.head.value, 99)
 
     def test_tagged_int_falsy(self):
         """(0 99 42 if?) -> (ok Int(42))."""
         expr, _ = parse(tokenize("(0 99 42 if?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head._tag, "int")
-        self.assertEqual(result._head._value, 42)
+        self.assertEqual(get_expr_builtin_tag(result.head), "int")
+        self.assertEqual(result.head.value, 42)
 
     # --- tagged errors -> (err ...) ---
 
@@ -162,8 +163,8 @@ class TestIfOperator(unittest.TestCase):
         expr, _ = parse(tokenize("(if?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head._tag, "str")
-        self.assertEqual(result._head.value, "stack underflow")
+        self.assertEqual(get_expr_builtin_tag(result.head), "str")
+        self.assertEqual(result.head.value, "stack underflow")
 
 
 if __name__ == "__main__":

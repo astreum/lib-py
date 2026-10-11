@@ -23,6 +23,7 @@ from tests.machine.operators.expression.test_ref import (
     stored_ref,
     store,
 )
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _load_expr(hash_bytes: bytes, block: bytes = BLOCK) -> Expr:
@@ -42,7 +43,7 @@ class TestLoadOperator(unittest.TestCase):
         expr, _ = parse(tokenize(f"(0x{'01' * 32} load?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "stack underflow")
+        self.assertEqual(result.head.value, "stack underflow")
 
     def test_load_zero32_returns_nil(self):
         expr, _ = parse(tokenize(f"(0x{BLOCK_HEX} 0x{ZERO_HEX} load)"))
@@ -65,7 +66,7 @@ class TestLoadOperator(unittest.TestCase):
         node = FakeNode()
         node.hot_storage[stored.hash()] = stored
         result = Machine(node=node).run(expr=_load_expr(stored.hash()))
-        self.assertEqual(result._tag, "symbol")
+        self.assertEqual(get_expr_builtin_tag(result), "symbol")
         self.assertEqual(result.value, "hello")
 
     def test_load_resolves_link_concrete(self):
@@ -73,9 +74,9 @@ class TestLoadOperator(unittest.TestCase):
         node = FakeNode()
         node.hot_storage[stored.hash()] = stored
         result = Machine(node=node).run(expr=_load_expr(stored.hash()))
-        self.assertEqual(result._tag, "link")
-        self.assertEqual(result._head.value, b"\x01")
-        self.assertEqual(result._tail.value, b"\x02")
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertEqual(result.head.value, b"\x01")
+        self.assertEqual(result.tail.value, b"\x02")
 
     def test_load_resolves_hash_children(self):
         head, tail = bytes_(b"head"), bytes_(b"tail")
@@ -84,10 +85,10 @@ class TestLoadOperator(unittest.TestCase):
         for e in (head, tail, cell):
             node.hot_storage[e.hash()] = e
         result = Machine(node=node).run(expr=_load_expr(cell.hash()))
-        self.assertEqual(result._head.value, b"head")
-        self.assertEqual(result._tail.value, b"tail")
+        self.assertEqual(result.head.value, b"head")
+        self.assertEqual(result.tail.value, b"tail")
         # The shared cell in storage was not changed.
-        self.assertIsNone(cell._head)
+        self.assertIsNone(cell.head)
 
     def test_load_meter_double_size(self):
         stored = link(bytes_(b"\x01"), bytes_(b"\x02"))
@@ -108,22 +109,22 @@ class TestLoadOperator(unittest.TestCase):
         expr, _ = parse(tokenize(f"(0x{BLOCK_HEX} 0x{ZERO_HEX} load?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertTrue(_is_nil(result._head))
+        self.assertTrue(_is_nil(result.head))
 
     def test_load_non_bytes_err(self):
         expr, _ = parse(tokenize(f'(0x{BLOCK_HEX} "not-a-hash" load?)'))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._head.value, "load requires 32-byte hash, got str")
+        self.assertEqual(result.head.value, "load requires 32-byte hash, got str")
 
     def test_load_short_bytes_err(self):
         expr, _ = parse(tokenize(f"(0x{BLOCK_HEX} 0xdead load?)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._head.value, "load requires 32-byte hash, got 2 bytes")
+        self.assertEqual(result.head.value, "load requires 32-byte hash, got 2 bytes")
 
     def test_load_no_node_err(self):
         expr, _ = parse(tokenize(f"(0x{BLOCK_HEX} 0x{'01' * 32} load?)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._head.value, "load requires a node connection")
+        self.assertEqual(result.head.value, "load requires a node connection")
 
     def test_load_unknown_block_err(self):
         node = FakeNode()
@@ -133,7 +134,7 @@ class TestLoadOperator(unittest.TestCase):
         expr, _ = parse(tokenize(f"(0x{BLOCK_HEX} 0x{stored.hash().hex()} load?)"))
         result = machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "load: unknown block")
+        self.assertEqual(result.head.value, "load: unknown block")
 
 
 class TestLoadFollowsRefs(unittest.TestCase):
@@ -154,8 +155,8 @@ class TestLoadFollowsRefs(unittest.TestCase):
         result = machine.run(expr=_load_expr(root.hash()))
 
         # (new-value . old-leaf) with the pointer replaced by what it names.
-        self.assertEqual(result._head._head.value, b"new")
-        self.assertEqual(result._head._tail.hash(), old_leaf.hash())
+        self.assertEqual(result.head.head.value, b"new")
+        self.assertEqual(result.head.tail.hash(), old_leaf.hash())
 
     def test_a_ref_to_a_ref_is_returned_as_data(self):
         leaf = bytes_(b"leaf")
@@ -179,7 +180,7 @@ class TestLoadFollowsRefs(unittest.TestCase):
         machine = machine_with_blocks(node, BLOCK)  # OLD unknown
         expr, _ = parse(tokenize(f"(0x{BLOCK_HEX} 0x{root.hash().hex()} load?)"))
         result = machine.run(expr=expr)
-        self.assertEqual(result._head.value, "load: unknown block")
+        self.assertEqual(result.head.value, "load: unknown block")
 
 
 if __name__ == "__main__":

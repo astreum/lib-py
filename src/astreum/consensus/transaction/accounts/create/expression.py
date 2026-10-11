@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from astreum.consensus.account import create_account
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def handle_expression_account_create(
@@ -14,17 +15,17 @@ def handle_expression_account_create(
     """Create an expression account addressed by its create transaction hash."""
     expression_address = transaction_hash
 
-    if transaction.data._tag != "link" or transaction.data._head is None:
+    if get_expr_builtin_tag(transaction.data) != "link" or transaction.data.head is None:
         return False
-    data_head = transaction.data._head
-    if data_head._tag != "link":
+    data_head = transaction.data.head
+    if get_expr_builtin_tag(data_head) != "link":
         return False
     # The program is named by hash, or already loaded (a transaction read from
     # a message or fetched whole): its hash is the same.
-    if data_head._head_hash is not None:
-        program_hash = data_head._head_hash
-    elif data_head._head is not None:
-        program_hash = data_head._head.hash()
+    if data_head.head_hash is not None:
+        program_hash = data_head.head_hash
+    elif data_head.head is not None:
+        program_hash = data_head.head.hash()
     else:
         return False
 

@@ -10,12 +10,12 @@ def handle_stack_bytes(machine, stack: List[Expr], env) -> None:
     v = stack.pop()
     tag = get_expr_tag(v)
     if tag == "int":
-        result = bytes_(_encode_int(v._value))
+        result = bytes_(_encode_int(v.value))
         machine.meter.charge_bytes(v.size())
         stack.append(result)
     elif tag in FLOAT_TAGS:
         # Encode float to its wire bytes representation
-        result = bytes_(_float_to_bytes(tag, v._value))
+        result = bytes_(_float_to_bytes(tag, v.value))
         machine.meter.charge_bytes(v.size())
         stack.append(result)
     elif tag in ("str", "symbol"):

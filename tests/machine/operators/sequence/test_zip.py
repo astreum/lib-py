@@ -10,24 +10,25 @@ if str(SRC_DIR) not in sys.path:
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.expression import NIL, int_, fp64_, bytes_, str_, symbol, link
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
 def _collect_link(value):
     out = []
-    while value._tag == "link" and value._head is not None:
-        out.append(value._head)
-        if value._tail is NIL or value._tail is None:
+    while get_expr_builtin_tag(value) == "link" and value.head is not None:
+        out.append(value.head)
+        if value.tail is NIL or value.tail is None:
             break
-        value = value._tail
+        value = value.tail
     return out
 
 
@@ -46,11 +47,11 @@ class TestZipOperator(unittest.TestCase):
         pairs = _collect_link(result)
         self.assertEqual(len(pairs), 3)
         # Pair 0
-        self.assertEqual(pairs[0]._head.value, 1)
-        self.assertEqual(pairs[0]._tail.value, "a")
+        self.assertEqual(pairs[0].head.value, 1)
+        self.assertEqual(pairs[0].tail.value, "a")
         # Pair 2
-        self.assertEqual(pairs[2]._head.value, 3)
-        self.assertEqual(pairs[2]._tail.value, "c")
+        self.assertEqual(pairs[2].head.value, 3)
+        self.assertEqual(pairs[2].tail.value, "c")
 
     # --- shortest-stop ---
 
@@ -67,8 +68,8 @@ class TestZipOperator(unittest.TestCase):
         result = self.machine.run(expr=expr)
         pairs = _collect_link(result)
         self.assertEqual(len(pairs), 1)
-        self.assertEqual(pairs[0]._head.value, 1)
-        self.assertEqual(pairs[0]._tail.value, "a")
+        self.assertEqual(pairs[0].head.value, 1)
+        self.assertEqual(pairs[0].tail.value, "a")
 
     # --- empty ---
 
@@ -91,25 +92,25 @@ class TestZipOperator(unittest.TestCase):
         pairs = _collect_link(result)
         self.assertEqual(len(pairs), 2)
         # (0xff, "x"), (0x41, "y")
-        self.assertEqual(pairs[0]._head._tag, "bytes")
-        self.assertEqual(pairs[0]._head.value, b"\xff")
-        self.assertEqual(pairs[0]._tail.value, "x")
+        self.assertEqual(get_expr_builtin_tag(pairs[0].head), "bytes")
+        self.assertEqual(pairs[0].head.value, b"\xff")
+        self.assertEqual(pairs[0].tail.value, "x")
 
     # --- error: non-sequence ---
 
     def test_zip_non_sequence(self):
         expr, _ = parse(tokenize("(42 '(a b c) zip)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_zip_underflow_returns_nil(self):
         expr, _ = parse(tokenize("(zip)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     # --- tagged zip ---
 
@@ -117,7 +118,7 @@ class TestZipOperator(unittest.TestCase):
         expr, _ = parse(tokenize("('(1 2 3) '(a b c) zip?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        pairs = _collect_link(result._head)
+        pairs = _collect_link(result.head)
         self.assertEqual(len(pairs), 3)
 
     def test_zip_err_tagged(self):
@@ -129,7 +130,7 @@ class TestZipOperator(unittest.TestCase):
         expr, _ = parse(tokenize("(zip?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head.value, "stack underflow")
+        self.assertEqual(result.head.value, "stack underflow")
 
 
 if __name__ == "__main__":

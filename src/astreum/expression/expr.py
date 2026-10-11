@@ -208,73 +208,24 @@ class Expr:
         self._hash = None
         self._size = None
 
-    # --- backward-compat property aliases ---
-
-    @property
-    def _tag(self):
-        if self.base in ("symbol", "bytes"):
-            return self.base
-        if self.base == "link":
-            if self.tail is not None and self.tail.base == "symbol" and self.tail.value in BUILTIN_COMPOSITE_TYPE_NAMES:
-                return self.tail.value
-            return "link"
-        return self.base
-
-    @property
-    def _value(self):
-        return self.value
-
-    @_value.setter
-    def _value(self, v):
-        self.value = v
-
-    @property
-    def _head(self):
-        return self.head
-
-    @_head.setter
-    def _head(self, v):
-        self.head = v
-
-    @property
-    def _tail(self):
-        return self.tail
-
-    @_tail.setter
-    def _tail(self, v):
-        self.tail = v
-
-    @property
-    def _head_hash(self):
-        return self.head_hash
-
-    @_head_hash.setter
-    def _head_hash(self, v):
-        self.head_hash = v
-
-    @property
-    def _tail_hash(self):
-        return self.tail_hash
-
-    @_tail_hash.setter
-    def _tail_hash(self, v):
-        self.tail_hash = v
-
     def __repr__(self):
-        if self._tag == "int":
-            return str(self._value)
-        elif self._tag in FLOAT_TAGS:
-            return str(_expr_to_fp64(self))
-        elif self._tag == "str":
-            return f'"{self._value}"'
-        elif self._tag == "symbol":
-            return self._value
-        elif self._tag == "bytes":
-            return "0x" + self._value.hex() if self._value else "0x"
-        elif self._tag == "link":
+        from astreum.expression.helpers import get_expr_builtin_tag
+
+        tag = get_expr_builtin_tag(self)
+        if tag in BUILTIN_COMPOSITE_TYPE_NAMES and self.value is None:
             return self._repr_link()
+        if tag == "int":
+            return str(self.value)
+        elif tag in FLOAT_TAGS:
+            return str(_expr_to_fp64(self))
+        elif tag == "str":
+            return f'"{self.value}"'
+        elif tag == "symbol":
+            return self.value
+        elif tag == "bytes":
+            return "0x" + self.value.hex() if self.value else "0x"
         else:
-            return f"#<{self._tag} {self._value}>"
+            return self._repr_link()
 
     def _repr_link(self) -> str:
         """Represent a link expression as a string.
@@ -285,27 +236,29 @@ class Expr:
         if self is NIL:
             return "nil"
 
-        if self._head_hash is not None and self.tail is None and self._tail_hash is None:
-            return f"#{self._head_hash.hex()}"
+        if self.head_hash is not None and self.tail is None and self.tail_hash is None:
+            return f"#{self.head_hash.hex()}"
+
+        from astreum.expression.helpers import get_expr_builtin_tag
 
         parts: list[str] = []
         current: Expr = self
         while current is not None and current.base == "link":
-            if current._head_hash is not None:
-                parts.append(f"#{current._head_hash.hex()}")
+            if current.head_hash is not None:
+                parts.append(f"#{current.head_hash.hex()}")
             elif current.head is not None:
                 parts.append("nil" if current.head is NIL else repr(current.head))
             else:
                 parts.append("nil")
 
-            if current._tail_hash is not None:
-                parts.append(f". #{current._tail_hash.hex()}")
+            if current.tail_hash is not None:
+                parts.append(f". #{current.tail_hash.hex()}")
                 break
             if current.tail is NIL or current.tail is None:
                 break
             if (current.tail.base == "link"
-                    and current.tail._head_hash is None
-                    and current.tail._tag == "link"):
+                    and current.tail.head_hash is None
+                    and get_expr_builtin_tag(current.tail) == "link"):
                 current = current.tail
                 continue
             parts.append(f". {repr(current.tail)}")
@@ -319,12 +272,14 @@ class Expr:
         Returns:
             The computed hash or ZERO32.
         """
-        encoder = TAG_BYTE_ENCODINGS.get(self._tag)
+        from astreum.expression.helpers import get_expr_builtin_tag
+
+        encoder = TAG_BYTE_ENCODINGS.get(get_expr_builtin_tag(self))
         if encoder is None:
-            if self._value is not None and hasattr(self._value, "hash"):
-                return self._value.hash()
+            if self.value is not None and hasattr(self.value, "hash"):
+                return self.value.hash()
             return ZERO32
-        return _terminal_hash(HASH_BYTE_BYTES, encoder(self._value))
+        return _terminal_hash(HASH_BYTE_BYTES, encoder(self.value))
 
     def hash(self):
         """Compute and cache the hash of the expression.
@@ -350,7 +305,7 @@ class Expr:
             self._hash = _terminal_hash(HASH_BYTE_BYTES, self.value)
             return self._hash
 
-        head_hash = self._value.hash() if self._value is not None else ZERO32
+        head_hash = self.value.hash() if self.value is not None else ZERO32
         tail_hash = _terminal_hash(HASH_BYTE_SYMBOL, self.base.encode("utf-8"))
         self._hash = _link_hash(head_hash, tail_hash)
         return self._hash
@@ -392,12 +347,12 @@ class Expr:
 
         encoder = TAG_BYTE_ENCODINGS.get(self.base)
         if encoder is not None:
-            self._size = len(encoder(self._value))
+            self._size = len(encoder(self.value))
             return self._size
 
-        if self._value is not None:
-            if hasattr(self._value, "size"):
-                self._size = self._value.size()
+        if self.value is not None:
+            if hasattr(self.value, "size"):
+                self._size = self.value.size()
                 return self._size
 
         self._size = 0

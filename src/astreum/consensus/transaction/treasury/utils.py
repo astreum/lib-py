@@ -5,6 +5,7 @@ from dataclasses import replace
 from astreum.storage.radix import RadixTree, get_from_radix_tree, get_radix_node_expr, put_in_radix_tree
 from astreum.expression import Expr, ZERO32, resolve_inner_exprs
 from astreum.consensus.transaction.treasury.record import TreasuryLoanRecord, TreasuryUserRecord, load_user_record
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _collect_sub_exprs(expr: Expr) -> list:
@@ -17,11 +18,11 @@ def _collect_sub_exprs(expr: Expr) -> list:
         List of all expressions.
     """
     result = [expr]
-    if expr._tag == "link":
-        if expr._head is not None:
-            result.extend(_collect_sub_exprs(expr._head))
-        if expr._tail is not None:
-            result.extend(_collect_sub_exprs(expr._tail))
+    if get_expr_builtin_tag(expr) == "link":
+        if expr.head is not None:
+            result.extend(_collect_sub_exprs(expr.head))
+        if expr.tail is not None:
+            result.extend(_collect_sub_exprs(expr.tail))
     return result
 
 

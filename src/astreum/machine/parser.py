@@ -63,9 +63,9 @@ def _parse_one(tokens: List[str], pos: int = 0) -> Tuple[Expr, int]:
                     result = link(item, result)
                 # Merge bare hash pointers: (@h1 . @h2) → Expr("link", head_hash=h1, tail_hash=h2)
                 if (len(items) == 1
-                        and items[0].base == "link" and items[0]._head_hash is not None
-                        and tail.base == "link" and tail._head_hash is not None):
-                    result = Expr("link", head_hash=items[0]._head_hash, tail_hash=tail._head_hash)
+                        and items[0].base == "link" and items[0].head_hash is not None
+                        and tail.base == "link" and tail.head_hash is not None):
+                    result = Expr("link", head_hash=items[0].head_hash, tail_hash=tail.head_hash)
                 return result, i
             expr, i = _parse_one(tokens, i)
             items.append(expr)

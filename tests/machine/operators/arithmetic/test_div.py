@@ -10,14 +10,15 @@ if str(SRC_DIR) not in sys.path:
 from astreum.machine import Expr, tokenize, parse
 from astreum.machine.main import Machine
 from astreum.expression import NIL, int_, fp64_, bytes_, str_, symbol, link
+from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def _is_tagged(expr, tag):
     return (
-        expr._tag == "link"
-        and expr._tail is not None
-        and expr._tail._tag == "symbol"
-        and expr._tail.value == tag
+        get_expr_builtin_tag(expr) == "link"
+        and expr.tail is not None
+        and get_expr_builtin_tag(expr.tail) == "symbol"
+        and expr.tail.value == tag
     )
 
 
@@ -33,47 +34,47 @@ class TestDivOperator(unittest.TestCase):
         """(100 7 /) -> 14."""
         expr, _ = parse(tokenize("(100 7 /)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "int")
+        self.assertEqual(get_expr_builtin_tag(result), "int")
         self.assertEqual(result.value, 14)
 
     def test_div_float(self):
         """(10.0 4.0 /) -> 2.5."""
         expr, _ = parse(tokenize("(10.0 4.0 /)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "fp64")
+        self.assertEqual(get_expr_builtin_tag(result), "fp64")
         self.assertEqual(result.value, 2.5)
 
     def test_div_zero_returns_nil(self):
         """(7 0 /) -> NIL (bare dispatch catches OpError)."""
         expr, _ = parse(tokenize("(7 0 /)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_div_cross_type_returns_nil(self):
         """(1 "hello" /) -> NIL (bare dispatch catches OpError)."""
         expr, _ = parse(tokenize('(1 "hello" /)'))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_div_cross_fp64_int_returns_nil(self):
         """(1 2.0 /) -> NIL (cross-type Float/Int no longer allowed)."""
         expr, _ = parse(tokenize("(1 2.0 /)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     def test_div_underflow_returns_nil(self):
         """(/) -> NIL."""
         expr, _ = parse(tokenize("(/)"))
         result = self.machine.run(expr=expr)
-        self.assertEqual(result._tag, "link")
-        self.assertIsNone(result._head)
-        self.assertIsNone(result._tail)
+        self.assertEqual(get_expr_builtin_tag(result), "link")
+        self.assertIsNone(result.head)
+        self.assertIsNone(result.tail)
 
     # --- tagged div (?) ---
 
@@ -82,48 +83,48 @@ class TestDivOperator(unittest.TestCase):
         expr, _ = parse(tokenize("(100 7 /?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head._tag, "int")
-        self.assertEqual(result._head.value, 14)
+        self.assertEqual(get_expr_builtin_tag(result.head), "int")
+        self.assertEqual(result.head.value, 14)
 
     def test_div_fp64_ok(self):
         """(10.0 4.0 /?) -> (ok . 2.5)."""
         expr, _ = parse(tokenize("(10.0 4.0 /?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "ok"))
-        self.assertEqual(result._head._tag, "fp64")
-        self.assertEqual(result._head.value, 2.5)
+        self.assertEqual(get_expr_builtin_tag(result.head), "fp64")
+        self.assertEqual(result.head.value, 2.5)
 
     def test_div_zero_err(self):
         """(7 0 /?) -> (err . "division by zero")."""
         expr, _ = parse(tokenize("(7 0 /?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head._tag, "str")
-        self.assertEqual(result._head.value, "division by zero")
+        self.assertEqual(get_expr_builtin_tag(result.head), "str")
+        self.assertEqual(result.head.value, "division by zero")
 
     def test_div_cross_type_err(self):
         """(1 "hello" /?) -> (err . "division by int and str")."""
         expr, _ = parse(tokenize("(1 \"hello\" /?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head._tag, "str")
-        self.assertEqual(result._head.value, "division by int and str")
+        self.assertEqual(get_expr_builtin_tag(result.head), "str")
+        self.assertEqual(result.head.value, "division by int and str")
 
     def test_div_cross_fp64_int_err(self):
         """(1 2.0 /?) -> (err . "division by int and float")."""
         expr, _ = parse(tokenize("(1 2.0 /?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head._tag, "str")
-        self.assertEqual(result._head.value, "division by int and fp64")
+        self.assertEqual(get_expr_builtin_tag(result.head), "str")
+        self.assertEqual(result.head.value, "division by int and fp64")
 
     def test_div_underflow_err(self):
         """(/?) -> (err . "stack underflow")."""
         expr, _ = parse(tokenize("(/?)"))
         result = self.machine.run(expr=expr)
         self.assertTrue(_is_tagged(result, "err"))
-        self.assertEqual(result._head._tag, "str")
-        self.assertEqual(result._head.value, "stack underflow")
+        self.assertEqual(get_expr_builtin_tag(result.head), "str")
+        self.assertEqual(result.head.value, "stack underflow")
 
 
 if __name__ == "__main__":

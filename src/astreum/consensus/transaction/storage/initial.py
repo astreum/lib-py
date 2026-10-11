@@ -18,6 +18,7 @@ from astreum.consensus.constants import STORAGE_ADDRESS
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.transaction.storage.model import StorageRecord
 from astreum.crypto.merkle import create_merkle_tree
+from astreum.expression.helpers import get_expr_builtin_tag
 
 class UnresolvedRecordExpr(Exception):
     """An expr the record walk had to follow could not be fetched."""
@@ -75,17 +76,17 @@ def _typed_payload_size(
         if expr.value is not None:
             return len(TAG_BYTE_ENCODINGS[expr.tail.value](expr.value))
         return len(expr.head.value)
-    tail_hash = expr._tail_hash
-    if tail_hash is None and expr._tail is not None:
-        tail_hash = expr._tail.hash()
+    tail_hash = expr.tail_hash
+    if tail_hash is None and expr.tail is not None:
+        tail_hash = expr.tail.hash()
     if _BUILTIN_TYPE_HASH.get(tail_hash) not in BUILTIN_COMPOSITE_TYPE_NAMES:
         return None
-    head = expr._head
-    if head is None and expr._head_hash is not None:
+    head = expr.head
+    if head is None and expr.head_hash is not None:
         # The payload is part of the cell: it is in the cell's block.
-        head = get_expr(node, expr._head_hash, contact=contact, **_scope(block_hash))
+        head = get_expr(node, expr.head_hash, contact=contact, **_scope(block_hash))
         if head is None:
-            raise UnresolvedRecordExpr(expr._head_hash)
+            raise UnresolvedRecordExpr(expr.head_hash)
     if head is None or head.base != "bytes":
         return None
     return len(head.value)
@@ -111,7 +112,7 @@ def _flat_size(expr: Expr, node: Any, contact: Any, block_hash: bytes | None = N
     typed = _typed_payload_size(expr, node, contact, block_hash)
     if typed is not None:
         return typed
-    if expr._tag != "link":
+    if get_expr_builtin_tag(expr) != "link":
         return expr.size()
     return 64
 
@@ -131,7 +132,7 @@ def _single_cell(expr: Expr, node: Any, contact: Any, block_hash: bytes | None =
     Returns:
         The single cell expression.
     """
-    if expr._tag != "link" or _typed_payload_size(expr, node, contact, block_hash) is not None:
+    if get_expr_builtin_tag(expr) != "link" or _typed_payload_size(expr, node, contact, block_hash) is not None:
         return expr
     cell = Expr("link", head_hash=_get_head_hash(expr), tail_hash=_get_tail_hash(expr))
     return cell if cell.hash() == expr.hash() else expr
@@ -141,14 +142,14 @@ def _cell_children(
     sub_expr: Expr, node: Any, contact: Any, follow_refs: bool, block_hash: bytes | None = None
 ) -> list[tuple[Expr | None, bytes]]:
     """Items to visit below *sub_expr*, in visiting order: (expr or None, hash)."""
-    if sub_expr._tag != "link":
+    if get_expr_builtin_tag(sub_expr) != "link":
         return []
     if follow_refs and _typed_payload_size(sub_expr, node, contact, block_hash) is not None:
         return []  # a value, not a structure: its payload is part of the cell
     items: list[tuple[Expr | None, bytes]] = []
     for child, ref in (
-        (sub_expr._head, sub_expr._head_hash),
-        (sub_expr._tail, sub_expr._tail_hash),
+        (sub_expr.head, sub_expr.head_hash),
+        (sub_expr.tail, sub_expr.tail_hash),
     ):
         if child is not None:
             child_hash = child.hash()
@@ -368,11 +369,11 @@ def handle_storage_initial_contract(
             )
             if missed:
                 return None
-            data_head = transaction.data._head
-            if data_head is None or data_head._tag != "link":
+            data_head = transaction.data.head
+            if data_head is None or get_expr_builtin_tag(data_head) != "link":
                 return None
-            list_expr = data_head._head
-            if list_expr is None or list_expr._tag != "link":
+            list_expr = data_head.head
+            if list_expr is None or get_expr_builtin_tag(list_expr) != "link":
                 return None
             list_items, missed = resolve_list_exprs(
                 node, list_expr, contact=block.contact, block_hash=block_scope(block)
