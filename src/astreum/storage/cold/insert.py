@@ -6,6 +6,7 @@ from typing import Any
 from astreum.storage.cold.collate import collate_exprs
 from astreum.storage.cold.merge import merge_exprs
 from astreum.expression.encoding import encode_expr_to_bytes
+from astreum.expression.helpers import builtin_composite_payload
 
 
 def _level_size(level_path: Path) -> int | None:
@@ -86,17 +87,11 @@ def put_expr_in_cold_storage(
             put_expr_in_cold_storage(node, expr._head, table=table, size_attr=size_attr, key=key)
         if expr._tail is not None:
             put_expr_in_cold_storage(node, expr._tail, table=table, size_attr=size_attr, key=key)
-        # For builtin composites (int, str, float), the encoded value must be stored
-        # as a separate bytes expression so head_hash can be resolved later.
-        if expr._head is None and expr.value is not None and expr._tail is not None and expr._tail.base == "symbol":
-            from astreum.expression.expr import TYPE_SYMBOLS, TAG_BYTE_ENCODINGS, Expr
-            type_name = expr._tail.value
-            if type_name in TYPE_SYMBOLS:
-                encoder = TAG_BYTE_ENCODINGS.get(type_name)
-                if encoder is not None:
-                    encoded = encoder(expr.value)
-                    value_expr = Expr("bytes", value=encoded)
-                    put_expr_in_cold_storage(node, value_expr, table=table, size_attr=size_attr, key=key)
+        # A builtin composite (int, str, float) needs its encoded value stored
+        # as a separate bytes expr so head_hash can be resolved later.
+        payload = builtin_composite_payload(expr)
+        if payload is not None:
+            put_expr_in_cold_storage(node, payload, table=table, size_attr=size_attr, key=key)
 
     expr_id = key if key is not None else expr.hash()
     expr_bytes = encode_expr_to_bytes(expr)

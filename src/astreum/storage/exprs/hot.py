@@ -3,6 +3,8 @@ from __future__ import annotations
 from time import time
 from typing import Optional
 
+from astreum.expression.helpers import builtin_composite_payload
+
 
 def get_expr_from_hot_storage(node, expr_id: bytes) -> Optional["Expr"]:
     """Retrieve an Expr from the in-memory hot storage cache.
@@ -48,6 +50,11 @@ def put_expr_in_hot_storage(node, expr: "Expr") -> bool:
             put_expr_in_hot_storage(node, expr._head)
         if expr._tail is not None:
             put_expr_in_hot_storage(node, expr._tail)
+        # A builtin composite (int, str, float) needs its encoded value stored
+        # as a separate bytes expr so head_hash can be resolved from storage.
+        payload = builtin_composite_payload(expr)
+        if payload is not None:
+            put_expr_in_hot_storage(node, payload)
 
     key = expr.hash()
     with node.hot_storage_lock:

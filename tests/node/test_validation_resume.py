@@ -53,26 +53,34 @@ class TestValidationResume(unittest.TestCase):
             # Produce blocks for ~15 seconds (block_spacing is a constant 2,
             # so genesis + ~6-7 blocks in that window)
             time.sleep(15)
-
-            saved_hash = node.latest_block_hash
-            saved_block = node.latest_block
-            self.assertIsNotNone(
-                saved_hash, "node should have a latest_block_hash after genesis"
-            )
-            self.assertIsNotNone(
-                saved_block, "node should have a latest_block after genesis"
-            )
-            height_before = saved_block.height
-            self.assertGreater(
-                height_before, 0,
-                f"expected at least 1 block (genesis), got height={height_before}",
-            )
-            print(
-                f"Phase 1 complete: height={height_before}, "
-                f"hash={saved_hash.hex()[:16]}..."
-            )
         finally:
             disconnect_node(node)
+
+        # Read the saved state only after the validation worker has stopped.
+        # disconnect_node waits 1 second for the worker. A worker that is
+        # still building a block can commit it after that wait.
+        node.consensus_validation_thread.join(timeout=30)
+        self.assertFalse(
+            node.consensus_validation_thread.is_alive(),
+            "validation worker should stop after disconnect",
+        )
+        saved_hash = node.latest_block_hash
+        saved_block = node.latest_block
+        self.assertIsNotNone(
+            saved_hash, "node should have a latest_block_hash after genesis"
+        )
+        self.assertIsNotNone(
+            saved_block, "node should have a latest_block after genesis"
+        )
+        height_before = saved_block.height
+        self.assertGreater(
+            height_before, 0,
+            f"expected at least 1 block (genesis), got height={height_before}",
+        )
+        print(
+            f"Phase 1 complete: height={height_before}, "
+            f"hash={saved_hash.hex()[:16]}..."
+        )
 
         # ── Phase 2: same node, resume from cold storage ──────────────
         # latest_block_hash was persisted on the instance attribute during
@@ -113,5 +121,7 @@ class TestValidationResume(unittest.TestCase):
             )
         finally:
             disconnect_node(node)
+            # The worker can still write to cold storage after disconnect.
+            node.consensus_validation_thread.join(timeout=30)
 
         cold_dir.cleanup()

@@ -6,6 +6,8 @@ from astreum.expression.expr import (
     Expr, NIL, ZERO32, bytes_, link,
     _decode_int,
     BUILTIN_COMPOSITE_TYPE_NAMES,
+    TAG_BYTE_ENCODINGS,
+    TYPE_SYMBOLS,
 )
 from astreum.expression.floats.common import FLOAT_TAGS
 from astreum.expression.floats.fp16 import _decode_fp16
@@ -22,6 +24,36 @@ def _scope(block_hash) -> dict:
         Empty dict if block_hash is None, else dict with block_hash.
     """
     return {} if block_hash is None else {"block_hash": block_hash}
+
+
+def builtin_composite_payload(expr: Expr):
+    """Get the payload expr of a builtin composite that holds a plain value.
+
+    An int, str or float made in memory keeps its value in ``expr.value`` and
+    has no head object. Its head hash names a bytes expr that holds the
+    encoded value. Storage must save that bytes expr, or no node can resolve
+    the head hash later.
+
+    Args:
+        expr: The expression to inspect.
+
+    Returns:
+        The bytes expr that holds the encoded value, or None when ``expr``
+        is not a builtin composite with a plain value.
+    """
+    if (
+        expr.base != "link"
+        or expr.head is not None
+        or expr.value is None
+        or expr.tail is None
+        or expr.tail.base != "symbol"
+        or expr.tail.value not in TYPE_SYMBOLS
+    ):
+        return None
+    encoder = TAG_BYTE_ENCODINGS.get(expr.tail.value)
+    if encoder is None:
+        return None
+    return bytes_(encoder(expr.value))
 
 
 def is_builtin_composite(expr: Expr) -> bool:

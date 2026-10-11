@@ -18,6 +18,9 @@ class TestTxLogOperator(unittest.TestCase):
         self.block = type('Block', (), {})()
         self.machine = Machine(node=None, meter_limit=10_000)
         self.machine.block = self.block
+        # An empty signature models a nested call, which skips the sender
+        # balance check in tx.log.
+        self.machine.tx = type('Tx', (), {'signature': b''})()
         self.fee_calls = []
 
         self._patcher = mock.patch(

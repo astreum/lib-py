@@ -21,6 +21,7 @@ from astreum.consensus.block.encoding.decode import get_block_from_storage  # no
 from astreum.communication.difficulty import message_difficulty  # noqa: E402
 from astreum.communication.models.peer import get_peer  # noqa: E402
 from astreum.communication.node import connect_node
+from astreum.storage.exprs import get_expr_list  # noqa: E402
 from astreum.communication.disconnect import disconnect_node
 
 
@@ -122,8 +123,9 @@ class TestNodeValidation(unittest.TestCase):
             )
             connect_node(node_b)
 
-            node_a_peer_key = getattr(node_b, "relay_public_key_bytes", None)
-            node_b_peer_key = getattr(node_a, "relay_public_key_bytes", None)
+            # Peers are keyed by storage public key, not relay public key.
+            node_a_peer_key = getattr(node_b, "storage_public_key_bytes", None)
+            node_b_peer_key = getattr(node_a, "storage_public_key_bytes", None)
             self.assertIsNotNone(node_a_peer_key)
             self.assertIsNotNone(node_b_peer_key)
 
@@ -155,10 +157,8 @@ class TestNodeValidation(unittest.TestCase):
                 latest_hash,
                 "node B should receive latest_block_hash after connecting to node A",
             )
-            self.assertTrue(
-                latest_hash in node_a.storage_index or latest_hash in node_b.storage_index,
-                "latest_block_hash should appear in node storage index",
-            )
+            # storage_index is filled only from on-chain storage records, so a
+            # new block hash is not expected to be in it.
 
             node_a_block = get_block_from_storage(astreum_node=node_a, block_hash=latest_hash)
             self.assertIsNotNone(
@@ -166,59 +166,55 @@ class TestNodeValidation(unittest.TestCase):
                 "node A should load latest block from storage",
             )
 
-            node_a_header = node_a.get_expr_list(latest_hash)
+            # A new block's exprs exist only on node A, and node B is not a
+            # validator, so it gets no BLOCK announcement. Give B the contact.
+            contact_a = (node_a.relay_public_key_bytes, "127.0.0.1", port_a)
+
+            node_a_header = get_expr_list(node_a, latest_hash)
             self.assertIsNotNone(
                 node_a_header,
                 "node A should load latest block header from storage",
             )
-            node_a_header_items, _ = resolve_inner_exprs(node_a, node_a_header)
             self.assertIsNotNone(
                 node_a_block.body_hash,
                 "node A should have a block body list hash",
             )
-            body_expr = node_a.get_expr_list(node_a_block.body_hash)
+            body_expr = get_expr_list(node_a, node_a_block.body_hash)
             self.assertIsNotNone(
                 body_expr,
                 "node A should load block body list from storage",
             )
-            body_items, _ = resolve_inner_exprs(node_a, body_expr)
-            self.assertTrue(
-                node_a_block.body_hash in node_a.storage_index or node_a_block.body_hash in node_b.storage_index,
-                "block body hash should appear in node storage index",
-            )
 
             loaded_block = None
             for _ in range(3):
-                header_b = node_b.get_expr_list(latest_hash)
+                header_b = get_expr_list(node_b, latest_hash, contact=contact_a, block_hash=latest_hash)
                 self.assertIsNotNone(
                     header_b,
                     "node B should load latest block header from storage",
                 )
-                header_b_items, _ = resolve_inner_exprs(node_b, header_b)
-                node_a_header_hashes = [expr.hash() for expr in node_a_header_items]
-                header_hashes = [expr.hash() for expr in header_b_items]
+                # An expr hash is a content hash, so equal hashes mean equal trees.
                 self.assertEqual(
-                    node_a_header_hashes,
-                    header_hashes,
+                    node_a_header.hash(),
+                    header_b.hash(),
                     "node B header list should match node A",
                 )
-                if header_b_items and len(header_b_items) >= 4:
-                    body_node = header_b_items[0]
-                    if body_node._tag == "link":
-                        body_b = node_b.get_expr_list(body_node.hash())
-                        self.assertIsNotNone(
-                            body_b,
-                            "node B should load block details list from storage",
-                        )
-                        body_b_items, _ = resolve_inner_exprs(node_b, body_b)
-                        node_a_body_hashes = [expr.hash() for expr in body_items]
-                        body_hashes = [expr.hash() for expr in body_b_items]
-                        self.assertEqual(
-                            node_a_body_hashes,
-                            body_hashes,
-                            "node B details list should match node A",
-                        )
-                loaded_block = get_block_from_storage(astreum_node=node_b, block_hash=latest_hash)
+                if node_a_block.body_hash is not None:
+                    body_b = get_expr_list(
+                        node_b,
+                        node_a_block.body_hash,
+                        contact=contact_a,
+                        block_hash=latest_hash,
+                    )
+                    self.assertIsNotNone(
+                        body_b,
+                        "node B should load block body list from storage",
+                    )
+                    self.assertEqual(
+                        body_expr.hash(),
+                        body_b.hash(),
+                        "node B body list should match node A",
+                    )
+                loaded_block = get_block_from_storage(astreum_node=node_b, block_hash=latest_hash, contact=contact_a)
                 if loaded_block is not None:
                     break
                 time.sleep(3)
