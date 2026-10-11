@@ -159,24 +159,24 @@ def _apply_tx_effects(
             receipt_status = STATUS_FAILED
             transfer_amount = 0
 
-        def _get_or_create_recipient_account() -> tuple["Account", bool]:
-            """Get or create the recipient account.
+    def _get_or_create_recipient_account() -> tuple["Account", bool]:
+        """Get or create the recipient account.
 
-            Args:
-                None.
+        Args:
+            None.
 
-            Returns:
-                Tuple of (account, is_new).
-            """
-            if transaction.recipient == transaction.sender:
-                return sender_account, False
-            if transaction.recipient == STORAGE_ADDRESS:
-                return storage_account, False
-            account = block.accounts.get_account(address=transaction.recipient, node=node)
-            if account is None:
-                return (create_account(), True)
+        Returns:
+            Tuple of (account, is_new).
+        """
+        if transaction.recipient == transaction.sender:
+            return sender_account, False
+        if transaction.recipient == STORAGE_ADDRESS:
+            return storage_account, False
+        account = block.accounts.get_account(address=transaction.recipient, node=node)
+        if account is None:
+            return (create_account(), True)
 
-            return (account, False)
+        return (account, False)
 
     recipient_account = None
     is_recipient_new = False
