@@ -2,6 +2,23 @@ from astreum.consensus.block.rate import calculate_storage_fee
 from astreum.consensus.models.receipt import STATUS_SUCCESS
 
 
+def pending_bloom_fee(block, transaction, receipt_status) -> int:
+    """Get the storage fee of the pending bloom inserts without inserting.
+
+    Args:
+        block: The block.
+        transaction: The transaction.
+        receipt_status: The receipt status.
+
+    Returns:
+        The storage fee. It is 0 when the status is not success.
+    """
+    keys = transaction.pending_bloom_keys
+    if receipt_status != STATUS_SUCCESS or not keys:
+        return 0
+    return calculate_storage_fee(block, 8 * len(keys))
+
+
 def finalize_pending_bloom_inserts(node, block, transaction, receipt_status) -> int:
     """Insert pending bloom variants if tx succeeded. Returns storage fee.
 

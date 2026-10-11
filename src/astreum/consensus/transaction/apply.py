@@ -26,7 +26,10 @@ from astreum.consensus.transaction.storage.initial import (
 )
 from astreum.consensus.transaction.storage.payment import handle_storage_payment_contract
 from astreum.consensus.transaction.treasury.borrow import handle_treasury_borrow
-from astreum.consensus.transaction.bloom.pending import finalize_pending_bloom_inserts
+from astreum.consensus.transaction.bloom.pending import (
+    finalize_pending_bloom_inserts,
+    pending_bloom_fee,
+)
 from astreum.consensus.transaction.treasury.record import (
     TreasuryUserRecord,
     load_user_record,
@@ -36,6 +39,7 @@ from astreum.consensus.transaction.treasury.repay import handle_treasury_repay
 from astreum.consensus.transaction.treasury.guarantees import handle_treasury_guarantee
 from astreum.consensus.transaction.treasury.buy import handle_treasury_buy
 from astreum.consensus.transaction.treasury.claim import handle_treasury_claim
+from astreum.consensus.transaction.fees import settle_fees
 
 
 # Transaction codes whose handler credits the sender mid-flow (so a pre-check on
@@ -176,6 +180,29 @@ def _apply_tx_effects(
 
     recipient_account = None
     is_recipient_new = False
+
+    # A failed top-level transaction keeps only its fees, counter, receipt, logs
+    # and search elements. Everything else returns to this snapshot.
+    snapshot = None if nested else block.snapshot()
+    rolled_back = False
+
+    def _rollback() -> None:
+        """Restore the block and read the accounts again.
+
+        Args:
+            None.
+
+        Returns: None
+        """
+        nonlocal sender_account, storage_account, recipient_account
+        nonlocal is_recipient_new, transfer_amount, rolled_back
+        block.restore(snapshot)
+        sender_account = block.accounts.get_account(address=transaction.sender, node=node)
+        storage_account = block.accounts.get_account(address=STORAGE_ADDRESS, node=node)
+        recipient_account = None
+        is_recipient_new = False
+        transfer_amount = 0
+        rolled_back = True
 
     # data fee is sender + receiptient sizes
     current_data_fee = 0
@@ -468,6 +495,10 @@ def _apply_tx_effects(
             transfer_amount = 0
             pass
 
+    # Point 1: the handler failed. Its writes do not stay.
+    if not nested and receipt_status != STATUS_SUCCESS:
+        _rollback()
+
     # Bloom Filter — top-level only.
     # (account, elements) pairs for the involved accounts. The elements are
     # priced here and inserted after the final status is known.
@@ -507,7 +538,7 @@ def _apply_tx_effects(
         ):
             receipt_status = STATUS_FAILED
 
-        operator_bloom_fee = finalize_pending_bloom_inserts(node, block, transaction, receipt_status)
+        operator_bloom_fee = pending_bloom_fee(block, transaction, receipt_status)
         current_storage_fee += operator_bloom_fee
         if sender_account.balance < (
             tx_fee + transfer_amount + current_data_fee
@@ -546,8 +577,6 @@ def _apply_tx_effects(
                 + current_storage_fee
             ):
                 receipt_status = STATUS_FAILED
-        if not nested:
-            block.pending_exprs.append(logs_expr)
 
     # New account: the sender pays for its cell before the balance is deducted.
     # (to_expr, not expr(): expr() caches, and the account changes later.)
@@ -592,24 +621,47 @@ def _apply_tx_effects(
             receipt = _build_receipt(current_storage_fee)
         current_storage_fee = receipt.storage_fee
 
-    # Final affordability check — top-level only.
-    affordability_failed = False
+    # Final affordability check — top-level only. A sender that cannot pay
+    # everything fails the transaction and still pays min(balance, fees).
+    # See consensus/transaction/fees.py.
+    settlement = None
     if not nested:
-        if sender_account.balance < (
+        if receipt_status == STATUS_SUCCESS and sender_account.balance < (
             tx_fee + transfer_amount + current_data_fee
             + current_storage_fee
         ):
             receipt_status = STATUS_FAILED
-            # Revert any amount already credited to the recipient, then skip
-            # fee deduction entirely so the sender balance never goes negative.
-            if transfer_amount and recipient_account is not None:
-                recipient_account.balance -= transfer_amount
+        # Point 2: a late check failed. The handler writes do not stay.
+        if receipt_status != STATUS_SUCCESS and not rolled_back:
+            _rollback()
+        settlement = settle_fees(
+            sender_account.balance,
+            tx_fee,
+            current_data_fee,
+            current_storage_fee,
+            transfer_amount,
+        )
+        if not settlement.affordable:
+            receipt_status = STATUS_FAILED
             transfer_amount = 0
-            affordability_failed = True
-        if receipt.status != receipt_status:
-            # The receipt records the final status. 0 and 1 are the same size,
-            # so its fee does not move.
+        if (
+            receipt.status != receipt_status
+            or settlement.transaction_fee != tx_fee
+            or settlement.data_fee != current_data_fee
+            or settlement.storage_fee != current_storage_fee
+        ):
+            # The receipt records the final status and the fees taken.
+            tx_fee = settlement.transaction_fee
+            current_evaluation_fee = min(current_evaluation_fee, tx_fee)
+            current_data_fee = settlement.data_fee
+            current_storage_fee = settlement.storage_fee
             receipt = _build_receipt(current_storage_fee)
+
+    # Operator bloom inserts and logs — top-level, with the final status.
+    if not nested:
+        finalize_pending_bloom_inserts(node, block, transaction, receipt_status)
+        if collected_logs:
+            block.pending_exprs.append(logs_expr)
 
     # Involved accounts — insert only when the final status is success.
     if receipt_status == STATUS_SUCCESS:
@@ -618,15 +670,11 @@ def _apply_tx_effects(
             block.involved_accounts.add(account_address)
 
     # Balance deductions.
-    if not affordability_failed:
-        if nested:
-            sender_account.balance -= transfer_amount
-        else:
-            total_fees = (
-                tx_fee + current_data_fee + current_storage_fee
-            )
-            sender_account.balance -= total_fees + transfer_amount
-            storage_account.balance += current_storage_fee
+    if nested:
+        sender_account.balance -= transfer_amount
+    else:
+        sender_account.balance -= settlement.total
+        storage_account.balance += settlement.storage_fee
 
     # Accounts write-back (cache).
     if not nested and counter_matched:

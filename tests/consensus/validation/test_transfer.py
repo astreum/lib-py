@@ -134,7 +134,8 @@ class TestTransfer(unittest.TestCase):
         receipt = self.block.receipts[-1]
         recipient_acct = self.block.accounts.get_account(recipient, self.node)
         self.assertEqual(receipt.status, STATUS_FAILED)
-        self.assertEqual(recipient_acct.balance, 0)
+        # A failed transaction does not create the recipient account.
+        self.assertIsNone(recipient_acct)
 
 
 if __name__ == "__main__":
