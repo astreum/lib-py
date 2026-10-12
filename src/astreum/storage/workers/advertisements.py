@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import time
+from itertools import islice
 from typing import TYPE_CHECKING
 
 from astreum.consensus.constants import STORAGE_ADDRESS
+from astreum.expression import RESOLUTION_SINGLE
 from astreum.storage.advertisements import advertise_exprs
+from astreum.storage.exprs.network import put_exprs_in_network
 from astreum.storage.radix import RadixTree, get_from_radix_tree
 from astreum.storage.requests import prune_expired_expr_reqs
 from astreum.storage.records import (
     fetch_and_store_record,
     get_record_from_cold_storage,
+    iter_records_in_cold_storage,
     parse_record,
 )
 
@@ -148,13 +152,65 @@ def _long_term_store_one(node: "Node") -> bool:
     return fetch_and_store_record(node, storage_id, record)
 
 
+_ANNOUNCE_DONE = "done"
+_ANNOUNCE_MORE = "more"
+_ANNOUNCE_WAIT = "wait"
+
+
+def _startup_announce_step(node: "Node") -> str:
+    """Announce one batch of stored records as this node.
+
+    Does nothing until ``node.latest_block`` is loaded. The first ready call
+    starts an iterator over the records table. Each call then sends the next
+    batch, sized to fit one ``STORAGE_PUT`` datagram, through
+    ``put_exprs_in_network``. An error ends the job.
+
+    Args:
+        node: A Node instance with ``is_storage_provider`` set.
+
+    Returns:
+        ``"wait"`` if the node is not synced yet, ``"more"`` if records
+        remain, ``"done"`` if the job is finished or does not apply.
+    """
+    if not getattr(node, "is_storage_provider", False):
+        return _ANNOUNCE_DONE
+    state = getattr(node, "startup_announce", None)
+    if state == _ANNOUNCE_DONE:
+        return _ANNOUNCE_DONE
+    if getattr(node, "latest_block", None) is None:
+        return _ANNOUNCE_WAIT
+
+    try:
+        from astreum.communication.storage_request.model import max_batch_entries
+        from astreum.utils.config import DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES
+
+        if state is None:
+            state = iter_records_in_cold_storage(node)
+            node.startup_announce = state
+        budget = node.config.get(
+            "storage_put_batch_max_bytes", DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES
+        )
+        per_batch = max(1, max_batch_entries(budget))
+        batch = list(islice(state, per_batch))
+        if batch:
+            put_exprs_in_network(node, [(expr_id, RESOLUTION_SINGLE) for expr_id in batch])
+        if len(batch) < per_batch:
+            node.startup_announce = _ANNOUNCE_DONE
+            return _ANNOUNCE_DONE
+    except Exception as exc:
+        node.logger.exception("Startup announce failed: %s", exc)
+        node.startup_announce = _ANNOUNCE_DONE
+        return _ANNOUNCE_DONE
+    return _ANNOUNCE_MORE
+
+
 def advertise_storage(astreum_node: "Node") -> None:
     """Periodically update the storage request price and long-term-store.
 
     Runs a single timed loop in a daemon thread that adjusts
     ``storage_request_current_price`` based on incoming queue pressure to
     signal demand. When ``is_storage_provider`` is enabled, the same loop also
-    processes one storage-index entry per ``long_term_storage_interval``
+    announces every stored record once after sync, then processes one storage-index entry per ``long_term_storage_interval``
     seconds: entries missing from the records table are fetched and written
     to cold storage plus the records table. Fresh-expr advertisement happens
     at block creation via ``advertise_exprs(entries=...)``. The periodic
@@ -193,6 +249,7 @@ def advertise_storage(astreum_node: "Node") -> None:
     next_price_at = now if price_interval > 0 else None
     next_long_term_at = now if long_term_enabled and long_term_interval > 0 else None
     next_prune_at = now + prune_interval if prune_interval > 0 else None
+    next_announce_at = now if getattr(astreum_node, "is_storage_provider", False) else None
 
     while not stop.is_set():
         now = time.monotonic()
@@ -213,6 +270,15 @@ def advertise_storage(astreum_node: "Node") -> None:
             while next_long_term_at <= now:
                 next_long_term_at += long_term_interval
 
+        if next_announce_at is not None and now >= next_announce_at:
+            progress = _startup_announce_step(astreum_node)
+            if progress == _ANNOUNCE_DONE:
+                next_announce_at = None
+            elif progress == _ANNOUNCE_MORE:
+                next_announce_at = now
+            else:
+                next_announce_at = now + 1.0
+
         if next_prune_at is not None and now >= next_prune_at:
             try:
                 removed = prune_expired_expr_reqs(astreum_node)
@@ -224,7 +290,9 @@ def advertise_storage(astreum_node: "Node") -> None:
                 next_prune_at += prune_interval
 
         deadlines = [
-            d for d in (next_price_at, next_long_term_at, next_prune_at) if d is not None
+            d
+            for d in (next_price_at, next_long_term_at, next_prune_at, next_announce_at)
+            if d is not None
         ]
         if not deadlines:
             stop.wait(1.0)
