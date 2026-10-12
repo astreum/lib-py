@@ -123,6 +123,11 @@ class TestStartupAnnounceLoop(unittest.TestCase):
         node.config["storage_request_price_interval"] = 0
         node.config["expr_request_ttl"] = 0
         node.long_term_storage_interval = 0
+        node.peers = {}
+        node.peers_lock = threading.RLock()
+        node.index_requests = []
+        node.index_requests_lock = threading.Lock()
+        node.index_requested = False
         node.communication_stop_event = threading.Event()
         return node
 

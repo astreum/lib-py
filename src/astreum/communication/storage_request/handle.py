@@ -372,6 +372,13 @@ def handle_storage_request(node: "Node", peer: "Peer", message: Message) -> tupl
             )
             return _handle_put(node, peer, storage_request)
 
+        case StorageRequestCode.STORAGE_INDEX_REQUEST:
+            node.logger.debug("Queued STORAGE_INDEX_REQUEST from %s", peer.address)
+            with node.index_requests_lock:
+                if peer.public_key_bytes not in node.index_requests:
+                    node.index_requests.append(peer.public_key_bytes)
+            return True, None
+
         case _:
             node.logger.debug("Unknown StorageRequestCode %s from %s", storage_request.code, peer.address)
             return False, f"unknown StorageRequestCode {storage_request.code}"

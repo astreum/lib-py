@@ -382,6 +382,11 @@ class TestAdvertiseStorageLoop(unittest.TestCase):
             config={"storage_request_price_interval": interval},
             is_storage_provider=long_term,
             long_term_storage_interval=interval,
+            peers={},
+            peers_lock=threading.RLock(),
+            index_requests=[],
+            index_requests_lock=threading.Lock(),
+            index_requested=False,
             communication_stop_event=threading.Event(),
             logger=_silent_logger(),
         )

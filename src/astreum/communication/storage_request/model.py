@@ -102,6 +102,8 @@ class StorageRequest:
             return self._put_to_bytes()
         if self.code == StorageRequestCode.STORAGE_GET:
             return self._get_to_bytes()
+        if self.code == StorageRequestCode.STORAGE_INDEX_REQUEST:
+            return bytes([self.code.value])
         raise ValueError(f"Cannot encode StorageRequestCode {self.code!r}")
 
     def _get_to_bytes(self) -> bytes:
@@ -194,6 +196,13 @@ class StorageRequest:
 
         if req_type == StorageRequestCode.STORAGE_GET:
             return cls._get_from_bytes(data)
+
+        if req_type == StorageRequestCode.STORAGE_INDEX_REQUEST:
+            if len(data) != 1:
+                raise ValueError(
+                    f"STORAGE_INDEX_REQUEST must be 1 byte ({len(data)} bytes)"
+                )
+            return cls(code=req_type)
         raise ValueError(f"Unsupported StorageRequestCode: {req_type!r}")
 
     @classmethod

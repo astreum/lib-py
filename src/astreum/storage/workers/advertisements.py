@@ -5,9 +5,18 @@ from itertools import islice
 from typing import TYPE_CHECKING
 
 from astreum.consensus.constants import STORAGE_ADDRESS
+from astreum.communication.models.peer import get_peer
+from astreum.communication.storage_request.code import StorageRequestCode
+from astreum.communication.storage_request.model import StorageRequest
+from astreum.communication.util import xor_distance
 from astreum.expression import RESOLUTION_SINGLE
 from astreum.storage.advertisements import advertise_exprs
-from astreum.storage.exprs.network import put_exprs_in_network
+from astreum.storage.exprs.network import (
+    _send_storage_put,
+    put_exprs_in_network,
+    send_put_entries,
+)
+from astreum.storage.providers import provider_payload_for_id
 from astreum.storage.radix import RadixTree, get_from_radix_tree
 from astreum.storage.requests import prune_expired_expr_reqs
 from astreum.storage.records import (
@@ -204,6 +213,84 @@ def _startup_announce_step(node: "Node") -> str:
     return _ANNOUNCE_MORE
 
 
+def _send_index_requests(node: "Node") -> bool:
+    """Send one ``STORAGE_INDEX_REQUEST`` to every known peer, once.
+
+    Waits until ``node.latest_block`` is loaded, so the replies can pass the
+    storage trie check, and until at least one peer is known.
+
+    Args:
+        node: A Node instance.
+
+    Returns:
+        True if the requests were sent in this call, False otherwise.
+    """
+    if node.index_requested or getattr(node, "latest_block", None) is None:
+        return False
+    with node.peers_lock:
+        peers = list(node.peers.values())
+    peers = [peer for peer in peers if peer.address is not None]
+    if not peers:
+        return False
+    node.index_requested = True
+    request = StorageRequest(code=StorageRequestCode.STORAGE_INDEX_REQUEST)
+    for peer in peers:
+        _send_storage_put(node, peer, request)
+    return True
+
+
+def _serve_one_index_request(node: "Node") -> bool:
+    """Answer one queued ``STORAGE_INDEX_REQUEST``.
+
+    Scans ``node.storage_index`` and sends the requester every entry the
+    requester is nearer to than this node. Entries go out as ``STORAGE_PUT``
+    datagrams, grouped by provider id, each with its original provider
+    payload. This node keeps its own entries.
+
+    Args:
+        node: A Node instance.
+
+    Returns:
+        True if a queued request was taken, False if the queue was empty.
+    """
+    with node.index_requests_lock:
+        if not node.index_requests:
+            return False
+        requester_key = node.index_requests.pop(0)
+
+    peer = get_peer(node, requester_key)
+    if peer is None or peer.address is None:
+        return True
+
+    own_key = node.config["storage_public_key_bytes"]
+    groups: dict[int, list[tuple[bytes, int]]] = {}
+    for expr_id, provider_id in list(node.storage_index.items()):
+        if xor_distance(expr_id, requester_key) < xor_distance(expr_id, own_key):
+            groups.setdefault(provider_id, []).append((expr_id, RESOLUTION_SINGLE))
+
+    for provider_id, entries in groups.items():
+        payload = provider_payload_for_id(node, provider_id)
+        if payload is None:
+            continue
+        send_put_entries(node, peer, payload, entries)
+    return True
+
+
+def _index_handoff_step(node: "Node") -> bool:
+    """Run one index handoff step: our request, then one reply.
+
+    Args:
+        node: A Node instance.
+
+    Returns:
+        True if more queued requests remain to answer, False otherwise.
+    """
+    _send_index_requests(node)
+    _serve_one_index_request(node)
+    with node.index_requests_lock:
+        return bool(node.index_requests)
+
+
 def advertise_storage(astreum_node: "Node") -> None:
     """Periodically update the storage request price and long-term-store.
 
@@ -250,6 +337,7 @@ def advertise_storage(astreum_node: "Node") -> None:
     next_long_term_at = now if long_term_enabled and long_term_interval > 0 else None
     next_prune_at = now + prune_interval if prune_interval > 0 else None
     next_announce_at = now if getattr(astreum_node, "is_storage_provider", False) else None
+    next_index_at = now
 
     while not stop.is_set():
         now = time.monotonic()
@@ -279,6 +367,14 @@ def advertise_storage(astreum_node: "Node") -> None:
             else:
                 next_announce_at = now + 1.0
 
+        if now >= next_index_at:
+            try:
+                more = _index_handoff_step(astreum_node)
+            except Exception as exc:
+                astreum_node.logger.exception("Index handoff step failed: %s", exc)
+                more = False
+            next_index_at = now if more else now + 1.0
+
         if next_prune_at is not None and now >= next_prune_at:
             try:
                 removed = prune_expired_expr_reqs(astreum_node)
@@ -291,7 +387,13 @@ def advertise_storage(astreum_node: "Node") -> None:
 
         deadlines = [
             d
-            for d in (next_price_at, next_long_term_at, next_prune_at, next_announce_at)
+            for d in (
+                next_price_at,
+                next_long_term_at,
+                next_prune_at,
+                next_announce_at,
+                next_index_at,
+            )
             if d is not None
         ]
         if not deadlines:

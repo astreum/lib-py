@@ -52,6 +52,11 @@ def setup_storage(node: Any, config: dict) -> None:
     node.hot_storage_timestamps = {}
     node.storage_index = {}
     node.startup_announce = None
+    # Index handoff: STORAGE_INDEX_REQUEST senders waiting for a reply, and
+    # whether this node already sent its own request after sync.
+    node.index_requests = []
+    node.index_requests_lock = threading.Lock()
+    node.index_requested = False
     node.storage_providers = []
     # Which peer holds a recent block's uncommitted exprs (BLOCK message).
     from astreum.consensus.block.holders import init_block_holders
