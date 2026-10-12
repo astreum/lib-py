@@ -113,12 +113,12 @@ def _long_term_store_one(node: "Node") -> bool:
     and stores it (cold + records).
 
     Args:
-        node: A Node instance with storage and long-term storage enabled.
+        node: A Node instance with storage and ``is_storage_provider`` enabled.
 
     Returns:
         True if an entry was processed, False otherwise.
     """
-    if not node.long_term_storage:
+    if not node.is_storage_provider:
         return False
 
     keys = list(node.storage_index.keys())  # snapshot; UDP thread mutates the dict
@@ -153,7 +153,7 @@ def advertise_storage(astreum_node: "Node") -> None:
 
     Runs a single timed loop in a daemon thread that adjusts
     ``storage_request_current_price`` based on incoming queue pressure to
-    signal demand. When ``long_term_storage`` is enabled, the same loop also
+    signal demand. When ``is_storage_provider`` is enabled, the same loop also
     processes one storage-index entry per ``long_term_storage_interval``
     seconds: entries missing from the records table are fetched and written
     to cold storage plus the records table. Fresh-expr advertisement happens
@@ -175,7 +175,7 @@ def advertise_storage(astreum_node: "Node") -> None:
     long_term_interval = float(
         getattr(astreum_node, "long_term_storage_interval", 0) or 0
     )
-    long_term_enabled = bool(getattr(astreum_node, "long_term_storage", False))
+    long_term_enabled = bool(getattr(astreum_node, "is_storage_provider", False))
 
     if long_term_enabled:
         astreum_node.logger.info(

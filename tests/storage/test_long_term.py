@@ -21,6 +21,7 @@ from astreum.storage.records import (
     get_record_from_cold_storage,
 )
 from astreum.storage.setup import setup_storage
+from astreum.storage.workers.claim import claim_storage
 from astreum.node import Node
 
 
@@ -49,15 +50,15 @@ def _silent_logger():
 class TestLongTermConfig(unittest.TestCase):
     def test_default_off_and_interval_default(self):
         config = config_setup({"default_seed": None})
-        self.assertFalse(config["long_term_storage"])
+        self.assertFalse(config["is_storage_provider"])
         self.assertEqual(
             config["long_term_storage_interval"],
             DEFAULT_LONG_TERM_STORAGE_INTERVAL_SECONDS,
         )
 
     def test_on_when_set(self):
-        config = config_setup({"default_seed": None, "long_term_storage": True})
-        self.assertTrue(config["long_term_storage"])
+        config = config_setup({"default_seed": None, "is_storage_provider": True})
+        self.assertTrue(config["is_storage_provider"])
 
     def test_interval_parsed(self):
         config = config_setup(
@@ -76,15 +77,19 @@ class TestLongTermConfig(unittest.TestCase):
 
     def test_must_be_boolean(self):
         with self.assertRaises(ValueError):
-            config_setup({"default_seed": None, "long_term_storage": "yes"})
+            config_setup({"default_seed": None, "is_storage_provider": "yes"})
+
+    def test_old_key_ignored(self):
+        config = config_setup({"default_seed": None, "long_term_storage": True})
+        self.assertFalse(config["is_storage_provider"])
 
 
 class TestLongTermSetup(unittest.TestCase):
     def test_disabled_without_cold_path(self):
-        config = config_setup({"default_seed": None, "long_term_storage": True})
+        config = config_setup({"default_seed": None, "is_storage_provider": True})
         node = SimpleNamespace(logger=_silent_logger())
         setup_storage(node, config)
-        self.assertFalse(node.long_term_storage)
+        self.assertFalse(node.is_storage_provider)
         self.assertEqual(node.long_term_cursor, 0)
         self.assertEqual(
             node.long_term_storage_interval,
@@ -96,14 +101,14 @@ class TestLongTermSetup(unittest.TestCase):
             config = config_setup(
                 {
                     "default_seed": None,
-                    "long_term_storage": True,
+                    "is_storage_provider": True,
                     "long_term_storage_interval": 3.0,
                     "cold_storage_path": temp_dir,
                 }
             )
             node = SimpleNamespace(logger=_silent_logger())
             setup_storage(node, config)
-            self.assertTrue(node.long_term_storage)
+            self.assertTrue(node.is_storage_provider)
             self.assertEqual(node.long_term_storage_interval, 3.0)
             self.assertEqual(node.long_term_cursor, 0)
 
@@ -246,7 +251,7 @@ REC_HASH = b"\x0b" * 32
 
 def _lt_node(**overrides):
     node = SimpleNamespace(
-        long_term_storage=True,
+        is_storage_provider=True,
         long_term_cursor=0,
         storage_index={REC_HASH: 0},
         latest_block=None,
@@ -275,7 +280,7 @@ class TestLongTermStoreOne(unittest.TestCase):
         return patcher, fetch
 
     def test_disabled_noop(self):
-        node = _lt_node(long_term_storage=False)
+        node = _lt_node(is_storage_provider=False)
         self.assertFalse(_long_term_store_one(node))
         self.assertEqual(node.long_term_cursor, 0)
 
@@ -375,7 +380,7 @@ class TestAdvertiseStorageLoop(unittest.TestCase):
     def _loop_node(self, long_term, interval=0.05):
         return SimpleNamespace(
             config={"storage_request_price_interval": interval},
-            long_term_storage=long_term,
+            is_storage_provider=long_term,
             long_term_storage_interval=interval,
             communication_stop_event=threading.Event(),
             logger=_silent_logger(),
@@ -411,6 +416,33 @@ class TestAdvertiseStorageLoop(unittest.TestCase):
             side_effect=RuntimeError("boom"),
         ):
             self._run_loop(node, duration=0.3)
+
+
+class TestClaimWorkerGate(unittest.TestCase):
+    def _node(self, provider):
+        return SimpleNamespace(
+            is_storage_provider=provider,
+            communication_stop_event=threading.Event(),
+            latest_block=None,
+            logger=_silent_logger(),
+        )
+
+    def test_claim_worker_exits_when_not_provider(self):
+        node = self._node(False)
+        thread = threading.Thread(target=claim_storage, args=(node,), daemon=True)
+        thread.start()
+        thread.join(timeout=2.0)
+        self.assertFalse(thread.is_alive())
+
+    def test_claim_worker_runs_when_provider(self):
+        node = self._node(True)
+        thread = threading.Thread(target=claim_storage, args=(node,), daemon=True)
+        thread.start()
+        thread.join(timeout=0.3)
+        self.assertTrue(thread.is_alive())
+        node.communication_stop_event.set()
+        thread.join(timeout=2.0)
+        self.assertFalse(thread.is_alive())
 
 
 if __name__ == "__main__":

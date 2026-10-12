@@ -82,12 +82,12 @@ def setup_storage(node: Any, config: dict) -> None:
         Path(config["cold_storage_path"]) / "records" if config.get("cold_storage_path") else None
     )
 
-    node.long_term_storage = bool(config.get("long_term_storage"))
-    if node.long_term_storage and not config.get("cold_storage_path"):
+    node.is_storage_provider = bool(config.get("is_storage_provider"))
+    if node.is_storage_provider and not config.get("cold_storage_path"):
         node.logger.error(
-            "long_term_storage requires cold_storage_path; disabling long-term storage"
+            "is_storage_provider requires cold_storage_path; disabling storage provider"
         )
-        node.long_term_storage = False
+        node.is_storage_provider = False
     node.long_term_storage_interval = config["long_term_storage_interval"]
     node.long_term_cursor = 0
 

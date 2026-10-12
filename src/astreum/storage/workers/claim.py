@@ -400,7 +400,8 @@ def _submit_claim_group(node: Node, latest_block, entries: list[tuple]) -> bool:
 def claim_storage(node: Node) -> None:
     """Submit storage reward claims on era boundaries.
 
-    Runs as a daemon thread.  On each era boundary (every ``ERA_SIZE``
+    Runs as a daemon thread.  Returns at once when ``node.is_storage_provider``
+    is false.  On each era boundary (every ``ERA_SIZE``
     blocks) it iterates the records table on disk, and for each record where
     this node is a provider, computes a proof-of-work challenge for the
     challenged slot and submits a single ``STORAGE_PAYMENT`` transaction
@@ -421,6 +422,9 @@ def claim_storage(node: Node) -> None:
     Returns:
         None.  Runs indefinitely until ``communication_stop_event`` fires.
     """
+    if not getattr(node, "is_storage_provider", False):
+        return
+
     stop = node.communication_stop_event
     last_checked_era = -1
 

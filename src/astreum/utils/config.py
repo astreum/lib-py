@@ -295,10 +295,10 @@ def config_setup(config: Dict = {}):
             raise ValueError("expr_request_ttl must be a positive number")
     config["expr_request_ttl"] = expr_request_ttl
 
-    long_term_raw = config.get("long_term_storage", False)
-    if not isinstance(long_term_raw, bool):
-        raise ValueError("long_term_storage must be a boolean")
-    config["long_term_storage"] = long_term_raw
+    storage_provider_raw = config.get("is_storage_provider", False)
+    if not isinstance(storage_provider_raw, bool):
+        raise ValueError("is_storage_provider must be a boolean")
+    config["is_storage_provider"] = storage_provider_raw
 
     long_term_interval_raw = config.get(
         "long_term_storage_interval", DEFAULT_LONG_TERM_STORAGE_INTERVAL_SECONDS

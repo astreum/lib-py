@@ -181,7 +181,7 @@ class TestSweepWorker(unittest.TestCase):
             config={"storage_request_price_interval": 0, "expr_request_ttl": 0.05},
             logger=MagicMock(),
             communication_stop_event=stop,
-            long_term_storage=False,
+            is_storage_provider=False,
             long_term_storage_interval=0,
             expr_requests={H1: PendingExprRequest(RESOLUTION_SINGLE, 0.0)},  # long expired
             expr_requests_lock=threading.Lock(),

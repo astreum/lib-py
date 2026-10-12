@@ -65,7 +65,7 @@ def _make_node(peers=(), budget=DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES):
         outgoing_queue=queue.Queue(),
         storage_index={},
         storage_providers=[],
-        long_term_storage=False,
+        is_storage_provider=False,
     )
 
 
@@ -329,14 +329,14 @@ class TestReceivePath(unittest.TestCase):
 
     def test_inline_fetch_capped_at_eight(self):
         node = _make_node([self.peer_a])
-        node.long_term_storage = True
+        node.is_storage_provider = True
         ids = _ids(0x00, 12)
         with patch("astreum.storage.radix.RadixTree"):
             _, fetch = self._handle(node, [(e, 4) for e in ids])
         self.assertEqual(fetch.call_count, put_handle.BATCH_INLINE_FETCH_LIMIT)
         self.assertEqual(len(node.storage_index), 12)
 
-    def test_no_inline_fetch_without_long_term_storage(self):
+    def test_no_inline_fetch_without_storage_provider(self):
         node = _make_node([self.peer_a])
         _, fetch = self._handle(node, [(e, 4) for e in _ids(0x00, 3)])
         self.assertEqual(fetch.call_count, 0)

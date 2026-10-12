@@ -113,7 +113,7 @@ def _handle_put(
     if to_self:
         storage_account = get_latest_storage_account(node)
         provider_id = provider_id_for_payload(node, storage_request.data)
-        fetch_budget = BATCH_INLINE_FETCH_LIMIT if getattr(node, "long_term_storage", False) else 0
+        fetch_budget = BATCH_INLINE_FETCH_LIMIT if getattr(node, "is_storage_provider", False) else 0
         indexed = 0
         for expr_id in to_self:
             stored_value = None
