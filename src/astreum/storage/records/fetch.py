@@ -121,4 +121,31 @@ def fetch_and_store_record(
     if create_merkle_tree(slot_hashes).root != record.slots_root:
         return False
     put_expr_in_cold_storage(node, root)
-    return put_record_in_cold_storage(node, storage_id, slot_hashes)
+    stored = put_record_in_cold_storage(node, storage_id, slot_hashes)
+    if stored:
+        _announce_record(node, storage_id)
+    return stored
+
+
+def _announce_record(node: "Node", storage_id: bytes) -> None:
+    """Announce this node as a provider of a record it has just stored.
+
+    The record is already in cold storage, so a reply never names this node
+    before it holds the data. The index ranks providers by distance: this node
+    goes first if it is nearer than the listed providers. An error is logged
+    and does not change the result of the store.
+
+    Args:
+        node: A Node instance that stored the record.
+        storage_id: The 32-byte block hash (record key).
+
+    Returns:
+        None.
+    """
+    from astreum.expression import RESOLUTION_SINGLE
+    from astreum.storage.exprs.network import put_exprs_in_network
+
+    try:
+        put_exprs_in_network(node, [(storage_id, RESOLUTION_SINGLE)])
+    except Exception as exc:
+        node.logger.debug("Record announce failed for %s: %s", storage_id.hex(), exc)
