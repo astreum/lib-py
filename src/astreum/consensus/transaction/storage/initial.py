@@ -14,9 +14,9 @@ from astreum.expression.expr import (
 )
 from astreum.storage.exprs import get_expr, get_expr_list
 from astreum.storage.radix import RadixTree, get_from_radix_tree
-from astreum.consensus.constants import STORAGE_ADDRESS
+from astreum.consensus.constants import PROVIDERS_PER_RECORD, STORAGE_ADDRESS
 from astreum.consensus.transaction.model import Transaction
-from astreum.consensus.transaction.storage.model import StorageRecord
+from astreum.consensus.transaction.storage.model import StorageLane, StorageRecord
 from astreum.crypto.merkle import create_merkle_tree
 from astreum.expression.helpers import get_expr_builtin_tag
 
@@ -276,9 +276,14 @@ def generate_initial_storage_record(
     storage_fee = calculate_storage_fee(block, total_new_size)
     record = StorageRecord(
         creation_block_hash=block.previous_block_hash,
-        last_payment_block_hash=block.previous_block_hash,
-        last_payment_height=block.height - 1,
-        last_payment_winner=ZERO32,
+        lanes=tuple(
+            StorageLane(
+                block_hash=block.previous_block_hash,
+                height=block.height - 1,
+                winner=ZERO32,
+            )
+            for _ in range(PROVIDERS_PER_RECORD)
+        ),
         new_size=total_new_size,
         new_count=len(slot_hashes),
         slots_root=create_merkle_tree(slot_hashes).root,

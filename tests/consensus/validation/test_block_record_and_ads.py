@@ -34,7 +34,7 @@ from astreum.node import Node  # noqa: E402
 from astreum.storage.exprs import get_expr_from_local_storage  # noqa: E402
 from astreum.storage.radix import get_all_from_radix_tree  # noqa: E402
 from astreum.storage.records import get_record_from_cold_storage  # noqa: E402
-from astreum.consensus.transaction.storage.model import StorageRecord  # noqa: E402
+from astreum.consensus.transaction.storage.model import storage_record_from_expr  # noqa: E402
 from astreum.crypto.merkle import create_merkle_tree  # noqa: E402
 from tests.consensus.validation.test_verify_stake_halving import (  # noqa: E402
     _free_port,
@@ -147,7 +147,7 @@ class TestBlockRecordAndAds(unittest.TestCase):
         for block in self.chain:
             blob = get_record_from_cold_storage(self.node, block.previous_block_hash)
             slots = [blob[i : i + 32] for i in range(0, len(blob), 32)]
-            record = StorageRecord.from_expr(
+            record = storage_record_from_expr(
                 self.node, self._storage_entries(block)[block.previous_block_hash]
             )
             self.assertIsNotNone(record, f"height {block.height}")
@@ -164,13 +164,13 @@ class TestBlockRecordAndAds(unittest.TestCase):
             for key, value in entries.items():
                 self.assertIn(key, block_ids, f"height {block.height}: stray key {key.hex()[:12]}")
                 self.assertIsNotNone(
-                    StorageRecord.from_expr(self.node, value),
+                    storage_record_from_expr(self.node, value),
                     f"height {block.height}: {key.hex()[:12]} is not a record",
                 )
 
     def test_slots_per_record_stay_about_flat_over_empty_blocks(self) -> None:
         counts = [
-            StorageRecord.from_expr(
+            storage_record_from_expr(
                 self.node, self._storage_entries(b)[b.previous_block_hash]
             ).new_count
             for b in self.chain

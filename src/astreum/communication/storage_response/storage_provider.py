@@ -29,3 +29,30 @@ def decode_storage_provider(payload: bytes) -> Tuple[bytes, bytes, str, int]:
     provider_address = socket.inet_ntoa(provider_ip_bytes)
     provider_port = int.from_bytes(provider_port_bytes, byteorder="big", signed=False)
     return storage_public_key, relay_public_key, provider_address, provider_port
+
+
+PROVIDER_PAYLOAD_LEN = 32 + 32 + 4 + 2
+
+
+def decode_storage_providers(data: bytes) -> list[Tuple[bytes, bytes, str, int]]:
+    """Decode concatenated 70-byte provider payloads.
+
+    Args:
+        data: One or more provider payloads joined together.
+
+    Returns:
+        One ``(storage_key, relay_key, address, port)`` tuple per payload, in
+        the order of the data.
+
+    Raises:
+        ValueError: If the length is 0 or is not a multiple of 70.
+    """
+    if not data or len(data) % PROVIDER_PAYLOAD_LEN != 0:
+        raise ValueError(
+            f"provider payloads must be a multiple of {PROVIDER_PAYLOAD_LEN} bytes "
+            f"(got={len(data)})"
+        )
+    return [
+        decode_storage_provider(data[i : i + PROVIDER_PAYLOAD_LEN])
+        for i in range(0, len(data), PROVIDER_PAYLOAD_LEN)
+    ]

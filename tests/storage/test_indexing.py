@@ -28,7 +28,7 @@ from astreum.expression import (
 from astreum.consensus.account import create_account
 from astreum.consensus.block.create import create_block
 from astreum.consensus.constants import STORAGE_ADDRESS
-from astreum.consensus.transaction.storage.model import StorageRecord
+from astreum.consensus.transaction.storage.model import StorageLane, StorageRecord, storage_record_to_expr
 from astreum.consensus.models.accounts import Accounts
 from astreum.node import Node
 from astreum.communication.node import connect_node
@@ -165,14 +165,15 @@ class TestStorageIndexing(unittest.TestCase):
             node._test_storage_tree = tree
             node.latest_block = block
             node.latest_block_hash = block.expr_id
-        record_expr = StorageRecord(
+        record_expr = storage_record_to_expr(StorageRecord(
             creation_block_hash=ZERO32,
-            last_payment_block_hash=ZERO32,
-            last_payment_height=0,
-            last_payment_winner=ZERO32,
+            lanes=(
+                StorageLane(block_hash=ZERO32, height=0, winner=ZERO32),
+                StorageLane(block_hash=ZERO32, height=0, winner=ZERO32),
+            ),
             new_size=0,
             new_count=0,
-        ).expr()
+        ))
         for key in keys:
             put_in_radix_tree(tree, node, key, record_expr)
 

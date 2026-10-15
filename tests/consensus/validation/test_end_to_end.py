@@ -42,7 +42,13 @@ from astreum.consensus.models.accounts import Accounts  # noqa: E402
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS, Receipt  # noqa: E402
 from astreum.consensus.transaction import create_transaction  # noqa: E402
 from astreum.consensus.transaction.code import TransactionCode  # noqa: E402
-from astreum.consensus.transaction.storage.model import StorageRecord  # noqa: E402
+from astreum.consensus.transaction.storage.model import (  # noqa: E402
+    StorageLane,
+    StorageRecord,
+    storage_record_cells,
+    storage_record_from_storage,
+    storage_record_to_expr,
+)
 from astreum.consensus.transaction.storage.payment import challenge_index  # noqa: E402
 from astreum.consensus.transaction.treasury.record import TreasuryUserRecord  # noqa: E402
 from astreum.consensus.validation import node as validation_node  # noqa: E402
@@ -89,13 +95,16 @@ def _slot_ids(blob):
     return [chunk for chunk in chunks if chunk != ZERO32]
 
 
-def _claim(storage_id, slots, index, nonce=0):
+def _claim(storage_id, slots, index, nonce=0, lane=0):
     tree = create_merkle_tree([s.hash() for s in slots])
     return link(
         bytes_(storage_id),
         link(
             bytes_(encode_expr_to_bytes(slots[index])),
-            link(bytes_list_to_expr(generate_merkle_tree_proof(tree, index)), link(int_(nonce), NIL)),
+            link(
+                bytes_list_to_expr(generate_merkle_tree_proof(tree, index)),
+                link(int_(nonce), link(int_(lane), NIL)),
+            ),
         ),
     )
 
@@ -133,21 +142,23 @@ class Fixture:
         treasury.data_hash = stake_trie.root_hash
         accounts.pending_exprs.extend(resolve_inner_exprs(node, stake_record.expr())[0])
 
-        # A record the chain already holds, last paid to the sender: the first
-        # claim on a record by anyone else needs a proof of work no test can do.
+        # A record the chain already holds, lane 0 last paid to the sender: the
+        # first claim on a lane by anyone else needs a proof of work no test can do.
+        # Lane 1 is unpaid.
         record = StorageRecord(
             creation_block_hash=SEED_ID,
-            last_payment_block_hash=SEED_ID,
-            last_payment_height=0,
-            last_payment_winner=self.sender,
+            lanes=(
+                StorageLane(block_hash=SEED_ID, height=0, winner=self.sender),
+                StorageLane(block_hash=SEED_ID, height=0, winner=ZERO32),
+            ),
             new_size=SEED_SIZE,
             new_count=len(SEED_SLOTS),
             slots_root=create_merkle_tree([s.hash() for s in SEED_SLOTS]).root,
         )
         storage = create_account(balance=0, data_hash=ZERO32, counter=0)
-        put_in_radix_tree(storage.data, node, SEED_ID, record.expr())
+        put_in_radix_tree(storage.data, node, SEED_ID, storage_record_to_expr(record))
         storage.data_hash = storage.data.root_hash
-        accounts.pending_exprs.extend(record.cells())
+        accounts.pending_exprs.extend(storage_record_cells(record))
         self.seed_record = record
 
         accounts.pending_exprs.extend(resolve_inner_exprs(node, self.program)[0])
@@ -200,7 +211,7 @@ class Fixture:
 
     def first_block(self, node):
         """(name, transaction) in the order they are applied."""
-        challenged = challenge_index(SEED_ID, SEED_ID, len(SEED_SLOTS))
+        challenged = challenge_index(SEED_ID, SEED_ID, len(SEED_SLOTS), 0)
         wrong_slot = (challenged + 1) % len(SEED_SLOTS)
         good = _claim(SEED_ID, SEED_SLOTS, challenged)
         wrong_slot_claim = _claim(SEED_ID, SEED_SLOTS, wrong_slot)
@@ -215,7 +226,7 @@ class Fixture:
                 bytes_(encode_expr_to_bytes(SEED_SLOTS[challenged])),
                 link(
                     bytes_list_to_expr(generate_merkle_tree_proof(tree, wrong_slot)),
-                    link(int_(0), NIL),
+                    link(int_(0), link(int_(0), NIL)),
                 ),
             ),
         )
@@ -463,9 +474,11 @@ class TestEndToEnd(unittest.TestCase):
             STORAGE_ADDRESS, self.node
         )
         head = get_from_radix_tree(storage.data, self.node, SEED_ID)
-        record = StorageRecord.from_storage(self.node, head.hash())
-        self.assertEqual(record.last_payment_height, 1)
-        self.assertEqual(record.last_payment_winner, fx.sender)
+        record = storage_record_from_storage(self.node, head.hash())
+        self.assertEqual(record.lanes[0].height, 1)
+        self.assertEqual(record.lanes[0].winner, fx.sender)
+        # The other lane is untouched.
+        self.assertEqual(record.lanes[1], fx.seed_record.lanes[1])
         self.assertEqual(record.slots_root, fx.seed_record.slots_root)
         self.assertEqual(record.new_count, len(SEED_SLOTS))
 
@@ -607,7 +620,7 @@ class TestEndToEnd(unittest.TestCase):
 
                 # The root the chain holds for the record.
                 held, _ = get_from_radix_tree_with_block(head_storage, self.node, record_id)
-                record = StorageRecord.from_storage(self.node, held.hash())
+                record = storage_record_from_storage(self.node, held.hash())
                 self.assertEqual(seen["root"], record.slots_root)
                 self.assertEqual(create_merkle_tree(seen["slots"]).root, record.slots_root)
                 self.assertEqual(len(seen["slots"]), record.new_count)

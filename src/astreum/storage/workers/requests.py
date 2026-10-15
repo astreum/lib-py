@@ -77,8 +77,8 @@ def _resolve_destination(node: "Node", expr_id: bytes, contact=None, block_hash=
     *contact* (``(relay_key, address, port)``) overrides routing, for redirects.
     A scoped request (*block_hash*) is routed by the block: its holder if there
     is one, else the provider indexed for it, else the peer nearest the block
-    hash. Otherwise an indexed provider wins for *expr_id*, then the closest
-    peer.
+    hash. Otherwise the nearest usable indexed provider wins for *expr_id*, then
+    the closest peer.
 
     Args:
         node: A Node instance for routing.
@@ -104,8 +104,7 @@ def _resolve_destination(node: "Node", expr_id: bytes, contact=None, block_hash=
                 return _provider_destination(node, relay_key_bytes, address, port)
             route_id = block_hash
 
-        provider_id = node.storage_index.get(route_id)
-        if provider_id is not None:
+        for provider_id in node.storage_index.get(route_id, ()):
             from astreum.communication.storage_response.storage_provider import (
                 decode_storage_provider,
             )
@@ -114,8 +113,11 @@ def _resolve_destination(node: "Node", expr_id: bytes, contact=None, block_hash=
             payload = provider_payload_for_id(node, provider_id)
             if payload is None:
                 node.logger.debug("Unknown provider id %s for %s", provider_id, route_id.hex())
-                return None
-            _, relay_key_bytes, address, port = decode_storage_provider(payload)
+                continue
+            try:
+                _, relay_key_bytes, address, port = decode_storage_provider(payload)
+            except ValueError:
+                continue
             return _provider_destination(node, relay_key_bytes, address, port)
 
         peer = node.peer_route.closest_peer_for_hash(route_id)

@@ -210,7 +210,74 @@ def get_exprs_from_network(
         results[expr_id] = _resolve_structured(
             node, expr_id, resolution, contact, block_hash
         )
+
+    # The first provider did not answer. Ask the second provider once. A
+    # caller that named a contact asked one peer on purpose.
+    if contact is None:
+        missing = [
+            (h, requested[h])
+            for h in (*waiting_flat, *(h for h, _ in waiting_structured))
+            if results[h] is None
+        ]
+        resent = _resend_to_next_provider(node, missing, block_hash)
+        flat = [h for h in waiting_flat if h in resent]
+        if flat:
+            results.update(_poll_local(node, flat))
+        for expr_id, resolution in waiting_structured:
+            if expr_id in resent:
+                results[expr_id] = _resolve_structured(
+                    node, expr_id, resolution, contact, block_hash
+                )
     return results
+
+
+def _resend_to_next_provider(
+    node, missing: list[tuple[bytes, int]], block_hash=None
+) -> set[bytes]:
+    """Queue the GET of each missing hash to its second provider.
+
+    The second contact comes from the pending request, where the
+    STORAGE_PROVIDER reply handler saved it, or from the second provider in the
+    index of this node. A hash with no second provider is skipped.
+
+    Args:
+        node: A Node instance with the request registry and the index.
+        missing: ``(expr_id, resolution)`` pairs that the first poll missed.
+        block_hash: Optional block hash of a scoped fetch.
+
+    Returns:
+        The set of hashes for which a GET was queued.
+    """
+    from astreum.communication.storage_response.storage_provider import (
+        decode_storage_provider,
+    )
+    from astreum.storage.providers import provider_payload_for_id
+    from astreum.storage.requests import has_expr_req, rearm_expr_req, take_next_contact
+    from astreum.storage.workers.requests import queue_storage_get
+
+    scope = {} if block_hash is None else {"block_hash": block_hash}
+    route_key = block_hash
+    queued: set[bytes] = set()
+    for expr_id, resolution in missing:
+        contact = take_next_contact(node, expr_id)
+        if contact is None:
+            provider_ids = node.storage_index.get(route_key or expr_id, ())
+            payload = (
+                provider_payload_for_id(node, provider_ids[1]) if len(provider_ids) > 1 else None
+            )
+            if payload is None:
+                continue
+            try:
+                _, relay_key, address, port = decode_storage_provider(payload)
+            except ValueError:
+                continue
+            contact = (relay_key, address, port)
+        live = has_expr_req(node, expr_id)
+        if live:
+            rearm_expr_req(node, expr_id)
+        if queue_storage_get(node, expr_id, resolution, contact=contact, preclaimed=live, **scope):
+            queued.add(expr_id)
+    return queued
 
 
 def get_expr_from_network(
@@ -400,7 +467,7 @@ def send_put_entries(
     Args:
         node: A Node instance with outgoing queue.
         peer: The target Peer.
-        provider_payload: The 70-byte provider payload.
+        provider_payload: One or two joined 70-byte provider payloads.
         entries: List of (expr_id, payload_type) tuples.
 
     Returns:
@@ -414,7 +481,7 @@ def send_put_entries(
     from astreum.utils.config import DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES
 
     budget = node.config.get("storage_put_batch_max_bytes", DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES)
-    per_batch = max(1, max_batch_entries(budget))
+    per_batch = max(1, max_batch_entries(budget, len(provider_payload) // 70))
 
     results = []
     for start in range(0, len(entries), per_batch):
@@ -445,7 +512,7 @@ def put_exprs_in_network(
     Returns:
         List of (expr_id, success, reason) tuples.
     """
-    from astreum.storage.providers import provider_id_for_payload
+    from astreum.storage.providers import index_provider, provider_id_for_payload
 
     try:
         provider_payload = build_provider_payload(node)
@@ -462,7 +529,7 @@ def put_exprs_in_network(
             results.append((expr_id, False, f"peer lookup failed: {exc}"))
             continue
         if peer is None:
-            node.storage_index[expr_id] = provider_id_for_payload(node, provider_payload)
+            index_provider(node, expr_id, provider_id_for_payload(node, provider_payload))
             results.append((expr_id, True, None))
             continue
         by_destination.setdefault(peer.public_key_bytes, (peer, []))[1].append(

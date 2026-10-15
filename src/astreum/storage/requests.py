@@ -28,9 +28,20 @@ class PendingExprRequest:
         sender: Peer key of the first accepted page, ``None`` until then.
         total: Page count declared by the first accepted page.
         pages: Staged exprs per received page number.
+        next_contact: ``(relay_key, address, port)`` of the second provider
+            from a STORAGE_PROVIDER reply, or ``None``. Dropped with the
+            request.
     """
 
-    __slots__ = ("payload_type", "expires_at", "sender", "total", "pages", "block_hash")
+    __slots__ = (
+        "payload_type",
+        "expires_at",
+        "sender",
+        "total",
+        "pages",
+        "block_hash",
+        "next_contact",
+    )
 
     def __init__(
         self,
@@ -44,6 +55,7 @@ class PendingExprRequest:
         self.sender: Optional[bytes] = None
         self.total: Optional[int] = None
         self.pages: Dict[int, List["Expr"]] = {}
+        self.next_contact: Optional[Tuple[bytes, str, int]] = None
 
 
 class StageResult(enum.Enum):
@@ -262,3 +274,62 @@ def prune_expired_expr_reqs(node: "Node") -> int:
         for h in expired:
             del node.expr_requests[h]
     return len(expired)
+
+
+def set_next_contact(
+    node: "Node", expr_id: bytes, contact: Tuple[bytes, str, int]
+) -> bool:
+    """Save the second provider contact on a live request.
+
+    Args:
+        node: A Node instance with the ``expr_requests`` registry.
+        expr_id: The content hash being requested.
+        contact: ``(relay_key, address, port)`` of the second provider.
+
+    Returns:
+        True if a live request holds the contact, False otherwise.
+    """
+    with node.expr_requests_lock:
+        entry = _live_entry(node, expr_id, time.monotonic())
+        if entry is None:
+            return False
+        entry.next_contact = contact
+        return True
+
+
+def take_next_contact(node: "Node", expr_id: bytes) -> Optional[Tuple[bytes, str, int]]:
+    """Return the saved second provider contact and clear it.
+
+    Args:
+        node: A Node instance with the ``expr_requests`` registry.
+        expr_id: The content hash being requested.
+
+    Returns:
+        The contact, or ``None`` if the request is not live or holds none.
+    """
+    with node.expr_requests_lock:
+        entry = _live_entry(node, expr_id, time.monotonic())
+        if entry is None:
+            return None
+        contact, entry.next_contact = entry.next_contact, None
+        return contact
+
+
+def rearm_expr_req(node: "Node", expr_id: bytes) -> bool:
+    """Push the deadline of a live request to now plus the request lifetime.
+
+    Args:
+        node: A Node instance with the ``expr_requests`` registry.
+        expr_id: The content hash being requested.
+
+    Returns:
+        True if a live request was extended, False otherwise.
+    """
+    ttl = _ttl(node)
+    with node.expr_requests_lock:
+        now = time.monotonic()
+        entry = _live_entry(node, expr_id, now)
+        if entry is None:
+            return False
+        entry.expires_at = now + ttl
+        return True

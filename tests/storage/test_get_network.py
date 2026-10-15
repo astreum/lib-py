@@ -441,5 +441,84 @@ class TestGetExprFromNetwork(unittest.TestCase):
         queue.assert_called_once()
 
 
+
+# ===========================================================================
+# TestProviderResponseHandler
+# ===========================================================================
+
+class TestProviderResponseHandler(unittest.TestCase):
+    """handle_storage_response for a STORAGE_PROVIDER reply."""
+
+    H = b"\x11" * 32
+
+    @staticmethod
+    def _payload(key_byte: int, port: int) -> bytes:
+        import socket
+
+        return (
+            bytes([key_byte]) * 32
+            + bytes([key_byte + 1]) * 32
+            + socket.inet_aton("10.0.0.1")
+            + port.to_bytes(2, "big")
+        )
+
+    def _handle(self, data: bytes, retry_results):
+        from astreum.communication.storage_response import handle as resp_handle
+        from astreum.communication.storage_response.code import StorageResponseCode
+        from astreum.communication.storage_response.model import StorageResponse
+        from astreum.storage.requests import claim_expr_req
+
+        node = _fake_node()
+        node.storage_index = {}
+        claim_expr_req(node, self.H, RESOLUTION_SINGLE)
+        message = MagicMock()
+        message.content = StorageResponse(
+            code=StorageResponseCode.STORAGE_PROVIDER, data=data, expr_id=self.H
+        ).to_bytes()
+        calls = []
+        results = list(retry_results)
+
+        def fake_retry(n, *, expr_id, peer_contact):
+            calls.append(peer_contact)
+            return results.pop(0)
+
+        with patch.object(resp_handle, "_retry_pending_storage_get_via_peer_contact", side_effect=fake_retry):
+            result = resp_handle.handle_storage_response(node, MagicMock(), message)
+        return node, result, calls
+
+    def test_response_handler_sorts_pieces(self):
+        far = self._payload(0xF0, 6000)
+        near = self._payload(0x01, 5000)
+        _, result, calls = self._handle(far + near, [True])
+        self.assertEqual(result, (True, None))
+        self.assertEqual(calls[0][2], 5000)
+
+    def test_second_provider_used_when_first_unusable(self):
+        _, result, calls = self._handle(
+            self._payload(0x01, 5000) + self._payload(0xF0, 6000), [False, True]
+        )
+        self.assertEqual(result, (True, None))
+        self.assertEqual([c[2] for c in calls], [5000, 6000])
+
+    def test_handler_saves_next_contact(self):
+        node, _, _ = self._handle(self._payload(0x01, 5000) + self._payload(0xF0, 6000), [True])
+        self.assertEqual(node.expr_requests[self.H].next_contact[2], 6000)
+
+    def test_handler_does_not_index_response(self):
+        node, _, _ = self._handle(self._payload(0x01, 5000) + self._payload(0xF0, 6000), [True])
+        self.assertEqual(node.storage_index, {})
+
+    def test_response_with_no_usable_contact_fails(self):
+        _, result, _ = self._handle(
+            self._payload(0x01, 5000) + self._payload(0xF0, 6000), [False, False]
+        )
+        self.assertEqual(result, (False, "no usable STORAGE_PROVIDER contact"))
+
+    def test_bad_provider_length_rejected(self):
+        _, result, calls = self._handle(b"\x01" * 100, [])
+        self.assertFalse(result[0])
+        self.assertEqual(calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

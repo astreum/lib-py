@@ -9,6 +9,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from astreum.consensus.transaction.code import TransactionCode
+from astreum.consensus.transaction.storage.model import StorageLane, StorageRecord
+from astreum.expression import ZERO32
 from astreum.storage.workers import claim as claim_mod
 from astreum.storage.workers.claim import (
     _BASE_TX_FEE,
@@ -95,13 +97,14 @@ class TestNextClaimCounter(unittest.TestCase):
         self.assertEqual(_next_claim_counter(node), 0)
 
 
-def _claim(nonce, seed=0, slot_size=40, proof_len=3):
-    """A claim: (storage_id, slot_expr_bytes, proof, nonce)."""
+def _claim(nonce, seed=0, slot_size=40, proof_len=3, lane=0):
+    """A claim: (storage_id, slot_expr_bytes, proof, nonce, lane)."""
     return (
         bytes([seed]) * 32,
         bytes([seed + 1]) * slot_size,
         [bytes([seed, k]) * 16 for k in range(proof_len)],
         nonce,
+        lane,
     )
 
 
@@ -241,23 +244,25 @@ class TestComputeClaim(unittest.TestCase):
 
     def _record(self, **kw):
         fields = dict(
-            last_payment_block_hash=b"\x11" * 32,
-            last_payment_winner=self.pk,  # incumbent: no work needed
-            last_payment_height=0,
+            lanes=(
+                # incumbent: no work needed
+                StorageLane(block_hash=b"\x11" * 32, height=0, winner=self.pk),
+                StorageLane(block_hash=b"\x12" * 32, height=0, winner=ZERO32),
+            ),
             new_count=len(self.slots),
             new_size=100,
             slots_root=self.root,
         )
         fields.update(kw)
-        return SimpleNamespace(**fields)
+        return StorageRecord(**fields)
 
-    def _run(self, record, blob=None, local=True):
+    def _run(self, record, blob=None, local=True, lane=0):
         blob = b"".join(self.ids) if blob is None else blob
         by_id = {s.hash(): s for s in self.slots}
         with patch.object(claim_mod, "get_record_from_cold_storage", return_value=blob), patch.object(
             claim_mod, "get_expr_from_local_storage", side_effect=lambda n, h: by_id.get(h) if local else None
         ):
-            return claim_mod._compute_pow_and_challenge(self.node, self.storage_id, record)
+            return claim_mod._compute_pow_and_challenge(self.node, self.storage_id, record, lane)
 
     def test_claim_verifies_against_the_records_root(self):
         from astreum.crypto.merkle import MerkleTree, verify_merkle_tree_proof
@@ -265,9 +270,10 @@ class TestComputeClaim(unittest.TestCase):
         from astreum.consensus.transaction.storage.payment import challenge_index
 
         record = self._record()
-        storage_id, slot_bytes, proof, nonce = self._run(record)
+        storage_id, slot_bytes, proof, nonce, lane = self._run(record)
         self.assertEqual(storage_id, self.storage_id)
-        index = challenge_index(record.last_payment_block_hash, self.storage_id, record.new_count)
+        self.assertEqual(lane, 0)
+        index = challenge_index(record.lanes[0].block_hash, self.storage_id, record.new_count, 0)
         self.assertEqual(decode_expr_from_bytes(slot_bytes).hash(), self.ids[index])
         self.assertTrue(
             verify_merkle_tree_proof(
@@ -278,7 +284,7 @@ class TestComputeClaim(unittest.TestCase):
     def test_no_slot_list_no_claim(self):
         with patch.object(claim_mod, "get_record_from_cold_storage", return_value=None):
             self.assertIsNone(
-                claim_mod._compute_pow_and_challenge(self.node, self.storage_id, self._record())
+                claim_mod._compute_pow_and_challenge(self.node, self.storage_id, self._record(), 0)
             )
 
     def test_a_slot_list_that_does_not_give_the_root_is_not_claimed(self):
@@ -306,7 +312,7 @@ class TestSplitClaims(unittest.TestCase):
 
         expr = NIL
         for entry in reversed(group):
-            expr = link(claim_mod._claim_expr(entry[:4]), expr)
+            expr = link(claim_mod._claim_expr(entry[:5]), expr)
         return claim_mod._tree_bytes(expr)
 
     def test_small_claims_share_one_tx(self):
@@ -352,11 +358,12 @@ class TestBuildClaimsCollectsPayouts(unittest.TestCase):
         return node
 
     def _record(self, winner):
-        return SimpleNamespace(
+        return StorageRecord(
             new_size=100,
-            last_payment_height=0,
-            last_payment_winner=winner,
-            last_payment_block_hash=b"\x11" * 32,
+            lanes=(
+                StorageLane(block_hash=b"\x11" * 32, height=0, winner=winner),
+                StorageLane(block_hash=b"\x12" * 32, height=0, winner=winner),
+            ),
             new_count=1,
         )
 
@@ -368,27 +375,29 @@ class TestBuildClaimsCollectsPayouts(unittest.TestCase):
         with patch.object(
             claim_mod, "iter_records_in_cold_storage", return_value=iter([self.storage_id])
         ), patch.object(claim_mod, "get_from_radix_tree", return_value=self.contract_head), patch.object(
-            claim_mod.StorageRecord, "from_storage", return_value=self._record(winner)
+            claim_mod, "storage_record_from_storage", return_value=self._record(winner)
         ), patch.object(
             claim_mod,
             "_compute_pow_and_challenge",
-            return_value=(self.storage_id, self.slot_id, [b"\x01" * 32], 7),
+            side_effect=lambda n, sid, rec, lane: (
+                self.storage_id, self.slot_id, [b"\x01" * 32], 7, lane
+            ),
         ):
             return _build_claims_for_records(node, latest_block, {})
 
     def test_wall_drop_branch_payout(self):
         # Non-incumbent takeover: needs 5+ eras elapsed.
-        node = self._node(self.other_pk)
+        node = self._node(self.pk)
         entries = self._run(node, self.other_pk, 6 * self.ERA_SIZE)
         self.assertEqual(
-            entries, [(self.storage_id, self.slot_id, [b"\x01" * 32], 7, 100 * 6 * self.ERA_SIZE)]
+            entries, [(self.storage_id, self.slot_id, [b"\x01" * 32], 7, 0, 100 * 6 * self.ERA_SIZE)]
         )
 
     def test_incumbent_branch_payout(self):
         node = self._node(self.pk)
         entries = self._run(node, self.pk, 2 * self.ERA_SIZE)
         self.assertEqual(
-            entries, [(self.storage_id, self.slot_id, [b"\x01" * 32], 7, 100 * 2 * self.ERA_SIZE)]
+            entries, [(self.storage_id, self.slot_id, [b"\x01" * 32], 7, 0, 100 * 2 * self.ERA_SIZE)]
         )
 
     def test_young_record_skipped(self):

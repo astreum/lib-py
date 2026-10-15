@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from astreum.consensus.block.rate_window import windowed_rate_fraction
+from astreum.consensus.constants import PROVIDERS_PER_RECORD
 
 
 def calculate_discount_rate(block: object, node=None, range_blocks: int = 0) -> float:
@@ -43,7 +44,8 @@ def calculate_storage_fee(block: object, total_bytes: int) -> int:
         total_bytes: Total bytes to store.
 
     Returns:
-        The storage fee in units.
+        The storage fee in units. The fee covers ``PROVIDERS_PER_RECORD``
+        copies of the data.
 
     Raises:
         ValueError: If previous block fees are invalid.
@@ -59,4 +61,4 @@ def calculate_storage_fee(block: object, total_bytes: int) -> int:
     if denominator <= 0:
         raise ValueError("previous block cumulative total fees must be greater than zero")
 
-    return (numerator + denominator - 1) // denominator
+    return ((numerator + denominator - 1) // denominator) * PROVIDERS_PER_RECORD

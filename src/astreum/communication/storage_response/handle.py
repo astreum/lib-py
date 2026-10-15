@@ -7,15 +7,18 @@ from astreum.communication.storage_response.storage_found import decode_found_pa
 from astreum.communication.storage_response.code import StorageResponseCode
 from astreum.communication.storage_response.model import StorageResponse
 from astreum.communication.storage_response.storage_payment_required import decode_storage_payment_required
-from astreum.communication.storage_response.storage_provider import decode_storage_provider
+from astreum.communication.storage_response.storage_provider import decode_storage_providers
 from astreum.communication.storage_response.retry import _retry_pending_storage_get_via_peer_contact
 from astreum.expression import Expr
 from astreum.expression.encoding import encode_expr_to_bytes
 from astreum.storage.exprs import put_expr_in_hot_storage
+from astreum.communication.util import xor_distance
 from astreum.storage.requests import (
     StageResult,
+    get_expr_req_block,
     has_expr_req,
     pop_expr_req,
+    set_next_contact,
     stage_found_page,
 )
 
@@ -118,19 +121,24 @@ def handle_storage_response(node: "Node", peer: "Peer", message: Message) -> tup
 
         case StorageResponseCode.STORAGE_PROVIDER:
             try:
-                storage_key_bytes, relay_key_bytes, provider_address, provider_port = decode_storage_provider(
-                    storage_response.data
-                )
+                pieces = decode_storage_providers(storage_response.data)
             except Exception as exc:
                 node.logger.debug("Invalid STORAGE_PROVIDER payload from %s: %s", peer.address, exc)
                 return False, "invalid STORAGE_PROVIDER payload"
 
-            _retry_pending_storage_get_via_peer_contact(
-                node,
-                expr_id=storage_response.expr_id,
-                peer_contact=(relay_key_bytes, provider_address, provider_port),
-            )
-            return True, None
+            # The reply order is not trusted. Ask the provider nearest to the
+            # key first. The reply is used here and never stored in the index.
+            route_id = get_expr_req_block(node, storage_response.expr_id) or storage_response.expr_id
+            pieces.sort(key=lambda piece: xor_distance(route_id, piece[0]))
+            contacts = [(relay, address, port) for _, relay, address, port in pieces]
+            for position, contact in enumerate(contacts):
+                if _retry_pending_storage_get_via_peer_contact(
+                    node, expr_id=storage_response.expr_id, peer_contact=contact
+                ):
+                    if position + 1 < len(contacts):
+                        set_next_contact(node, storage_response.expr_id, contacts[position + 1])
+                    return True, None
+            return False, "no usable STORAGE_PROVIDER contact"
 
         case StorageResponseCode.STORAGE_PAYMENT_REQUIRED:
             try:

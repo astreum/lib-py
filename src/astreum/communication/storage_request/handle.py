@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import increment_peer_metric
 from astreum.communication.storage_request.code import StorageRequestCode
-from astreum.communication.storage_request.model import StorageRequest
+from astreum.communication.storage_request.model import PROVIDER_PAYLOAD_BYTES, StorageRequest
 from astreum.communication.storage_request.payment_required import (
     _queue_storage_payment_required,
     _requires_storage_channel,
@@ -28,7 +28,11 @@ from astreum.storage.exprs import get_expr_from_local_storage
 from astreum.storage.requests import DEFAULT_STORAGE_FOUND_MAX_PAGES
 from astreum.storage.records import get_record_from_cold_storage
 from astreum.communication.util import xor_distance
-from astreum.storage.providers import provider_id_for_payload, provider_payload_for_id
+from astreum.storage.providers import (
+    index_provider,
+    provider_id_for_payload,
+    provider_payload_for_id,
+)
 from astreum.expression.helpers import get_expr_builtin_tag
 
 if TYPE_CHECKING:
@@ -112,7 +116,11 @@ def _handle_put(
 
     if to_self:
         storage_account = get_latest_storage_account(node)
-        provider_id = provider_id_for_payload(node, storage_request.data)
+        data = storage_request.data
+        provider_ids = [
+            provider_id_for_payload(node, data[i : i + PROVIDER_PAYLOAD_BYTES])
+            for i in range(0, len(data), PROVIDER_PAYLOAD_BYTES)
+        ]
         fetch_budget = BATCH_INLINE_FETCH_LIMIT if getattr(node, "is_storage_provider", False) else 0
         indexed = 0
         for expr_id in to_self:
@@ -122,7 +130,8 @@ def _handle_put(
             record = parse_record(node, stored_value)
             if record is None:
                 continue
-            node.storage_index[expr_id] = provider_id
+            for provider_id in provider_ids:
+                index_provider(node, expr_id, provider_id)
             indexed += 1
             if fetch_budget <= 0 or get_record_from_cold_storage(node, expr_id) is not None:
                 continue
@@ -256,9 +265,13 @@ def _serve_get(
 
     route_id = block_hash if block_hash is not None else expr_id
     if route_id in node.storage_index:
-        provider_id = node.storage_index[route_id]
-        provider_bytes = provider_payload_for_id(node, provider_id)
-        if provider_bytes is not None:
+        provider_ids = node.storage_index[route_id]
+        provider_bytes = b"".join(
+            payload
+            for payload in (provider_payload_for_id(node, i) for i in provider_ids)
+            if payload is not None
+        )
+        if provider_bytes:
             node.logger.debug("Known provider for %s; informing %s", route_id.hex(), peer.address)
             resp = StorageResponse(
                 code=StorageResponseCode.STORAGE_PROVIDER,
@@ -279,8 +292,8 @@ def _serve_get(
             )
             return True, None
         node.logger.debug(
-            "Unknown provider id %s for %s",
-            provider_id,
+            "Unknown provider ids %s for %s",
+            provider_ids,
             route_id.hex(),
         )
 
@@ -308,7 +321,7 @@ def _serve_get(
         return True, None
 
     if route_id in node.storage_index:
-        return False, f"unknown provider id {node.storage_index[route_id]} for {route_id.hex()}"
+        return False, f"unknown provider ids {node.storage_index[route_id]} for {route_id.hex()}"
     return True, None
 
 

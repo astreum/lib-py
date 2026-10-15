@@ -253,7 +253,7 @@ def _lt_node(**overrides):
     node = SimpleNamespace(
         is_storage_provider=True,
         long_term_cursor=0,
-        storage_index={REC_HASH: 0},
+        storage_index={REC_HASH: (0,)},
         latest_block=None,
         logger=_silent_logger(),
     )

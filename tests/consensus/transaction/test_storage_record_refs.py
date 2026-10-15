@@ -21,6 +21,7 @@ if str(HELPERS_DIR) not in sys.path:
 from _helpers import _FakeNode, make_block, make_previous_block, seed_storage_account
 
 from astreum.consensus.constants import STORAGE_ADDRESS
+from astreum.consensus.transaction.storage.model import storage_record_to_expr
 from astreum.consensus.transaction.storage.initial import (
     UnresolvedRecordExpr,
     _flat_size,
@@ -137,21 +138,27 @@ class TestFollowRefs(unittest.TestCase):
     def test_a_trie_holding_a_paid_record_can_be_walked(self):
         """A record rewritten by a claim names a winner and a root: both bytes
         values, so the next block's walk does not look for them."""
-        from astreum.consensus.transaction.storage.model import StorageRecord
+        from astreum.consensus.transaction.storage.model import (
+            StorageLane,
+            StorageRecord,
+            storage_record_to_expr,
+        )
 
         block_a, block_b = b"\x41" * 32, b"\x42" * 32
         record = StorageRecord(
             creation_block_hash=block_a,
-            last_payment_block_hash=block_b,
-            last_payment_height=3,
-            last_payment_winner=b"\x99" * 32,  # an address: no stored expr has this hash
+            lanes=(
+                # an address: no stored expr has this hash
+                StorageLane(block_hash=block_b, height=3, winner=b"\x99" * 32),
+                StorageLane(block_hash=block_b, height=4, winner=b"\x98" * 32),
+            ),
             new_size=10,
             new_count=2,
             slots_root=b"\x77" * 32,  # nor has this
         )
         for key in (block_a, block_b):  # the blocks it names are keys of the trie
             self._register(key)
-        put_in_radix_tree(self.storage_account.data, self.node, block_a, record.expr())
+        put_in_radix_tree(self.storage_account.data, self.node, block_a, storage_record_to_expr(record))
         for trie_node in self.storage_account.data.nodes.values():
             self.node.hot_storage[radix_node_hash(trie_node)] = get_radix_node_expr(trie_node)
         self.storage_account.data_hash = self.storage_account.data.root_hash
@@ -164,6 +171,7 @@ class TestFollowRefs(unittest.TestCase):
         )
         # The walk got through the record: its bytes values are cells, not fetches.
         self.assertIn(bytes_(b"\x99" * 32).hash(), slots)
+        self.assertIn(bytes_(b"\x98" * 32).hash(), slots)
         self.assertIn(bytes_(b"\x77" * 32).hash(), slots)
 
     def test_the_storage_trie_is_unavailable_raises(self):
@@ -192,7 +200,9 @@ class TestFollowRefs(unittest.TestCase):
         self.assertEqual(list(slots_a), list(slots_b))
         self.assertEqual(rec_a.new_count, rec_b.new_count)
         self.assertEqual(rec_a.new_size, rec_b.new_size)
-        self.assertEqual(rec_a.expr().hash(), rec_b.expr().hash())
+        self.assertEqual(
+            storage_record_to_expr(rec_a).hash(), storage_record_to_expr(rec_b).hash()
+        )
         self.assertEqual(fee_a, fee_b)
 
     def test_collected_exprs_are_single_cells_with_the_same_hash(self):

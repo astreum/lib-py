@@ -8,7 +8,7 @@ from blake3 import blake3
 from astreum.consensus.block.rate import calculate_storage_fee
 from astreum.consensus.transaction import create_transaction
 from astreum.consensus.transaction.code import TransactionCode
-from astreum.consensus.transaction.storage.model import StorageRecord
+from astreum.consensus.transaction.storage.model import StorageRecord, storage_record_from_storage
 from astreum.consensus.transaction.storage.initial import _single_cell
 from astreum.consensus.transaction.storage.payment import (
     _leading_zero_bits,
@@ -29,8 +29,8 @@ if TYPE_CHECKING:
     from astreum.node import Node
 
 
-# A claim: (storage_id, slot_expr_bytes, proof, nonce).
-Claim = tuple[bytes, bytes, list[bytes], int]
+# A claim: (storage_id, slot_expr_bytes, proof, nonce, lane).
+Claim = tuple[bytes, bytes, list[bytes], int, int]
 
 # A claim tx is cut at about this many bytes, well under one STORAGE_FOUND page
 # (PAGE_ENTRY_BUDGET), so a peer can fetch it in one response.
@@ -41,29 +41,34 @@ def _compute_pow_and_challenge(
     node: Node,
     storage_id: bytes,
     record: StorageRecord,
+    lane: int,
 ) -> Claim | None:
-    """Compute a PoW claim for the given record.
+    """Compute a PoW claim for one lane of the given record.
 
     The challenged slot's id is read from the record's slot list in the records
     table (byte offset = index * 32). The tree over that list is built in
     memory and gives the slot's proof against ``record.slots_root``. Returns
-    ``(storage_id, slot_expr_bytes, proof, nonce)`` or None if unavailable.
+    ``(storage_id, slot_expr_bytes, proof, nonce, lane)`` or None if unavailable.
 
     Args:
         node: A Node instance for storage and network access.
         storage_id: The 32-byte storage ID (block hash).
         record: The StorageRecord to claim for.
+        lane: The lane number to claim.
 
     Returns:
         A Claim tuple, or None if the record cannot be claimed.
     """
-    last_payment_block_hash = record.last_payment_block_hash
+    if not 0 <= lane < len(record.lanes):
+        return None
+    lane_state = record.lanes[lane]
+    last_payment_block_hash = lane_state.block_hash
     if len(last_payment_block_hash) != 32:
         return None
     if record.new_count <= 0:
         return None
 
-    challenge_index = _challenge_index(last_payment_block_hash, storage_id, record.new_count)
+    challenge_index = _challenge_index(last_payment_block_hash, storage_id, record.new_count, lane)
 
     # The slot list from the records table
     value = get_record_from_cold_storage(node, storage_id)
@@ -86,9 +91,9 @@ def _compute_pow_and_challenge(
     # Compute required bits
     required_bits = _required_bits(
         sender=sender_bytes,
-        last_payment_winner=record.last_payment_winner,
+        last_payment_winner=lane_state.winner,
         block_height=node.latest_block.height,
-        last_payment_height=record.last_payment_height,
+        last_payment_height=lane_state.height,
         base_bits=0,
     )
 
@@ -104,9 +109,10 @@ def _compute_pow_and_challenge(
             + slot_id
             + fetched_data_bytes
             + nonce_encoded
+            + bytes([lane])
         ).digest()
         if _leading_zero_bits(work_hash) >= required_bits:
-            return storage_id, fetched_data_bytes, proof, nonce
+            return storage_id, fetched_data_bytes, proof, nonce, lane
         nonce += 1
 
     return None
@@ -147,17 +153,20 @@ def _claim_expr(claim: Claim) -> Expr:
     """Convert a Claim tuple to an S-expression.
 
     Args:
-        claim: A (storage_id, slot_bytes, proof, nonce) tuple.
+        claim: A (storage_id, slot_bytes, proof, nonce, lane) tuple.
 
     Returns:
         An Expr representing the claim.
     """
-    storage_id, slot_bytes, proof, nonce = claim
+    storage_id, slot_bytes, proof, nonce, lane = claim
     return link(
         bytes_(storage_id),
         link(
             bytes_(slot_bytes),
-            link(bytes_list_to_expr(proof), link(int_(nonce), NIL)),
+            link(
+                bytes_list_to_expr(proof),
+                link(int_(nonce), link(int_(lane), NIL)),
+            ),
         ),
     )
 
@@ -194,7 +203,7 @@ def _tree_bytes(expr: Expr) -> int:
 def _split_claims(entries: list[tuple]) -> list[list[tuple]]:
     """Group claim entries greedily into transactions of about ``MAX_CLAIM_TX_BYTES``.
 
-    Each entry is ``(*claim, payout)``. A claim bigger than the limit on its
+    Each entry is ``(*claim, payout)``, six items. A claim bigger than the limit on its
     own gets a transaction of its own.
 
     Args:
@@ -207,7 +216,7 @@ def _split_claims(entries: list[tuple]) -> list[list[tuple]]:
     current: list[tuple] = []
     size = 0
     for entry in entries:
-        entry_size = _tree_bytes(_claim_expr(entry[:4]))
+        entry_size = _tree_bytes(_claim_expr(entry[:5]))
         if current and size + entry_size > MAX_CLAIM_TX_BYTES:
             groups.append(current)
             current, size = [], 0
@@ -255,11 +264,11 @@ def _build_claims_for_records(
     node: Node,
     latest_block,
     spacing_eras: dict[bytes, int],
-) -> list[tuple[bytes, bytes, list[bytes], int, int]]:
+) -> list[tuple[bytes, bytes, list[bytes], int, int, int]]:
     """Evaluate every record in the records table and build eligible claims.
 
-    Returns ``(storage_id, slot_expr_bytes, proof, nonce, payout)`` tuples,
-    where ``payout = new_size × (block_height − last_payment_height)``
+    Returns ``(storage_id, slot_expr_bytes, proof, nonce, lane, payout)`` tuples,
+    where ``payout = new_size × (block_height − lane height)``
     mirrors the reward calculation in ``storage/payment.py`` so the submit
     gate can check the bundle's aggregate economics.
 
@@ -273,7 +282,7 @@ def _build_claims_for_records(
     """
     from astreum.consensus.constants import STORAGE_ADDRESS
 
-    claims_to_make: list[tuple[bytes, bytes, list[bytes], int, int]] = []
+    claims_to_make: list[tuple[bytes, bytes, list[bytes], int, int, int]] = []
     seen: set[bytes] = set()
 
     storage_account = None
@@ -294,27 +303,38 @@ def _build_claims_for_records(
         if not contract_head:
             continue
 
-        record = StorageRecord.from_storage(node, contract_head.hash())
+        record = storage_record_from_storage(node, contract_head.hash())
         if record is None:
             continue
 
         current_spacing = spacing_eras.get(storage_id, 1)
-        eras_elapsed = (latest_block.height - record.last_payment_height) // ERA_SIZE
-        payout = record.new_size * (latest_block.height - record.last_payment_height)
 
-        if record.last_payment_winner == node.storage_public_key_bytes:
-            # We're incumbent
-            if eras_elapsed >= current_spacing:
-                claim = _compute_pow_and_challenge(node, storage_id, record)
+        def eras_elapsed(lane: int) -> int:
+            return (latest_block.height - record.lanes[lane].height) // ERA_SIZE
+
+        mine = next(
+            (i for i, lane in enumerate(record.lanes) if lane.winner == node.storage_public_key_bytes),
+            None,
+        )
+        if mine is not None:
+            # We hold a lane: claim it with the same spacing back-off as before.
+            # A holder never takes the other lane.
+            if eras_elapsed(mine) >= current_spacing:
+                claim = _compute_pow_and_challenge(node, storage_id, record, mine)
                 if claim is not None:
+                    payout = record.new_size * (latest_block.height - record.lanes[mine].height)
                     claims_to_make.append((*claim, payout))
                     spacing_eras[storage_id] = min(current_spacing + 1, 4)
         else:
-            # Someone else is incumbent
+            # Takeover: only after 5 eras (fib(8)=21, ~2Mx harder), on the lane
+            # that waited longest. Lane 0 wins a tie.
             spacing_eras[storage_id] = 1  # reset
-            if eras_elapsed >= 5:  # wall dropping (fib(8)=21, ~2Mx harder)
-                claim = _compute_pow_and_challenge(node, storage_id, record)
+            open_lanes = [i for i in range(len(record.lanes)) if eras_elapsed(i) >= 5]
+            if open_lanes:
+                lane = max(open_lanes, key=lambda i: (eras_elapsed(i), -i))
+                claim = _compute_pow_and_challenge(node, storage_id, record, lane)
                 if claim is not None:
+                    payout = record.new_size * (latest_block.height - record.lanes[lane].height)
                     claims_to_make.append((*claim, payout))
     return claims_to_make
 
@@ -362,7 +382,7 @@ def _submit_claim_group(node: Node, latest_block, entries: list[tuple]) -> bool:
         True to continue, False to stop submitting.
     """
     try:
-        claims = [entry[:4] for entry in entries]
+        claims = [entry[:5] for entry in entries]
         counter = _next_claim_counter(node)
         tx = _build_multi_claim_tx(node, claims, node.storage_secret_key, counter)
         try:
@@ -374,7 +394,7 @@ def _submit_claim_group(node: Node, latest_block, entries: list[tuple]) -> bool:
         except ValueError:
             # cumulative_total_fee <= 0 (young/odd block, rate.py:36-37)
             return False  # pass skipped; retried next era
-        total_payout = sum(entry[4] for entry in entries)
+        total_payout = sum(entry[5] for entry in entries)
         if total_payout < cost:
             node.logger.info(
                 "Claim worker: bundle unprofitable (%d payouts < %d cost); dropped",

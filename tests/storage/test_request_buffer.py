@@ -156,11 +156,46 @@ class TestQueue(unittest.TestCase):
         self.assertEqual(flush_storage_requests(node), 0)
         self.assertEqual(node.storage_request_buffer, {})
 
-    def test_unknown_provider_id_returns_false(self):
+    def test_resolve_falls_back_to_peer(self):
         node = _node()
         h = _ids(1)[0]
-        node.storage_index[h] = 99
-        self.assertFalse(queue_storage_get(node, h, RESOLUTION_SINGLE))
+        node.storage_index[h] = (99,)
+        self.assertTrue(queue_storage_get(node, h, RESOLUTION_SINGLE))
+        flush_storage_requests(node)
+        (address, entries), = _drain(node)
+        self.assertEqual(address, ("127.0.0.1", 9000))
+
+    def _two_providers(self, node, h):
+        keys = []
+        for port in (5000, 5001):
+            provider = X25519PrivateKey.generate()
+            relay = provider.public_key().public_bytes(
+                serialization.Encoding.Raw, serialization.PublicFormat.Raw
+            )
+            node.storage_providers.append(
+                bytes([port - 4999]) * 32 + relay + bytes([10, 0, 0, 7]) + port.to_bytes(2, "big")
+            )
+            keys.append(provider)
+        node.storage_index[h] = (0, 1)
+
+    def test_resolve_uses_first_provider(self):
+        node = _node()
+        h = _ids(1)[0]
+        self._two_providers(node, h)
+        queue_storage_get(node, h, RESOLUTION_SINGLE)
+        with patch(ENQUEUE, return_value=True) as enq:
+            flush_storage_requests(node)
+        self.assertEqual(enq.call_args.args[1], ("10.0.0.7", 5000))
+
+    def test_resolve_skips_unusable_provider(self):
+        node = _node()
+        h = _ids(1)[0]
+        self._two_providers(node, h)
+        node.storage_index[h] = (99, 1)
+        queue_storage_get(node, h, RESOLUTION_SINGLE)
+        with patch(ENQUEUE, return_value=True) as enq:
+            flush_storage_requests(node)
+        self.assertEqual(enq.call_args.args[1], ("10.0.0.7", 5001))
 
     def test_indexed_provider_destination_uses_difficulty_one(self):
         node = _node()
@@ -171,7 +206,7 @@ class TestQueue(unittest.TestCase):
         )
         payload = b"\x22" * 32 + relay + bytes([10, 0, 0, 7]) + (5000).to_bytes(2, "big")
         node.storage_providers.append(payload)
-        node.storage_index[h] = 0
+        node.storage_index[h] = (0,)
         queue_storage_get(node, h, RESOLUTION_SINGLE)
         shared = provider.exchange(node.relay_secret_key.public_key())
         with patch(ENQUEUE, return_value=True) as enq:
@@ -223,9 +258,9 @@ class TestScoped(unittest.TestCase):
         node.storage_providers.append(
             b"\x22" * 32 + relay + bytes([10, 0, 0, 7]) + (5000).to_bytes(2, "big")
         )
-        node.storage_index[self.BLOCK] = 0
+        node.storage_index[self.BLOCK] = (0,)
         h = _ids(1)[0]
-        node.storage_index[h] = 99  # the expr's own index entry is not used
+        node.storage_index[h] = (99,)  # the expr's own index entry is not used
         queue_storage_get(node, h, RESOLUTION_SINGLE, block_hash=self.BLOCK)
         shared = provider.exchange(node.relay_secret_key.public_key())
         with patch(ENQUEUE, return_value=True) as enq:

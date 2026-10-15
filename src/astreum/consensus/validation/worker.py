@@ -16,6 +16,7 @@ from astreum.consensus.block.difficulty import calculate_block_difficulty
 from astreum.consensus.block.nonce import generate_block_nonce
 from astreum.consensus.block.encoding.decode import get_block_from_storage
 from astreum.consensus.transaction import Transaction, apply_transaction_obj
+from astreum.consensus.transaction.storage.model import storage_record_to_expr
 from astreum.consensus.transaction.storage.initial import (
     UnresolvedRecordExpr,
     generate_initial_storage_record,
@@ -289,8 +290,8 @@ def make_validation_worker(
                 if result is not None:
                     record, slot_hashes, _, _ = result
                     record_id = previous_block.expr_id
-                    put_in_radix_tree(storage_account.data, node, record_id, record.expr())
-                    new_block.pending_exprs.append(record.expr())
+                    put_in_radix_tree(storage_account.data, node, record_id, storage_record_to_expr(record))
+                    new_block.pending_exprs.append(storage_record_to_expr(record))
                     storage_account.data_hash = storage_account.data.root_hash
                     storage_ids.append(record_id)
                     try:

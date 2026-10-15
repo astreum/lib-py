@@ -21,7 +21,18 @@ from astreum.consensus.transaction.storage.initial import (
     storage_walk_fee,
     storage_walk_size,
 )
-from astreum.consensus.transaction.storage.model import StorageRecord
+from dataclasses import replace
+
+from astreum.consensus.transaction.storage.model import (
+    StorageLane,
+    StorageRecord,
+    storage_lane_from_expr,
+    storage_lane_to_expr,
+    storage_record_cells,
+    storage_record_from_expr,
+    storage_record_from_storage,
+    storage_record_to_expr,
+)
 from tests.consensus.transaction.test_storage_record_refs import flat, store_flat
 from astreum.storage.radix import (
     get_from_radix_tree,
@@ -31,6 +42,7 @@ from astreum.storage.radix import (
 from astreum.storage.radix.node import radix_node_hash
 from astreum.expression import Expr, NIL, int_, bytes_, link, resolve_list_exprs
 from astreum.consensus.constants import STORAGE_ADDRESS
+from astreum.expression import ZERO32
 
 from _helpers import (
     _FakeNode,
@@ -155,7 +167,7 @@ class TestStorageWalkSize(unittest.TestCase):
 
 
 class TestRecordRoundTrip(unittest.TestCase):
-    """A record round-trips through its expr, in the 7-node layout."""
+    """A record round-trips through its expr, in the nested 5-item layout."""
 
     def setUp(self):
         self.node = _FakeNode()
@@ -170,58 +182,130 @@ class TestRecordRoundTrip(unittest.TestCase):
         self.assertIsNotNone(result)
         return result[0]
 
-    def test_roundtrip(self):
-        record = self._record()
-        record.last_payment_winner = os.urandom(32)
+    def _with_winners(self, record):
+        record.lanes = (
+            replace(record.lanes[0], winner=os.urandom(32), height=5),
+            replace(record.lanes[1], winner=os.urandom(32), height=7),
+        )
         record._expr = None
-        self.assertEqual(len(resolve_list_exprs(self.node, record.expr())[0]), 7)
-        store_expr_tree(self.node, record.expr())
-        decoded = StorageRecord.from_storage(self.node, record.expr().hash())
+        return record
+
+    def _list(self, items):
+        out = NIL
+        for item in reversed(items):
+            out = link(item, out)
+        return out
+
+    def _record_expr(self, lanes, creation=b"\x01" * 32):
+        return self._list([
+            lanes,
+            Expr("link", head_hash=creation),
+            bytes_(b"\x02" * 32),
+            int_(1),
+            int_(1),
+        ])
+
+    def test_record_round_trip_two_lanes(self):
+        record = self._with_winners(self._record())
+        self.assertEqual(len(resolve_list_exprs(self.node, storage_record_to_expr(record))[0]), 5)
+        store_expr_tree(self.node, storage_record_to_expr(record))
+        decoded = storage_record_from_storage(self.node, storage_record_to_expr(record).hash())
         self.assertIsNotNone(decoded)
-        for name in (
-            "creation_block_hash", "last_payment_block_hash", "last_payment_height",
-            "last_payment_winner", "new_size", "new_count", "slots_root",
-        ):
+        for name in ("creation_block_hash", "lanes", "new_size", "new_count", "slots_root"):
             self.assertEqual(getattr(decoded, name), getattr(record, name), name)
-        self.assertFalse(hasattr(decoded, "mint"))
+        self.assertEqual(len(decoded.lanes), 2)
 
-    def test_slots_root_and_winner_are_bytes_values_not_links(self):
-        record = self._record()
-        record.last_payment_winner = os.urandom(32)
-        record._expr = None
-        nodes, _ = resolve_list_exprs(self.node, record.expr())
-        # [last_payment_block_hash, height, winner, creation, slots_root, count, size]
-        self.assertEqual([get_expr_builtin_tag(n) for n in nodes], ["link", "int", "bytes", "link", "bytes", "int", "int"])
-        self.assertEqual(nodes[2].value, record.last_payment_winner)
-        self.assertEqual(nodes[4].value, record.slots_root)
+    def test_record_layout_types(self):
+        record = self._with_winners(self._record())
+        nodes, _ = resolve_list_exprs(self.node, storage_record_to_expr(record))
+        # [lanes, creation, slots_root, count, size]
+        self.assertEqual(
+            [get_expr_builtin_tag(n) for n in nodes],
+            ["link", "link", "bytes", "int", "int"],
+        )
+        self.assertEqual(nodes[2].value, record.slots_root)
+        lanes, _ = resolve_list_exprs(self.node, nodes[0])
+        self.assertEqual(len(lanes), 2)
+        for lane_expr, lane in zip(lanes, record.lanes):
+            items, _ = resolve_list_exprs(self.node, lane_expr)
+            # [block_hash, height, winner]
+            self.assertEqual([get_expr_builtin_tag(n) for n in items], ["link", "int", "bytes"])
+            self.assertEqual(items[2].value, lane.winner)
 
-    def test_older_layouts_are_rejected(self):
+    def test_new_record_has_two_empty_lanes(self):
         record = self._record()
-        nodes, _ = resolve_list_exprs(self.node, record.expr())
-        # drop slots_root: the 6-node layout
-        six = NIL
-        for n in reversed([x for i, x in enumerate(nodes) if i != 4]):
-            six = link(n, six)
-        # an extra node after the first: 8 nodes
-        eight = NIL
-        for n in reversed(nodes[:1] + [int_(0)] + nodes[1:]):
-            eight = link(n, eight)
-        # winner as a hash link, as before
-        old_winner = NIL
-        swapped = list(nodes)
-        swapped[2] = Expr("link", head_hash=record.last_payment_winner)
-        for n in reversed(swapped):
-            old_winner = link(n, old_winner)
-        for old in (six, eight, old_winner):
-            store_expr_tree(self.node, old)
-            self.assertIsNone(StorageRecord.from_storage(self.node, old.hash()))
+        self.assertEqual(len(record.lanes), 2)
+        for lane in record.lanes:
+            self.assertEqual(lane.winner, ZERO32)
+            self.assertEqual(lane.block_hash, self.block.previous_block_hash)
+            self.assertEqual(lane.height, self.block.height - 1)
+        self.assertEqual(record.lanes[0], record.lanes[1])
+        self.assertEqual(
+            storage_lane_to_expr(record.lanes[0]).hash(),
+            storage_lane_to_expr(record.lanes[1]).hash(),
+        )
+
+    def test_equal_lanes_share_one_cell(self):
+        record = self._record()
+        hashes = [e.hash() for e in storage_record_cells(record)]
+        self.assertEqual(len(hashes), len(set(hashes)))
+        lane_hash = storage_lane_to_expr(record.lanes[0]).hash()
+        self.assertEqual(hashes.count(lane_hash), 1)
+
+    def test_lane_round_trip(self):
+        lane = StorageLane(block_hash=b"\x0a" * 32, height=9, winner=b"\x0b" * 32)
+        expr = storage_lane_to_expr(lane)
+        store_expr_tree(self.node, expr)
+        self.assertEqual(storage_lane_from_expr(self.node, expr), lane)
+
+    def test_lane_wrong_item_count_rejected(self):
+        hash_item = Expr("link", head_hash=b"\x0a" * 32)
+        for items in (
+            [hash_item, int_(1)],
+            [hash_item, int_(1), bytes_(b"\x0b" * 32), int_(2)],
+        ):
+            expr = self._list(items)
+            store_expr_tree(self.node, expr)
+            self.assertIsNone(storage_lane_from_expr(self.node, expr))
+
+    def test_lanes_list_wrong_length_rejected(self):
+        lane = storage_lane_to_expr(StorageLane(block_hash=b"\x0a" * 32))
+        for count in (1, 3):
+            expr = self._record_expr(self._list([lane] * count))
+            store_expr_tree(self.node, expr)
+            self.assertIsNone(storage_record_from_storage(self.node, expr.hash()), count)
+
+    def test_record_rejects_seven_nodes(self):
+        seven = self._list([
+            Expr("link", head_hash=b"\x0a" * 32),
+            int_(1),
+            bytes_(b"\x0b" * 32),
+            Expr("link", head_hash=b"\x01" * 32),
+            bytes_(b"\x02" * 32),
+            int_(1),
+            int_(1),
+        ])
+        store_expr_tree(self.node, seven)
+        self.assertIsNone(storage_record_from_storage(self.node, seven.hash()))
+
+    def test_lane_item_types_rejected(self):
+        # winner as a hash link instead of a bytes value
+        bad = self._list([
+            Expr("link", head_hash=b"\x0a" * 32),
+            int_(1),
+            Expr("link", head_hash=b"\x0b" * 32),
+        ])
+        store_expr_tree(self.node, bad)
+        self.assertIsNone(storage_lane_from_expr(self.node, bad))
 
     def test_parse_record_new_count_reads_the_record(self):
         from astreum.storage.records import parse_record_new_count
 
         record = self._record()
-        store_expr_tree(self.node, record.expr())
-        self.assertEqual(parse_record_new_count(self.node, record.expr()), record.new_count)
+        store_expr_tree(self.node, storage_record_to_expr(record))
+        self.assertEqual(
+            parse_record_new_count(self.node, storage_record_to_expr(record)), record.new_count
+        )
         self.assertIsNone(parse_record_new_count(self.node, int_(3)))
         self.assertIsNone(parse_record_new_count(self.node, None))
 

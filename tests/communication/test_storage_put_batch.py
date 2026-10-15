@@ -116,10 +116,10 @@ class TestCodec(unittest.TestCase):
         self.assertEqual(decoded.entries, req.entries)
 
     def test_batch_of_one_size(self):
-        self.assertEqual(len(self._req(1).to_bytes()), 1 + 70 + 2 + 33)
+        self.assertEqual(len(self._req(1).to_bytes()), 1 + 1 + 70 + 2 + 33)
 
     def test_rejects_zero_count(self):
-        raw = bytes([StorageRequestCode.STORAGE_PUT]) + PROVIDER + (0).to_bytes(2, "big")
+        raw = bytes([StorageRequestCode.STORAGE_PUT, 1]) + PROVIDER + (0).to_bytes(2, "big")
         raw += b"\x00" * 33  # pad past the generic minimum length
         with self.assertRaises(ValueError):
             StorageRequest.from_bytes(raw)
@@ -132,9 +132,38 @@ class TestCodec(unittest.TestCase):
             StorageRequest.from_bytes(raw + b"\x00")
 
     def test_rejects_short_payload(self):
-        raw = bytes([StorageRequestCode.STORAGE_PUT]) + PROVIDER[:40]
+        raw = bytes([StorageRequestCode.STORAGE_PUT, 1]) + PROVIDER[:40]
         with self.assertRaises(ValueError):
             StorageRequest.from_bytes(raw)
+
+    def test_two_providers_round_trip(self):
+        entries = [(_ids(0xFF, 1)[0], 4)]
+        data = PROVIDER + b"Q" * 70
+        req = StorageRequest(StorageRequestCode.STORAGE_PUT, data, entries=entries)
+        raw = req.to_bytes()
+        self.assertEqual(len(raw), 1 + 1 + 140 + 2 + 33)
+        decoded = StorageRequest.from_bytes(raw)
+        self.assertEqual(decoded.data, data)
+        self.assertEqual(decoded.entries, entries)
+
+    def test_rejects_bad_provider_count(self):
+        entries = [(_ids(0xFF, 1)[0], 4)]
+        raw = StorageRequest(StorageRequestCode.STORAGE_PUT, PROVIDER, entries=entries).to_bytes()
+        for count in (0, 3):
+            with self.assertRaises(ValueError, msg=str(count)):
+                StorageRequest.from_bytes(raw[:1] + bytes([count]) + raw[2:])
+        with self.assertRaises(ValueError):
+            StorageRequest(
+                StorageRequestCode.STORAGE_PUT, b"P" * 210, entries=entries
+            ).to_bytes()
+
+    def test_rejects_truncated_two_provider_body(self):
+        entries = [(_ids(0xFF, 1)[0], 4)]
+        raw = StorageRequest(
+            StorageRequestCode.STORAGE_PUT, PROVIDER + b"Q" * 70, entries=entries
+        ).to_bytes()
+        with self.assertRaises(ValueError):
+            StorageRequest.from_bytes(raw[:100])
 
     def test_rejects_oversized_payload(self):
         raw = bytes([StorageRequestCode.STORAGE_PUT]) + b"\x00" * MAX_INLINE_MESSAGE_BYTES
@@ -201,7 +230,7 @@ class TestSendPath(unittest.TestCase):
         self.assertTrue(all(r.data == node_provider(node) for _, r in sent))
 
     def test_custom_budget_changes_chunk_size(self):
-        node = _make_node([self.peer_a], budget=78 + 1 + 72 + 33 * 4)
+        node = _make_node([self.peer_a], budget=78 + 1 + 73 + 33 * 4)
         advertise_exprs(node, self._entries(_ids(0xFF, 10)))
         self.assertEqual([len(r.entries) for _, r in _sent_requests(node)], [4, 4, 2])
 
@@ -271,11 +300,11 @@ class TestReceivePath(unittest.TestCase):
         self.peer_a = _peer(PEER_A_KEY, 9001)
         self.sender = _peer(b"\x55" * 32, 9100)
 
-    def _handle(self, node, entries, committed=None, record_ids=None):
+    def _handle(self, node, entries, committed=None, record_ids=None, provider=PROVIDER):
         """Run the STORAGE_PUT handler with admission/record checks stubbed."""
         committed = set(e for e, _ in entries) if committed is None else set(committed)
         record_ids = committed if record_ids is None else set(record_ids)
-        request = StorageRequest(StorageRequestCode.STORAGE_PUT, PROVIDER, entries=entries)
+        request = StorageRequest(StorageRequestCode.STORAGE_PUT, provider, entries=entries)
         message = SimpleNamespace(content=request.to_bytes())
         account = SimpleNamespace(data=SimpleNamespace(root_hash=b"\x09" * 32))
         with patch(
@@ -320,12 +349,29 @@ class TestReceivePath(unittest.TestCase):
         self.assertEqual(result, (True, None))
         self.assertEqual(set(node.storage_index), set(ids[:1]))
 
+    def test_two_provider_put_indexes_one_tuple(self):
+        node = _make_node([self.peer_a])
+        ids = _ids(0x00, 2)
+        self._handle(node, [(e, 4) for e in ids], provider=PROVIDER + b"Q" * 70)
+        self.assertEqual(len(node.storage_providers), 2)
+        self.assertEqual(set(node.storage_index), set(ids))
+        for value in node.storage_index.values():
+            self.assertEqual(len(value), 2)
+
     def test_self_indexing_records_provider(self):
         node = _make_node([self.peer_a])
         ids = _ids(0x00, 2)
         self._handle(node, [(e, 4) for e in ids])
         self.assertEqual(node.storage_providers, [PROVIDER])
-        self.assertEqual(set(node.storage_index.values()), {0})
+        self.assertEqual(set(node.storage_index.values()), {(0,)})
+
+    def test_two_ads_give_two_providers(self):
+        node = _make_node([self.peer_a])
+        ids = _ids(0x00, 1)
+        self._handle(node, [(e, 4) for e in ids])
+        self._handle(node, [(e, 4) for e in ids], provider=b"Q" * 70)
+        self.assertEqual(node.storage_providers, [PROVIDER, b"Q" * 70])
+        self.assertEqual(len(node.storage_index[ids[0]]), 2)
 
     def test_inline_fetch_capped_at_eight(self):
         node = _make_node([self.peer_a])
@@ -358,7 +404,7 @@ class TestReceivePath(unittest.TestCase):
         self.assertTrue(all(r.data == PROVIDER for _, r in sent))
 
     def test_forward_chunks_by_budget(self):
-        node = _make_node([self.peer_a], budget=78 + 1 + 72 + 33 * 3)
+        node = _make_node([self.peer_a], budget=78 + 1 + 73 + 33 * 3)
         ids = _ids(0xFF, 7)
         self._handle(node, [(e, 4) for e in ids])
         self.assertEqual([len(r.entries) for _, r in _sent_requests(node)], [3, 3, 1])

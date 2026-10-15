@@ -184,7 +184,7 @@ class TestGetServer(unittest.TestCase):
         return SimpleNamespace(
             logger=MagicMock(),
             storage_public_key_bytes=b"\x00" * 32,
-            storage_index={self.redirect_id: 0},
+            storage_index={self.redirect_id: (0,)},
             storage_providers=[PROVIDER],
             outgoing_queue=queue.Queue(),
             config={},
@@ -235,6 +235,25 @@ class TestGetServer(unittest.TestCase):
         self.assertEqual(by_id[self.redirect_id], StorageResponseCode.STORAGE_PROVIDER)
         self.assertNotIn(self.unknown_id, by_id)
         self.assertEqual(len(responses), 2)
+
+    def test_provider_response_holds_two_payloads(self):
+        other = b"Q" * 70
+        node = self._node()
+        node.storage_providers.append(other)
+        node.storage_index[self.redirect_id] = (0, 1)
+        _, responses, _ = self._serve([(self.redirect_id, RESOLUTION_SINGLE)], node=node)
+        self.assertEqual(responses[0].data, PROVIDER + other)
+        self.assertEqual(len(responses[0].data), 140)
+
+    def test_provider_response_one_payload(self):
+        _, responses, _ = self._serve([(self.redirect_id, RESOLUTION_SINGLE)])
+        self.assertEqual(responses[0].data, PROVIDER)
+
+    def test_provider_response_skips_missing_payload(self):
+        node = self._node()
+        node.storage_index[self.redirect_id] = (99, 0)
+        _, responses, _ = self._serve([(self.redirect_id, RESOLUTION_SINGLE)], node=node)
+        self.assertEqual(responses[0].data, PROVIDER)
 
     def test_scoped_entry_is_served_by_local_get_of_the_expr(self):
         block = b"\xb1" * 32  # not indexed here: the block plays no part in a hit

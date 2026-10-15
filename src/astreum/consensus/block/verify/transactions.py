@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, List, Optional
 
 from astreum.expression import Expr, RESOLUTION_FULL, link_list_to_expr
+from astreum.consensus.transaction.storage.model import storage_record_to_expr
 from astreum.storage.exprs import get_expr_list, prefetch_exprs_from_network
 from astreum.consensus.block.rate_window import update_statistics
 from astreum.storage.radix import RadixTree, get_from_radix_tree, put_in_radix_tree
@@ -297,7 +298,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
             return False, "failed building parent block record"
         if result is not None:
             record, _, _, _ = result
-            put_in_radix_tree(storage_account.data, node, prev_block.expr_id, record.expr())
+            put_in_radix_tree(storage_account.data, node, prev_block.expr_id, storage_record_to_expr(record))
             storage_account.data_hash = storage_account.data.root_hash
 
     # The tx hashes are all known now: fetch the missing tx trees in one batch

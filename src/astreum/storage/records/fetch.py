@@ -10,7 +10,7 @@ from astreum.storage.radix import RadixTree
 from astreum.storage.records.table import put_record_in_cold_storage
 
 if TYPE_CHECKING:
-    from astreum.consensus.transaction.storage.model import StorageRecord
+    from astreum.consensus.transaction.storage.model import storage_record_from_expr
     from astreum.node import Node
 
 
@@ -18,7 +18,7 @@ def parse_record(node: "Node", value: Any) -> "StorageRecord | None":
     """Parse a storage-trie value as a ``StorageRecord``, or None if it is not one.
 
     The value is the header stored in the storage trie at a record's key (the
-    block's expr hash). The layout lives in ``StorageRecord``.
+    block's expr hash). The layout lives in ``storage_record_from_expr``.
 
     Args:
         node: A Node instance for decoding expressions.
@@ -29,10 +29,10 @@ def parse_record(node: "Node", value: Any) -> "StorageRecord | None":
     """
     if value is None or get_expr_builtin_tag(value) != "link":
         return None
-    from astreum.consensus.transaction.storage.model import StorageRecord
+    from astreum.consensus.transaction.storage.model import storage_record_from_expr
 
     try:
-        return StorageRecord.from_expr(node, value)
+        return storage_record_from_expr(node, value)
     except (AttributeError, TypeError, ValueError):
         return None
 

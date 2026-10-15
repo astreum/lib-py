@@ -244,8 +244,9 @@ def _serve_one_index_request(node: "Node") -> bool:
 
     Scans ``node.storage_index`` and sends the requester every entry the
     requester is nearer to than this node. Entries go out as ``STORAGE_PUT``
-    datagrams, grouped by provider id, each with its original provider
-    payload. This node keeps its own entries.
+    datagrams, grouped by provider set. Each datagram carries the original
+    provider payloads of the entries, so an entry with two providers goes out
+    once. This node keeps its own entries.
 
     Args:
         node: A Node instance.
@@ -263,15 +264,16 @@ def _serve_one_index_request(node: "Node") -> bool:
         return True
 
     own_key = node.config["storage_public_key_bytes"]
-    groups: dict[int, list[tuple[bytes, int]]] = {}
-    for expr_id, provider_id in list(node.storage_index.items()):
+    groups: dict[bytes, list[tuple[bytes, int]]] = {}
+    for expr_id, provider_ids in list(node.storage_index.items()):
         if xor_distance(expr_id, requester_key) < xor_distance(expr_id, own_key):
-            groups.setdefault(provider_id, []).append((expr_id, RESOLUTION_SINGLE))
+            payload = b"".join(
+                p for p in (provider_payload_for_id(node, i) for i in provider_ids) if p
+            )
+            if payload:
+                groups.setdefault(payload, []).append((expr_id, RESOLUTION_SINGLE))
 
-    for provider_id, entries in groups.items():
-        payload = provider_payload_for_id(node, provider_id)
-        if payload is None:
-            continue
+    for payload, entries in groups.items():
         send_put_entries(node, peer, payload, entries)
     return True
 

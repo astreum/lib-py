@@ -110,7 +110,7 @@ class TestHandler(unittest.TestCase):
 
     def test_handler_does_no_work(self):
         node = _node()
-        node.storage_index[_id(0xFF)] = 0
+        node.storage_index[_id(0xFF)] = (0,)
         self._handle(node, _peer(REQUESTER_KEY, 9001))
         self.assertTrue(node.outgoing_queue.empty())
 
@@ -125,29 +125,29 @@ class TestResponder(unittest.TestCase):
         near = [_id(0xFF, 1), _id(0xFF, 2)]
         far = [_id(0x00, 1), _id(0x00, 2)]
         for expr_id in near + far:
-            self.node.storage_index[expr_id] = 0
+            self.node.storage_index[expr_id] = (0,)
         self.assertTrue(_serve_one_index_request(self.node))
         sent = _sent(self.node)
         ids = [e[0] for _, req in sent for e in req.entries]
         self.assertEqual(sorted(ids), sorted(near))
 
     def test_entries_use_single_resolution(self):
-        self.node.storage_index[_id(0xFF)] = 0
+        self.node.storage_index[_id(0xFF)] = (0,)
         _serve_one_index_request(self.node)
         (_, req), = _sent(self.node)
         self.assertEqual(req.code, StorageRequestCode.STORAGE_PUT)
         self.assertEqual(req.entries, [(_id(0xFF), RESOLUTION_SINGLE)])
 
     def test_keeps_provider(self):
-        self.node.storage_index[_id(0xFF, 1)] = 1
+        self.node.storage_index[_id(0xFF, 1)] = (1,)
         _serve_one_index_request(self.node)
         (_, req), = _sent(self.node)
         self.assertEqual(req.data, PROVIDER_B)
 
     def test_groups_by_provider(self):
-        self.node.storage_index[_id(0xFF, 1)] = 0
-        self.node.storage_index[_id(0xFF, 2)] = 1
-        self.node.storage_index[_id(0xFF, 3)] = 0
+        self.node.storage_index[_id(0xFF, 1)] = (0,)
+        self.node.storage_index[_id(0xFF, 2)] = (1,)
+        self.node.storage_index[_id(0xFF, 3)] = (0,)
         _serve_one_index_request(self.node)
         sent = {req.data: [e[0] for e in req.entries] for _, req in _sent(self.node)}
         self.assertEqual(sorted(sent), sorted([PROVIDER_A, PROVIDER_B]))
@@ -155,21 +155,37 @@ class TestResponder(unittest.TestCase):
         self.assertEqual(sent[PROVIDER_B], [_id(0xFF, 2)])
 
     def test_keeps_own_entries(self):
-        self.node.storage_index[_id(0xFF, 1)] = 0
-        self.node.storage_index[_id(0x00, 1)] = 1
+        self.node.storage_index[_id(0xFF, 1)] = (0,)
+        self.node.storage_index[_id(0x00, 1)] = (1,)
         before = dict(self.node.storage_index)
         _serve_one_index_request(self.node)
         self.assertEqual(self.node.storage_index, before)
 
     def test_unknown_peer_skipped(self):
         self.node.peers.clear()
-        self.node.storage_index[_id(0xFF)] = 0
+        self.node.storage_index[_id(0xFF)] = (0,)
         self.assertTrue(_serve_one_index_request(self.node))
         self.assertTrue(self.node.outgoing_queue.empty())
         self.assertEqual(self.node.index_requests, [])
 
+    def test_entry_with_two_providers_sent_in_one_message(self):
+        expr_id = _id(0xFF, 1)
+        self.node.storage_index[expr_id] = (0, 1)
+        _serve_one_index_request(self.node)
+        (_, request), = _sent(self.node)
+        self.assertEqual(request.data, PROVIDER_A + PROVIDER_B)
+        self.assertEqual([e[0] for e in request.entries], [expr_id])
+
+    def test_entries_grouped_by_provider_set(self):
+        both, only_a = _id(0xFF, 1), _id(0xFF, 2)
+        self.node.storage_index[both] = (0, 1)
+        self.node.storage_index[only_a] = (0,)
+        _serve_one_index_request(self.node)
+        by_data = {r.data: [e[0] for e in r.entries] for _, r in _sent(self.node)}
+        self.assertEqual(by_data, {PROVIDER_A + PROVIDER_B: [both], PROVIDER_A: [only_a]})
+
     def test_unknown_provider_skipped(self):
-        self.node.storage_index[_id(0xFF)] = 7
+        self.node.storage_index[_id(0xFF)] = (7,)
         _serve_one_index_request(self.node)
         self.assertTrue(self.node.outgoing_queue.empty())
 
@@ -215,7 +231,7 @@ class TestReplyUsesTrieCheck(unittest.TestCase):
         """The requester handles a reply as a normal STORAGE_PUT."""
         responder = _node(peers=[_peer(REQUESTER_KEY, 9001)])
         responder.index_requests.append(REQUESTER_KEY)
-        responder.storage_index[_id(0xFF)] = 0
+        responder.storage_index[_id(0xFF)] = (0,)
         _serve_one_index_request(responder)
         (_, req), = _sent(responder)
 

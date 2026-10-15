@@ -5,9 +5,11 @@ from astreum.communication.message_pow import (
 from astreum.communication.storage_request.code import StorageRequestCode
 
 # STORAGE_PUT layout (after the 1-byte request code):
-#   provider_payload (70B) + count u16 + count * (expr_id 32B + payload_type 1B)
+#   provider_count u8 (1 or 2) + provider_count * provider_payload (70B)
+#   + count u16 + count * (expr_id 32B + payload_type 1B)
 PROVIDER_PAYLOAD_BYTES = 70
-BATCH_HEADER_BYTES = PROVIDER_PAYLOAD_BYTES + 2
+MAX_PUT_PROVIDERS = 2
+BATCH_COUNT_BYTES = 2
 BATCH_ENTRY_BYTES = 32 + 1
 
 
@@ -36,16 +38,31 @@ def max_get_entries(budget_bytes: int) -> int:
     return (budget_bytes - MESSAGE_FRAMING_BYTES - 1 - GET_HEADER_BYTES) // SCOPED_GET_ENTRY_BYTES
 
 
-def max_batch_entries(budget_bytes: int) -> int:
+def batch_header_bytes(providers: int = 1) -> int:
+    """Return the STORAGE_PUT header size after the request code.
+
+    Args:
+        providers: The number of provider payloads in the request.
+
+    Returns:
+        int: The count of provider bytes plus the count fields.
+    """
+    return 1 + providers * PROVIDER_PAYLOAD_BYTES + BATCH_COUNT_BYTES
+
+
+def max_batch_entries(budget_bytes: int, providers: int = 1) -> int:
     """Return how many entries fit in one STORAGE_PUT datagram.
 
     Args:
         budget_bytes (int): The maximum byte budget for the datagram.
+        providers: The number of provider payloads in the request.
 
     Returns:
-        int: Description of the return value.
+        int: The number of entries that fit.
     """
-    return (budget_bytes - MESSAGE_FRAMING_BYTES - 1 - BATCH_HEADER_BYTES) // BATCH_ENTRY_BYTES
+    return (
+        budget_bytes - MESSAGE_FRAMING_BYTES - 1 - batch_header_bytes(providers)
+    ) // BATCH_ENTRY_BYTES
 
 
 class StorageRequest:
@@ -148,16 +165,18 @@ class StorageRequest:
         Returns:
             bytes: The encoded STORAGE_PUT bytes.
         """
-        if len(self.data) != PROVIDER_PAYLOAD_BYTES:
+        providers, remainder = divmod(len(self.data), PROVIDER_PAYLOAD_BYTES)
+        if remainder or not 1 <= providers <= MAX_PUT_PROVIDERS:
             raise ValueError(
-                f"STORAGE_PUT provider payload must be {PROVIDER_PAYLOAD_BYTES} bytes"
+                f"STORAGE_PUT provider data must be 1 to {MAX_PUT_PROVIDERS} "
+                f"payloads of {PROVIDER_PAYLOAD_BYTES} bytes"
             )
         if not self.entries:
             raise ValueError("STORAGE_PUT requires at least one entry")
         if len(self.entries) > 0xFFFF:
             raise ValueError("STORAGE_PUT entry count exceeds u16")
         parts = [
-            bytes([self.code.value]),
+            bytes([self.code.value, providers]),
             self.data,
             len(self.entries).to_bytes(2, "big"),
         ]
@@ -263,13 +282,20 @@ class StorageRequest:
             raise ValueError(
                 f"STORAGE_PUT too large ({len(data)} > {MAX_INLINE_MESSAGE_BYTES})"
             )
-        if len(data) < 1 + BATCH_HEADER_BYTES:
+        if len(data) < 2:
             raise ValueError(f"STORAGE_PUT too short ({len(data)} bytes)")
-        provider_payload = data[1 : 1 + PROVIDER_PAYLOAD_BYTES]
-        count = int.from_bytes(data[1 + PROVIDER_PAYLOAD_BYTES : 1 + BATCH_HEADER_BYTES], "big")
+        providers = data[1]
+        if not 1 <= providers <= MAX_PUT_PROVIDERS:
+            raise ValueError(f"STORAGE_PUT provider count must be 1 to {MAX_PUT_PROVIDERS}")
+        header_end = 1 + batch_header_bytes(providers)
+        if len(data) < header_end:
+            raise ValueError(f"STORAGE_PUT too short ({len(data)} bytes)")
+        provider_end = 2 + providers * PROVIDER_PAYLOAD_BYTES
+        provider_payload = data[2:provider_end]
+        count = int.from_bytes(data[provider_end:header_end], "big")
         if count < 1:
             raise ValueError("STORAGE_PUT count must be at least 1")
-        body = data[1 + BATCH_HEADER_BYTES :]
+        body = data[header_end:]
         if len(body) != count * BATCH_ENTRY_BYTES:
             raise ValueError(
                 f"STORAGE_PUT length mismatch (count={count}, body={len(body)} bytes)"
