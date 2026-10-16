@@ -1,16 +1,50 @@
 from __future__ import annotations
 
-import socket
-
 from astreum.communication.outgoing_queue import enqueue_outgoing
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import get_peer
+from astreum.communication.models.route_entry import (
+    encode_route_entry,
+    max_route_entries,
+)
 from astreum.communication.util import xor_distance
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from astreum import Node
     from astreum.communication.models.peer import Peer
+    from astreum.communication.models.route import Route
+
+
+def route_reply_entries(node: "Node", route: "Route", sender_key: bytes) -> list[bytes]:
+    """Encode the peers of a route nearest to the sender, nearest first.
+
+    The sender is left out. The count fits one datagram and the bucket size.
+
+    Args:
+        node: The node that answers.
+        route: The route to read the peers from.
+        sender_key: The storage key of the node that asked.
+
+    Returns:
+        The encoded entries, nearest peer first.
+    """
+    use_ipv6 = bool(node.use_ipv6)
+    ranked = []
+    for bucket in route.buckets.values():
+        for peer_key in bucket:
+            if peer_key == sender_key:
+                continue
+            peer = get_peer(node, peer_key)
+            if peer is None:
+                continue
+            entry = encode_route_entry(peer, use_ipv6)
+            if entry is None:
+                continue
+            ranked.append((xor_distance(sender_key, peer_key), entry))
+    ranked.sort(key=lambda item: item[0])
+    limit = max_route_entries(use_ipv6, route.bucket_size)
+    return [entry for _, entry in ranked[:limit]]
 
 
 def handle_route_request(node: "Node", peer: "Peer", message: Message) -> tuple[bool, str | None]:
@@ -34,44 +68,11 @@ def handle_route_request(node: "Node", peer: "Peer", message: Message) -> tuple[
         node.logger.debug("Unknown route id %s in ROUTE_REQUEST from %s", route_id, peer.address)
         return False, f"unknown route id {route_id}"
 
-    payload_parts = []
-    for bucket in route.buckets.values():
-        closest_key = None
-        closest_distance = None
-
-        for peer_key in bucket:
-            try:
-                distance = xor_distance(sender_public_key, peer_key)
-            except ValueError:
-                continue
-
-            if closest_distance is None or distance < closest_distance:
-                closest_distance = distance
-                closest_key = peer_key
-
-        if closest_key is None:
-            continue
-
-        bucket_peer = get_peer(node, closest_key)
-        if bucket_peer is None or bucket_peer.address is None:
-            continue
-
-        host, port = bucket_peer.address
-        try:
-            address_bytes = socket.inet_pton(socket.AF_INET, host)
-        except OSError:
-            try:
-                address_bytes = socket.inet_pton(socket.AF_INET6, host)
-            except OSError as exc:
-                node.logger.debug("Invalid peer address %s: %s", bucket_peer.address, exc)
-                continue
-
-        port_bytes = int(port).to_bytes(2, "big", signed=False)
-        payload_parts.append(address_bytes + port_bytes)
+    entries = route_reply_entries(node, route, sender_public_key)
 
     response = Message(
         topic=MessageTopic.ROUTE_RESPONSE,
-        content=b"".join(payload_parts),
+        content=bytes([route_id]) + b"".join(entries),
         sender_public_key_bytes=node.storage_public_key_bytes,
     )
     response.encrypt(peer.shared_key_bytes)

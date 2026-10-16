@@ -379,7 +379,7 @@ class TestAdvertiseStorageLoop(unittest.TestCase):
 
     def _loop_node(self, long_term, interval=0.05):
         return SimpleNamespace(
-            config={"storage_request_price_interval": interval},
+            config={"storage_request_price_interval": interval, "self_lookup_rounds": 0},
             is_storage_provider=long_term,
             long_term_storage_interval=interval,
             peers={},

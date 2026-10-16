@@ -122,6 +122,7 @@ class TestStartupAnnounceLoop(unittest.TestCase):
         node = _node(**kwargs)
         node.config["storage_request_price_interval"] = 0
         node.config["expr_request_ttl"] = 0
+        node.config["self_lookup_rounds"] = 0
         node.long_term_storage_interval = 0
         node.peers = {}
         node.peers_lock = threading.RLock()

@@ -14,6 +14,7 @@ DEFAULT_PEER_TIMEOUT_SECONDS = 15 * 60  # 15 minutes
 DEFAULT_PEER_TIMEOUT_INTERVAL_SECONDS = 10  # 10 seconds
 DEFAULT_BOOTSTRAP_RETRY_INTERVAL_SECONDS = 30  # 30 seconds
 DEFAULT_STORAGE_INDEX_INTERVAL_SECONDS = 600  # 10 minutes
+DEFAULT_SELF_LOOKUP_ROUNDS = 8  # most route requests in the join walk; 0 turns the walk off
 DEFAULT_STORAGE_REQUEST_MINIMUM_PRICE = 1
 DEFAULT_STORAGE_REQUEST_PRICE_INTERVAL_SECONDS = 5.0
 DEFAULT_STORAGE_FETCH_INTERVAL_SECONDS = 0.25
@@ -210,6 +211,17 @@ def config_setup(config: Dict = {}):
     if bootstrap_retry_interval <= 0:
         raise ValueError("bootstrap_retry_interval must be a positive integer")
     config["bootstrap_retry_interval"] = bootstrap_retry_interval
+
+    self_lookup_rounds_raw = config.get("self_lookup_rounds", DEFAULT_SELF_LOOKUP_ROUNDS)
+    try:
+        self_lookup_rounds = int(self_lookup_rounds_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"self_lookup_rounds must be an integer: {self_lookup_rounds_raw!r}"
+        ) from exc
+    if self_lookup_rounds < 0:
+        raise ValueError("self_lookup_rounds must be a non-negative integer")
+    config["self_lookup_rounds"] = self_lookup_rounds
 
     storage_index_raw = config.get(
         "storage_index_interval", DEFAULT_STORAGE_INDEX_INTERVAL_SECONDS
