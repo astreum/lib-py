@@ -22,15 +22,13 @@ def _queue_bootstrap_handshakes(node: "Node") -> int:
     Returns:
         int: The number of handshakes successfully queued.
     """
-    relay_public_key = node.relay_public_key
-
     bootstrap_peers = node.bootstrap_peers
     if not bootstrap_peers:
         return 0
 
     handshake_message = Message(
         handshake=True,
-        sender=relay_public_key,
+        sender_public_key_bytes=node.storage_public_key_bytes,
         content=node.relay_public_key_bytes,
     )
     sent = 0
