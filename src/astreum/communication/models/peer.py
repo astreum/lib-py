@@ -17,6 +17,7 @@ class Peer:
         address: Optional[Tuple[str, int]] = None,
         is_default_seed: bool = False,
         difficulty: int = 1,
+        handshake_timestamp: int = 0,
     ):
         self.shared_key_bytes = node_secret_key.exchange(peer_public_key)
         self.timestamp = datetime.now(timezone.utc)
@@ -31,12 +32,39 @@ class Peer:
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw,
         )
+        # Timestamp of the signed handshake that set the relay key
+        self.handshake_timestamp = handshake_timestamp
         # Traffic-sharing counters are updated by multiple communication threads.
         self.metrics_lock = threading.RLock()
         self.total_network_upload = 0
         self.total_network_download = 0
         self.shared_storage_upload = 0
         self.shared_storage_download = 0
+
+    def set_relay_key(
+        self,
+        node_secret_key: X25519PrivateKey,
+        relay_key_bytes: bytes,
+        handshake_timestamp: int,
+    ) -> None:
+        """Replace the relay key and the shared key of this peer in place.
+
+        The peer object stays the same, so the route and the metrics keep
+        their reference to it.
+
+        Args:
+            node_secret_key (X25519PrivateKey): Relay secret key of this node.
+            relay_key_bytes (bytes): New X25519 relay public key (32 bytes).
+            handshake_timestamp (int): Timestamp of the handshake that carried
+                the new relay key.
+
+        Raises:
+            ValueError: If the relay key is not a valid X25519 public key.
+        """
+        peer_public_key = X25519PublicKey.from_public_bytes(relay_key_bytes)
+        self.shared_key_bytes = node_secret_key.exchange(peer_public_key)
+        self.relay_public_key_bytes = relay_key_bytes
+        self.handshake_timestamp = handshake_timestamp
 
 
 def increment_peer_metric(peer: "Peer", attr_name: str, amount: int) -> None:

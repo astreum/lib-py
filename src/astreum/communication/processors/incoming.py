@@ -105,10 +105,6 @@ def process_incoming_messages(node: "Node") -> None:
             except Exception:
                 pass
             continue
-        else:
-            peer_address = (addr[0], addr[1])
-            if peer.address != peer_address:
-                peer.address = peer_address
 
         if packet_size is not None:
             increment_peer_metric(peer, "total_network_download", packet_size)
@@ -152,6 +148,13 @@ def process_incoming_messages(node: "Node") -> None:
                     window,
                 )
                 continue
+
+            peer_address = (addr[0], addr[1])
+            if peer.address != peer_address:
+                peer.address = peer_address
+                peer.is_default_seed = (
+                    bool(node.default_seed_ips) and addr[0] in node.default_seed_ips
+                )
 
             match message.topic:
                 case MessageTopic.PING:

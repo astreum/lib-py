@@ -78,7 +78,7 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
             addr,
         )
         return True
-    relay_key_bytes, _timestamp, _reply_requested = result
+    relay_key_bytes, handshake_timestamp, reply_requested = result
 
     port = addr[1]
     peer_address = (host, port)
@@ -87,10 +87,31 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
 
     existing_peer = get_peer(node, storage_key_bytes)
     if existing_peer is not None:
-        existing_peer.address = peer_address
-        existing_peer.is_default_seed = is_default_seed
+        if relay_key_bytes != existing_peer.relay_public_key_bytes:
+            if handshake_timestamp <= existing_peer.handshake_timestamp:
+                node.logger.debug(
+                    "Older handshake with another relay key dropped from %s",
+                    peer_address,
+                )
+                return True
+            try:
+                existing_peer.set_relay_key(
+                    node.relay_secret_key, relay_key_bytes, handshake_timestamp
+                )
+            except ValueError:
+                return True
+            node.logger.info("Relay key changed for peer at %s", peer_address)
+        elif handshake_timestamp > existing_peer.handshake_timestamp:
+            existing_peer.handshake_timestamp = handshake_timestamp
+        if reply_requested:
+            enqueue_outgoing(
+                node,
+                peer_address,
+                message=build_handshake(node, reply_requested=False),
+                difficulty=existing_peer.difficulty,
+            )
         _queue_handshake_ping(existing_peer, peer_address)
-        return False
+        return True
 
     try:
         peer_relay_key = X25519PublicKey.from_public_bytes(relay_key_bytes)
@@ -100,6 +121,7 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
             storage_public_key_bytes=storage_key_bytes,
             address=peer_address,
             is_default_seed=is_default_seed,
+            handshake_timestamp=handshake_timestamp,
         )
     except Exception:
         return True
