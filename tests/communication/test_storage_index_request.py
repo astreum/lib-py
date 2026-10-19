@@ -12,7 +12,7 @@ from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.storage_request import handle as put_handle
 from astreum.communication.storage_request.code import StorageRequestCode
 from astreum.communication.storage_request.model import StorageRequest
-from astreum.communication.self_lookup import SelfLookup
+from astreum.communication.self_lookup import SelfLookup, SelfLookupTimer
 from astreum.expression import RESOLUTION_SINGLE
 from astreum.storage.workers.advertisements import (
     _index_handoff_step,
@@ -53,6 +53,7 @@ def _node(peers=(), synced=True):
             "storage_public_key_bytes": SELF_KEY,
             "storage_put_batch_max_bytes": DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES,
             "self_lookup_rounds": 8,
+            "self_lookup_interval": 900,
             "peer_timeout_interval": 10,
         },
         peer_route=SimpleNamespace(closest_peer_for_hash=lambda h: None),
@@ -263,20 +264,20 @@ class TestStep(unittest.TestCase):
     def test_step_reports_remaining_requests(self):
         node = _node(peers=[_peer(REQUESTER_KEY, 9001)], synced=False)
         node.index_requests.extend([REQUESTER_KEY, REQUESTER_KEY])
-        walk = SelfLookup(done=True)
-        self.assertTrue(_index_handoff_step(node, walk))
-        self.assertFalse(_index_handoff_step(node, walk))
+        timer = SelfLookupTimer(walk=SelfLookup(done=True))
+        self.assertTrue(_index_handoff_step(node, timer))
+        self.assertFalse(_index_handoff_step(node, timer))
 
     def test_index_request_waits_for_walk(self):
         node = _node(peers=[_peer(REQUESTER_KEY, 9001)])
-        _index_handoff_step(node, _open_walk())
+        _index_handoff_step(node, SelfLookupTimer(walk=_open_walk()))
         self.assertFalse(node.index_requested)
         self.assertTrue(node.outgoing_queue.empty())
 
     def test_index_request_after_walk(self):
         a, b = _peer(REQUESTER_KEY, 9001), _peer(b"\x80" * 32, 9002)
         node = _node(peers=[a, b])
-        _index_handoff_step(node, SelfLookup(done=True))
+        _index_handoff_step(node, SelfLookupTimer(walk=SelfLookup(done=True)))
         self.assertTrue(node.index_requested)
         self.assertEqual(sorted(addr for addr, _ in _sent(node)), [a.address, b.address])
 
@@ -284,7 +285,7 @@ class TestStep(unittest.TestCase):
         node = _node(peers=[_peer(REQUESTER_KEY, 9001)])
         node.index_requests.append(REQUESTER_KEY)
         node.storage_index[_id(0xFF)] = (0,)
-        _index_handoff_step(node, _open_walk())
+        _index_handoff_step(node, SelfLookupTimer(walk=_open_walk()))
         self.assertFalse(node.index_requested)
         sent = _sent(node)
         self.assertEqual(len(sent), 1)

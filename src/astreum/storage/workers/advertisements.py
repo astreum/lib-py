@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from astreum.consensus.constants import STORAGE_ADDRESS
 from astreum.communication.models.peer import get_peer
-from astreum.communication.self_lookup import SelfLookup, self_lookup_step
+from astreum.communication.self_lookup import SelfLookupTimer, self_lookup_timer_step
 from astreum.communication.storage_request.code import StorageRequestCode
 from astreum.communication.storage_request.model import StorageRequest
 from astreum.communication.util import xor_distance
@@ -279,20 +279,21 @@ def _serve_one_index_request(node: "Node") -> bool:
     return True
 
 
-def _index_handoff_step(node: "Node", walk: SelfLookup) -> bool:
+def _index_handoff_step(node: "Node", timer: SelfLookupTimer) -> bool:
     """Run one index handoff step: the walk, our request, then one reply.
 
-    Our request goes out when the walk to our branch is complete. A reply to
-    another node does not wait for the walk.
+    Our request goes out when the first walk to our branch is complete. A
+    reply to another node does not wait for the walk. Later timer walks do not
+    send the request again.
 
     Args:
         node: A Node instance.
-        walk: The state of the self-lookup walk.
+        timer: The state of the repeating self-lookup walk.
 
     Returns:
         True if more queued requests remain to answer, False otherwise.
     """
-    if self_lookup_step(node, walk, time.monotonic()):
+    if self_lookup_timer_step(node, timer, time.monotonic()):
         _send_index_requests(node)
     _serve_one_index_request(node)
     with node.index_requests_lock:
@@ -346,7 +347,7 @@ def advertise_storage(astreum_node: "Node") -> None:
     next_prune_at = now + prune_interval if prune_interval > 0 else None
     next_announce_at = now if getattr(astreum_node, "is_storage_provider", False) else None
     next_index_at = now
-    walk = SelfLookup()
+    timer = SelfLookupTimer()
 
     while not stop.is_set():
         now = time.monotonic()
@@ -378,7 +379,7 @@ def advertise_storage(astreum_node: "Node") -> None:
 
         if now >= next_index_at:
             try:
-                more = _index_handoff_step(astreum_node, walk)
+                more = _index_handoff_step(astreum_node, timer)
             except Exception as exc:
                 astreum_node.logger.exception("Index handoff step failed: %s", exc)
                 more = False

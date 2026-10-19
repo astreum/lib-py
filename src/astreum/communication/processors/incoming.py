@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socket
+from datetime import datetime, timezone
 from queue import Empty
 from time import time
 from typing import TYPE_CHECKING
@@ -155,6 +156,8 @@ def process_incoming_messages(node: "Node") -> None:
                 peer.is_default_seed = (
                     bool(node.default_seed_ips) and addr[0] in node.default_seed_ips
                 )
+
+            peer.timestamp = datetime.now(timezone.utc)
 
             match message.topic:
                 case MessageTopic.PING:

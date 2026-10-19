@@ -136,7 +136,7 @@ class TestReply(unittest.TestCase):
             _add(node, _peer(k))
         keys = [
             decode_route_entries(e, False)[0][0]
-            for e in route_reply_entries(node, node.peer_route, SENDER_KEY)
+            for e in route_reply_entries(node, node.peer_route, SENDER_KEY, SENDER_KEY)
         ]
         # XOR with 0x80...: 0x10 -> 0x90, 0x20 -> 0xA0, 0x40 -> 0xC0.
         self.assertEqual(keys, [_key(0x10), _key(0x20), _key(0x40)])

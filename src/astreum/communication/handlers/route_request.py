@@ -16,8 +16,14 @@ if TYPE_CHECKING:
     from astreum.communication.models.route import Route
 
 
-def route_reply_entries(node: "Node", route: "Route", sender_key: bytes) -> list[bytes]:
-    """Encode the peers of a route nearest to the sender, nearest first.
+ROUTE_REQUEST_PLAIN_BYTES = 1
+ROUTE_REQUEST_TARGET_BYTES = 1 + 32
+
+
+def route_reply_entries(
+    node: "Node", route: "Route", sender_key: bytes, rank_key: bytes
+) -> list[bytes]:
+    """Encode the peers of a route nearest to a key, nearest first.
 
     The sender is left out. The count fits one datagram and the bucket size.
 
@@ -25,6 +31,8 @@ def route_reply_entries(node: "Node", route: "Route", sender_key: bytes) -> list
         node: The node that answers.
         route: The route to read the peers from.
         sender_key: The storage key of the node that asked.
+        rank_key: The key to rank the peers by. This is the sender key for a
+            plain request or the target for a targeted request.
 
     Returns:
         The encoded entries, nearest peer first.
@@ -41,7 +49,7 @@ def route_reply_entries(node: "Node", route: "Route", sender_key: bytes) -> list
             entry = encode_route_entry(peer, use_ipv6)
             if entry is None:
                 continue
-            ranked.append((xor_distance(sender_key, peer_key), entry))
+            ranked.append((xor_distance(rank_key, peer_key), entry))
     ranked.sort(key=lambda item: item[0])
     limit = max_route_entries(use_ipv6, route.bucket_size)
     return [entry for _, entry in ranked[:limit]]
@@ -56,7 +64,13 @@ def handle_route_request(node: "Node", peer: "Peer", message: Message) -> tuple[
     if not message.content:
         node.logger.debug("ROUTE_REQUEST missing route id from %s", peer.address)
         return False, "missing route id"
+    if len(message.content) not in (ROUTE_REQUEST_PLAIN_BYTES, ROUTE_REQUEST_TARGET_BYTES):
+        node.logger.debug(
+            "ROUTE_REQUEST with bad length %s from %s", len(message.content), peer.address
+        )
+        return False, "bad length"
     route_id = message.content[0]
+    rank_key = message.content[1:] if len(message.content) == ROUTE_REQUEST_TARGET_BYTES else sender_public_key
     if route_id == 0:
         route = node.peer_route
     elif route_id == 1:
@@ -68,7 +82,7 @@ def handle_route_request(node: "Node", peer: "Peer", message: Message) -> tuple[
         node.logger.debug("Unknown route id %s in ROUTE_REQUEST from %s", route_id, peer.address)
         return False, f"unknown route id {route_id}"
 
-    entries = route_reply_entries(node, route, sender_public_key)
+    entries = route_reply_entries(node, route, sender_public_key, rank_key)
 
     response = Message(
         topic=MessageTopic.ROUTE_RESPONSE,
