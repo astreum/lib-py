@@ -11,6 +11,7 @@ for path in (ROOT, ROOT / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from astreum.communication.models.route import Route
 from astreum.expression import RESOLUTION_SINGLE
 from astreum.storage.providers import index_provider, provider_id_for_payload
 from astreum.storage.records import get_record_from_cold_storage
@@ -35,8 +36,11 @@ def _logger():
     return SimpleNamespace(debug=lambda *a, **k: None)
 
 
-def _node(nearer_peer=None):
+def _node(nearer_peer=None, extra_peers=()):
     """A node that is the provider with storage key OWN_KEY."""
+    route = Route(OWN_KEY)
+    for peer in (*([nearer_peer] if nearer_peer else []), *extra_peers):
+        route.add_peer(peer.public_key_bytes, peer)
     return SimpleNamespace(
         storage_index={},
         storage_providers=[],
@@ -46,7 +50,7 @@ def _node(nearer_peer=None):
             "storage_public_key_bytes": OWN_KEY,
             "relay_public_key_bytes": b"\x88" * 32,
         },
-        peer_route=SimpleNamespace(closest_peer_for_hash=lambda h: nearer_peer),
+        peer_route=route,
         logger=_logger(),
     )
 
@@ -121,10 +125,21 @@ class TestAnnounceIndex(unittest.TestCase):
         node = _node(nearer_peer=peer)
         with patch("astreum.storage.exprs.network.send_put_entries", return_value=[]) as send:
             _announce_record(node, EXPR)
-        self.assertEqual(node.storage_index, {})
+        # One peer is nearer, so this node is second and names itself too.
+        self.assertEqual(node.storage_index[EXPR], (self._own_id(node),))
         send.assert_called_once()
         self.assertIs(send.call_args.args[1], peer)
         self.assertEqual(send.call_args.args[3], [(EXPR, RESOLUTION_SINGLE)])
+
+    def test_rank_two_does_not_list_itself(self):
+        peer = SimpleNamespace(public_key_bytes=b"\x01" * 32, address=("10.0.0.5", 7000))
+        other = SimpleNamespace(public_key_bytes=b"\x00" * 31 + b"\x01", address=("10.0.0.6", 7000))
+        node = _node(nearer_peer=peer, extra_peers=[other])
+        with patch("astreum.storage.exprs.network.send_put_entries", return_value=[]) as send:
+            _announce_record(node, EXPR)
+        self.assertEqual(node.storage_index, {})
+        send.assert_called_once()
+        self.assertIs(send.call_args.args[1], other)
 
 
 def _node_payload(node) -> bytes:

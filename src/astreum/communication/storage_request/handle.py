@@ -28,6 +28,7 @@ from astreum.storage.exprs import get_expr_from_local_storage
 from astreum.storage.requests import DEFAULT_STORAGE_FOUND_MAX_PAGES
 from astreum.storage.records import get_record_from_cold_storage
 from astreum.communication.util import xor_distance
+from astreum.consensus.constants import PROVIDERS_PER_RECORD
 from astreum.storage.providers import (
     index_provider,
     provider_id_for_payload,
@@ -99,17 +100,27 @@ def _handle_put(
 
     to_self: list[bytes] = []
     by_destination: dict[bytes, tuple[object, list[tuple[bytes, int]]]] = {}
+    own_key = node.config["storage_public_key_bytes"]
     for expr_id, payload_type in survivors:
         try:
             target = destination_peer(node, expr_id)
+            nearer = (
+                0
+                if target is None
+                else node.peer_route.count_nearer(expr_id, own_key, PROVIDERS_PER_RECORD)
+            )
         except Exception as exc:
             node.logger.debug(
                 "STORAGE_PUT destination lookup failed for %s: %s", expr_id.hex(), exc
             )
             target = None
-        if target is None:
+            nearer = 0
+        # Index when no peer is nearer, or when fewer than PROVIDERS_PER_RECORD
+        # known nodes are nearer (this node is one of the nearest providers).
+        if target is None or nearer < PROVIDERS_PER_RECORD:
             to_self.append(expr_id)
-        else:
+        # Forward to a strictly nearer peer, but never back to the sender.
+        if target is not None and target.public_key_bytes != peer.public_key_bytes:
             by_destination.setdefault(target.public_key_bytes, (target, []))[1].append(
                 (expr_id, payload_type)
             )

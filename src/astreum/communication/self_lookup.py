@@ -53,12 +53,14 @@ class SelfLookupTimer:
         joined: True after the first walk is complete.
         next_walk_at: Monotonic start time of the next walk, or None.
         cursor: Bucket index where the next far-bucket refresh starts.
+        completed: Number of walks that are complete.
     """
 
     walk: SelfLookup = field(default_factory=SelfLookup)
     joined: bool = False
     next_walk_at: float | None = None
     cursor: int = 0
+    completed: int = 0
 
 
 def _send_self_route_request(
@@ -206,6 +208,7 @@ def self_lookup_timer_step(node: "Node", timer: SelfLookupTimer, now: float) -> 
     if done:
         timer.joined = True
     if done and not was_done:
+        timer.completed += 1
         timer.cursor = refresh_one_bucket(node, timer.cursor)
         interval = node.config["self_lookup_interval"]
         timer.next_walk_at = now + interval if interval > 0 else None

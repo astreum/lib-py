@@ -4,12 +4,12 @@ import time
 from itertools import islice
 from typing import TYPE_CHECKING
 
-from astreum.consensus.constants import STORAGE_ADDRESS
+from astreum.consensus.constants import PROVIDERS_PER_RECORD, STORAGE_ADDRESS
 from astreum.communication.models.peer import get_peer
 from astreum.communication.self_lookup import SelfLookupTimer, self_lookup_timer_step
 from astreum.communication.storage_request.code import StorageRequestCode
 from astreum.communication.storage_request.model import StorageRequest
-from astreum.communication.util import xor_distance
+from astreum.communication.storage_response.storage_provider import decode_storage_provider
 from astreum.expression import RESOLUTION_SINGLE
 from astreum.storage.advertisements import advertise_exprs
 from astreum.storage.exprs.network import (
@@ -240,14 +240,41 @@ def _send_index_requests(node: "Node") -> bool:
     return True
 
 
+def _send_branch_index_requests(node: "Node") -> bool:
+    """Send a ``STORAGE_INDEX_REQUEST`` to the peers nearest to this node.
+
+    The nodes that hold the entries of this branch are among the peers nearest
+    to this node's own key. A timer walk calls this after it completes, so an
+    entry that the network made after the join reaches this node. Waits for
+    ``node.latest_block``, like ``_send_index_requests``.
+
+    Args:
+        node: A Node instance.
+
+    Returns:
+        True if a request was sent to at least one peer, False otherwise.
+    """
+    if getattr(node, "latest_block", None) is None:
+        return False
+    route = node.peer_route
+    peers = route.closest_peers(node.storage_public_key_bytes, route.bucket_size)
+    peers = [peer for peer in peers if peer.address is not None]
+    request = StorageRequest(code=StorageRequestCode.STORAGE_INDEX_REQUEST)
+    for peer in peers:
+        _send_storage_put(node, peer, request)
+    return bool(peers)
+
+
 def _serve_one_index_request(node: "Node") -> bool:
     """Answer one queued ``STORAGE_INDEX_REQUEST``.
 
-    Scans ``node.storage_index`` and sends the requester every entry the
-    requester is nearer to than this node. Entries go out as ``STORAGE_PUT``
-    datagrams, grouped by provider set. Each datagram carries the original
-    provider payloads of the entries, so an entry with two providers goes out
-    once. This node keeps its own entries.
+    Scans ``node.storage_index`` and sends the requester every entry for which
+    fewer than ``PROVIDERS_PER_RECORD`` known nodes are nearer to the key than
+    the requester. The known nodes are the route of this node, this node and
+    the listed providers. The requester itself never counts. Entries go out as
+    ``STORAGE_PUT`` datagrams, grouped by provider set. Each datagram carries
+    the original provider payloads of the entries, so an entry with two
+    providers goes out once. This node keeps its own entries.
 
     Args:
         node: A Node instance.
@@ -267,10 +294,23 @@ def _serve_one_index_request(node: "Node") -> bool:
     own_key = node.config["storage_public_key_bytes"]
     groups: dict[bytes, list[tuple[bytes, int]]] = {}
     for expr_id, provider_ids in list(node.storage_index.items()):
-        if xor_distance(expr_id, requester_key) < xor_distance(expr_id, own_key):
-            payload = b"".join(
-                p for p in (provider_payload_for_id(node, i) for i in provider_ids) if p
-            )
+        payloads = [provider_payload_for_id(node, i) for i in provider_ids]
+        provider_keys = []
+        for payload in payloads:
+            if payload is None:
+                continue
+            try:
+                provider_keys.append(decode_storage_provider(payload)[0])
+            except ValueError:
+                continue
+        place = node.peer_route.count_nearer(
+            expr_id,
+            requester_key,
+            PROVIDERS_PER_RECORD,
+            extra=[own_key, *provider_keys],
+        )
+        if place < PROVIDERS_PER_RECORD:
+            payload = b"".join(p for p in payloads if p)
             if payload:
                 groups.setdefault(payload, []).append((expr_id, RESOLUTION_SINGLE))
 
@@ -282,9 +322,10 @@ def _serve_one_index_request(node: "Node") -> bool:
 def _index_handoff_step(node: "Node", timer: SelfLookupTimer) -> bool:
     """Run one index handoff step: the walk, our request, then one reply.
 
-    Our request goes out when the first walk to our branch is complete. A
-    reply to another node does not wait for the walk. Later timer walks do not
-    send the request again.
+    Our first request goes to every known peer when the first walk to our
+    branch is complete. Each later walk that completes sends a request to the
+    peers nearest to this node. A reply to another node does not wait for the
+    walk.
 
     Args:
         node: A Node instance.
@@ -293,8 +334,12 @@ def _index_handoff_step(node: "Node", timer: SelfLookupTimer) -> bool:
     Returns:
         True if more queued requests remain to answer, False otherwise.
     """
+    completed_before = timer.completed
     if self_lookup_timer_step(node, timer, time.monotonic()):
-        _send_index_requests(node)
+        if not node.index_requested:
+            _send_index_requests(node)
+        elif timer.completed > completed_before:
+            _send_branch_index_requests(node)
     _serve_one_index_request(node)
     with node.index_requests_lock:
         return bool(node.index_requests)

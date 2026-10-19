@@ -194,6 +194,24 @@ class TestTimerWalk(unittest.TestCase):
         self.assertTrue(self_lookup_timer_step(node, timer, 110.0))
         self.assertTrue(timer.joined)
 
+    def test_completed_counts_each_walk(self):
+        node, timer = self._joined()
+        self.assertEqual(timer.completed, 1)
+        done_at = 100.0 + TIMEOUT_INTERVAL
+        self_lookup_timer_step(node, timer, done_at + INTERVAL)
+        self.assertEqual(timer.completed, 1)
+        self_lookup_timer_step(node, timer, done_at + INTERVAL + TIMEOUT_INTERVAL)
+        self.assertEqual(timer.completed, 2)
+
+    def test_completed_unchanged_while_open(self):
+        node = _walk_node()
+        peer = _walk_peer(0x40)
+        node.peer_route.add_peer(peer.public_key_bytes, peer)
+        timer = SelfLookupTimer()
+        self_lookup_timer_step(node, timer, 100.0)
+        self_lookup_timer_step(node, timer, 105.0)
+        self.assertEqual(timer.completed, 0)
+
     def test_walk_restarts_after_interval(self):
         node, timer = self._joined()
         _requests(node)

@@ -9,6 +9,7 @@ from unittest.mock import patch
 sys.path.insert(0, "src")
 
 from astreum.communication.models.message import Message, MessageTopic
+from astreum.communication.models.route import Route
 from astreum.communication.storage_request import handle as put_handle
 from astreum.communication.storage_request.code import StorageRequestCode
 from astreum.communication.storage_request.model import StorageRequest
@@ -16,6 +17,7 @@ from astreum.communication.self_lookup import SelfLookup, SelfLookupTimer
 from astreum.expression import RESOLUTION_SINGLE
 from astreum.storage.workers.advertisements import (
     _index_handoff_step,
+    _send_branch_index_requests,
     _send_index_requests,
     _serve_one_index_request,
 )
@@ -56,7 +58,7 @@ def _node(peers=(), synced=True):
             "self_lookup_interval": 900,
             "peer_timeout_interval": 10,
         },
-        peer_route=SimpleNamespace(closest_peer_for_hash=lambda h: None),
+        peer_route=Route(SELF_KEY),
         storage_public_key_bytes=SELF_KEY,
         logger=_silent_logger(),
         outgoing_queue=queue.Queue(),
@@ -206,6 +208,51 @@ class TestResponder(unittest.TestCase):
         self.assertTrue(_serve_one_index_request(self.node))
         self.assertEqual(self.node.index_requests, [other.public_key_bytes])
 
+    def _route_peer(self, key, port):
+        peer = _peer(key, port)
+        self.node.peer_route.add_peer(key, peer)
+        return peer
+
+    def test_sends_to_second_nearest(self):
+        expr_id = _id(0xFF, 1)
+        self._route_peer(_id(0xFF, 2), 9002)  # nearer to the key than the requester
+        self.node.storage_index[expr_id] = (0,)
+        _serve_one_index_request(self.node)
+        (_, req), = _sent(self.node)
+        self.assertEqual([e[0] for e in req.entries], [expr_id])
+
+    def test_skips_third_nearest_requester(self):
+        expr_id = _id(0x00, 1)
+        self._route_peer(_id(0x00, 2), 9002)  # nearer than the requester, and so is self
+        self.node.storage_index[expr_id] = (0,)
+        _serve_one_index_request(self.node)
+        self.assertTrue(self.node.outgoing_queue.empty())
+
+    def test_listed_provider_counts(self):
+        expr_id = _id(0x00, 1)  # self and PROVIDER_A (key 0x41..) are nearer than the requester
+        self.node.storage_index[expr_id] = (0,)
+        _serve_one_index_request(self.node)
+        self.assertTrue(self.node.outgoing_queue.empty())
+
+    def test_listed_provider_requester_gets_entry(self):
+        requester_key = b"A" * 32  # the key of PROVIDER_A
+        peer = _peer(requester_key, 9003)
+        self.node.peers[requester_key] = peer
+        self.node.index_requests[:] = [requester_key]
+        expr_id = b"\x40" + b"\x00" * 31
+        self.node.storage_index[expr_id] = (0, 1)
+        _serve_one_index_request(self.node)
+        (addr, req), = _sent(self.node)
+        self.assertEqual(addr, peer.address)
+        self.assertEqual([e[0] for e in req.entries], [expr_id])
+
+    def test_unknown_provider_id_not_counted(self):
+        expr_id = _id(0xFF, 1)
+        self.node.storage_index[expr_id] = (7, 0)
+        _serve_one_index_request(self.node)
+        (_, req), = _sent(self.node)
+        self.assertEqual(req.data, PROVIDER_A)
+
 
 class TestRequester(unittest.TestCase):
     def test_waits_for_latest_block(self):
@@ -290,6 +337,64 @@ class TestStep(unittest.TestCase):
         sent = _sent(node)
         self.assertEqual(len(sent), 1)
         self.assertEqual(sent[0][0], ("127.0.0.1", 9001))
+
+
+def _finished_walk():
+    """A walk with one round sent whose deadline has passed."""
+    return SelfLookup(rounds=1, distance=1, deadline=time.monotonic() - 1.0)
+
+
+class TestBranchRequest(unittest.TestCase):
+    def _node_with_route(self, keys, bucket_size=16):
+        peers = [_peer(key, 9100 + i) for i, key in enumerate(keys)]
+        node = _node(peers=peers)
+        node.peer_route = Route(SELF_KEY, bucket_size=bucket_size)
+        for peer in peers:
+            node.peer_route.add_peer(peer.public_key_bytes, peer)
+        node.index_requested = True
+        return node, peers
+
+    def _step(self, node, timer):
+        with patch("astreum.communication.self_lookup.refresh_one_bucket", return_value=0):
+            return _index_handoff_step(node, timer)
+
+    def test_branch_request_after_later_walk(self):
+        keys = [b"\x80" * 32, b"\x40" * 32, b"\x20" * 32, b"\x10" * 32]
+        node, peers = self._node_with_route(keys, bucket_size=2)
+        self._step(node, SelfLookupTimer(walk=_finished_walk(), joined=True))
+        sent = _sent(node)
+        self.assertEqual(
+            sorted(addr for addr, _ in sent), sorted([peers[2].address, peers[3].address])
+        )
+        self.assertTrue(
+            all(req.code == StorageRequestCode.STORAGE_INDEX_REQUEST for _, req in sent)
+        )
+
+    def test_no_branch_request_without_new_walk(self):
+        node, _ = self._node_with_route([b"\x80" * 32])
+        self._step(node, SelfLookupTimer(walk=SelfLookup(done=True), joined=True))
+        self.assertTrue(node.outgoing_queue.empty())
+
+    def test_branch_request_waits_for_latest_block(self):
+        node, _ = self._node_with_route([b"\x80" * 32])
+        node.latest_block = None
+        self.assertFalse(_send_branch_index_requests(node))
+        self.assertTrue(node.outgoing_queue.empty())
+
+    def test_branch_request_skips_peer_without_address(self):
+        node, peers = self._node_with_route([b"\x80" * 32, b"\x40" * 32])
+        peers[0].address = None
+        self.assertTrue(_send_branch_index_requests(node))
+        self.assertEqual([addr for addr, _ in _sent(node)], [peers[1].address])
+
+    def test_first_request_still_goes_to_every_peer(self):
+        node, peers = self._node_with_route([b"\x80" * 32, b"\x40" * 32])
+        node.index_requested = False
+        self._step(node, SelfLookupTimer(walk=_finished_walk()))
+        self.assertTrue(node.index_requested)
+        self.assertEqual(
+            sorted(addr for addr, _ in _sent(node)), sorted(p.address for p in peers)
+        )
 
 
 if __name__ == "__main__":

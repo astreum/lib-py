@@ -259,9 +259,19 @@ class TestSendPath(unittest.TestCase):
         theirs = _ids(0xFF, 2)
         advertised, _ = advertise_exprs(node, self._entries(mine + theirs))
         self.assertCountEqual(advertised, mine + theirs)
-        self.assertEqual(set(node.storage_index), set(mine))
+        # One peer is nearer to `theirs`, so this node is second and also names itself.
+        self.assertEqual(set(node.storage_index), set(mine + theirs))
         sent = _sent_requests(node)
         self.assertEqual([e for _, r in sent for e, _ in r.entries], theirs)
+
+    def test_second_nearest_sends_and_names_itself_only_with_one_nearer_peer(self):
+        peer_b = _peer(PEER_B_KEY, 9002)
+        node = _make_node([self.peer_a, peer_b])
+        theirs = _ids(0xFF, 2)
+        advertise_exprs(node, self._entries(theirs))
+        # Two peers are nearer to `theirs`: this node is third and does not name itself.
+        self.assertEqual(node.storage_index, {})
+        self.assertEqual([e for _, r in _sent_requests(node) for e, _ in r.entries], theirs)
 
     def test_no_peers_indexes_everything(self):
         node = _make_node([])
@@ -402,6 +412,45 @@ class TestReceivePath(unittest.TestCase):
         self.assertEqual(by_addr[self.peer_a.address], to_a)
         self.assertEqual(by_addr[peer_b.address], to_b)
         self.assertTrue(all(r.data == PROVIDER for _, r in sent))
+
+    def test_put_rank_one_indexes_and_forwards(self):
+        node = _make_node([self.peer_a])
+        ids = _ids(0xFF, 2)
+        result, _ = self._handle(node, [(e, 4) for e in ids])
+        self.assertEqual(result, (True, None))
+        self.assertEqual(set(node.storage_index), set(ids))
+        sent = _sent_requests(node)
+        self.assertEqual([addr for addr, _ in sent], [self.peer_a.address])
+        self.assertEqual([e for _, r in sent for e, _ in r.entries], ids)
+
+    def test_put_rank_two_forwards_only(self):
+        node = _make_node([self.peer_a, _peer(PEER_B_KEY, 9002)])
+        ids = _ids(0xFF, 2)
+        self._handle(node, [(e, 4) for e in ids])
+        self.assertEqual(node.storage_index, {})
+        self.assertEqual([e for _, r in _sent_requests(node) for e, _ in r.entries], ids)
+
+    def test_put_not_sent_back_to_sender(self):
+        node = _make_node([self.peer_a])
+        self.sender = self.peer_a
+        ids = _ids(0xFF, 2)
+        self._handle(node, [(e, 4) for e in ids])
+        self.assertEqual(set(node.storage_index), set(ids))
+        self.assertTrue(node.outgoing_queue.empty())
+
+    def test_put_rank_two_sender_nearest_is_dropped(self):
+        node = _make_node([self.peer_a, _peer(PEER_B_KEY, 9002)])
+        self.sender = self.peer_a
+        self._handle(node, [(e, 4) for e in _ids(0xFF, 2)])
+        self.assertEqual(node.storage_index, {})
+        self.assertTrue(node.outgoing_queue.empty())
+
+    def test_put_rank_one_inline_fetch(self):
+        node = _make_node([self.peer_a])
+        node.is_storage_provider = True
+        with patch("astreum.storage.radix.RadixTree"):
+            _, fetch = self._handle(node, [(e, 4) for e in _ids(0xFF, 3)])
+        self.assertEqual(fetch.call_count, 3)
 
     def test_forward_chunks_by_budget(self):
         node = _make_node([self.peer_a], budget=78 + 1 + 73 + 33 * 3)

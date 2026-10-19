@@ -1,4 +1,5 @@
-from typing import Dict, List, Optional
+from itertools import chain, islice
+from typing import Dict, Iterable, List, Optional
 from astreum.communication.models.peer import Peer
 from astreum.communication.util import xor_distance
 
@@ -78,3 +79,55 @@ class Route:
             return None
         peer = self.peers.get(closest_key)
         return peer
+
+    def count_nearer(
+        self, target: bytes, key: bytes, limit: int, extra: Iterable[bytes] = ()
+    ) -> int:
+        """Count the known keys that are nearer to ``target`` than ``key``.
+
+        The count is the place of ``key`` for ``target``: 0 is the nearest
+        node. The route never holds its own key, so a caller that must count
+        this node passes the key in ``extra``. A key counts one time. ``key``
+        itself never counts.
+
+        Args:
+            target: The 32-byte hash that the distance is measured to.
+            key: The 32-byte key whose place is counted.
+            limit: The count stops at this value.
+            extra: More keys to count, for example listed providers.
+
+        Returns:
+            The number of nearer keys, at most ``limit``.
+        """
+        distance = xor_distance(target, key)
+        seen: set[bytes] = {key}
+        count = 0
+        keys = (peer_key for bucket in self.buckets.values() for peer_key in bucket)
+        for other in chain(keys, extra):
+            if other in seen:
+                continue
+            seen.add(other)
+            try:
+                nearer = xor_distance(target, other) < distance
+            except ValueError:
+                continue
+            if nearer:
+                count += 1
+                if count >= limit:
+                    return count
+        return count
+
+    def closest_peers(self, target: bytes, count: int) -> List[Peer]:
+        """Return the peers nearest to ``target``, nearest first.
+
+        Args:
+            target: The 32-byte hash that the distance is measured to.
+            count: The largest number of peers to return.
+
+        Returns:
+            Up to ``count`` peers. A key with no ``Peer`` object is skipped.
+        """
+        keys = [peer_key for bucket in self.buckets.values() for peer_key in bucket]
+        keys.sort(key=lambda peer_key: xor_distance(target, peer_key))
+        peers = (self.peers.get(peer_key) for peer_key in keys)
+        return list(islice((p for p in peers if p is not None), count))

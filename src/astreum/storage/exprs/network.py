@@ -512,6 +512,7 @@ def put_exprs_in_network(
     Returns:
         List of (expr_id, success, reason) tuples.
     """
+    from astreum.consensus.constants import PROVIDERS_PER_RECORD
     from astreum.storage.providers import index_provider, provider_id_for_payload
 
     try:
@@ -520,16 +521,25 @@ def put_exprs_in_network(
         reason = f"unable to encode provider info: {exc}"
         return [(expr_id, False, reason) for expr_id, _ in entries]
 
+    own_key = node.config["storage_public_key_bytes"]
     results: list[tuple[bytes, bool, str | None]] = []
     by_destination: dict[bytes, tuple[object, list[tuple[bytes, int]]]] = {}
     for expr_id, payload_type in entries:
         try:
             peer = destination_peer(node, expr_id)
+            nearer = (
+                0
+                if peer is None
+                else node.peer_route.count_nearer(expr_id, own_key, PROVIDERS_PER_RECORD)
+            )
         except Exception as exc:
             results.append((expr_id, False, f"peer lookup failed: {exc}"))
             continue
-        if peer is None:
+        # Name this node when it is one of the nearest providers, then still
+        # send the PUT to a nearer peer so that peer lists this node too.
+        if peer is None or nearer < PROVIDERS_PER_RECORD:
             index_provider(node, expr_id, provider_id_for_payload(node, provider_payload))
+        if peer is None:
             results.append((expr_id, True, None))
             continue
         by_destination.setdefault(peer.public_key_bytes, (peer, []))[1].append(
