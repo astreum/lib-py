@@ -14,6 +14,7 @@ from astreum.communication.handlers.route_request import handle_route_request
 from astreum.communication.handlers.route_response import handle_route_response
 from astreum.communication.incoming_queue import enqueue_incoming
 from astreum.communication.models.message import Message, MessageTopic
+from astreum.communication.models.handshake import build_handshake
 from astreum.communication.models.peer import Peer, get_peer, increment_peer_metric
 from astreum.communication.outgoing_queue import enqueue_outgoing
 
@@ -94,11 +95,7 @@ def process_incoming_messages(node: "Node") -> None:
             try:
                 host = addr[0]
                 port = addr[1]
-                handshake_message = Message(
-                    handshake=True,
-                    sender_public_key_bytes=node.storage_public_key_bytes,
-                    content=node.relay_public_key_bytes,
-                )
+                handshake_message = build_handshake(node, reply_requested=True)
                 enqueue_outgoing(
                     node,
                     (host, port),
@@ -130,11 +127,7 @@ def process_incoming_messages(node: "Node") -> None:
             try:
                 host = addr[0]
                 port = addr[1]
-                handshake_message = Message(
-                    handshake=True,
-                    sender_public_key_bytes=node.storage_public_key_bytes,
-                    content=node.relay_public_key_bytes,
-                )
+                handshake_message = build_handshake(node, reply_requested=True)
                 enqueue_outgoing(
                     node,
                     (host, port),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Sequence
 
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
@@ -7,8 +8,11 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
 from astreum.communication.outgoing_queue import enqueue_outgoing
 from astreum.communication.models.peer import Peer, add_peer, get_peer
 from astreum.communication.models.message import Message, MessageTopic
+from astreum.communication.models.handshake import build_handshake
 from astreum.communication.models.ping import Ping
 from astreum.communication.difficulty import message_difficulty
+from astreum.communication.models.handshake import verify_handshake
+from astreum.utils.config import DEFAULT_MESSAGE_TIMESTAMP_WINDOW_SECONDS
 
 if TYPE_CHECKING:
     from astreum import Node
@@ -58,13 +62,23 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
                 exc,
             )
     storage_key_bytes = message.sender_public_key_bytes
-    # Handshake content carries the X25519 relay public key (32 bytes) for DH
-    relay_key_bytes = message.content[:32] if len(message.content) >= 32 else b""
 
     try:
         host = addr[0]
     except Exception:
         return True
+
+    window = node.config.get(
+        "message_timestamp_window", DEFAULT_MESSAGE_TIMESTAMP_WINDOW_SECONDS
+    )
+    result = verify_handshake(message, time.time(), window)
+    if result is None:
+        node.logger.debug(
+            "Handshake dropped from %s: bad length, reply_requested, time or signature",
+            addr,
+        )
+        return True
+    relay_key_bytes, _timestamp, _reply_requested = result
 
     port = addr[1]
     peer_address = (host, port)
@@ -98,11 +112,7 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
         peer_address[0],
         peer_address[1],
     )
-    response = Message(
-        handshake=True,
-        sender_public_key_bytes=node.storage_public_key_bytes,
-        content=node.relay_public_key_bytes,
-    )
+    response = build_handshake(node, reply_requested=False)
     enqueue_outgoing(
         node,
         peer_address,

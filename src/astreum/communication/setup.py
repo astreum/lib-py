@@ -20,6 +20,7 @@ from astreum.communication.processors.incoming import (
 from astreum.communication.processors.outgoing import process_outgoing_messages
 from astreum.communication.processors.peer import manage_peer
 from astreum.communication.outgoing_queue import enqueue_outgoing
+from astreum.communication.models.handshake import build_handshake
 from astreum.communication.util import address_str_to_host_and_port
 from astreum.storage.workers.advertisements import advertise_storage
 from astreum.storage.workers.claim import claim_storage
@@ -254,11 +255,7 @@ def communication_setup(node: "Node", config: dict):
             node.logger.warning("Invalid bootstrap address %s: %s", addr, exc)
             continue
 
-        handshake_message = Message(
-            handshake=True,
-            sender_public_key_bytes=node.storage_public_key_bytes,
-            content=node.relay_public_key_bytes,
-        )
+        handshake_message = build_handshake(node, reply_requested=True)
         enqueue_outgoing(
             node,
             (host, port),

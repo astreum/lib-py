@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from astreum.communication.outgoing_queue import enqueue_outgoing
 from astreum.communication.models.message import Message
+from astreum.communication.models.handshake import build_handshake
 from astreum.communication.models.peer import get_peer
 from astreum.communication.models.route_entry import decode_route_entries
 
@@ -60,11 +61,7 @@ def handle_route_response(node: "Node", peer: "Peer", message: Message) -> None:
         return
     node.logger.debug("Handshaking %s new nodes from ROUTE_RESPONSE", len(targets))
 
-    handshake_message = Message(
-        handshake=True,
-        sender_public_key_bytes=node.storage_public_key_bytes,
-        content=node.relay_public_key_bytes,
-    )
+    handshake_message = build_handshake(node, reply_requested=True)
     for address in targets:
         enqueue_outgoing(
             node,

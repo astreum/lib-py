@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, "src")
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 from astreum.communication.handlers.route_request import (
@@ -55,6 +56,7 @@ def _node(use_ipv6=False, bucket_size=16):
     node = SimpleNamespace(
         use_ipv6=use_ipv6,
         storage_public_key_bytes=OWN_KEY,
+        storage_secret_key=Ed25519PrivateKey.generate(),
         relay_public_key_bytes=b"\x55" * 32,
         peers={},
         peers_lock=threading.RLock(),

@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
-from astreum.communication.models.message import Message
+from astreum.communication.models.handshake import build_handshake
 from astreum.communication.models.peer import remove_peer
 from astreum.communication.outgoing_queue import enqueue_outgoing
 from astreum.communication.util import address_str_to_host_and_port
@@ -26,11 +26,7 @@ def _queue_bootstrap_handshakes(node: "Node") -> int:
     if not bootstrap_peers:
         return 0
 
-    handshake_message = Message(
-        handshake=True,
-        sender_public_key_bytes=node.storage_public_key_bytes,
-        content=node.relay_public_key_bytes,
-    )
+    handshake_message = build_handshake(node, reply_requested=True)
     sent = 0
     for addr in bootstrap_peers:
         try:

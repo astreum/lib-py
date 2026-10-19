@@ -3,11 +3,14 @@ import queue
 import threading
 import time as time_module
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import x25519
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from astreum.communication.models.handshake import build_handshake
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import Peer
 from astreum.communication.processors import incoming as incoming_processor
@@ -253,16 +256,22 @@ class TestReceiverWindowCheck(unittest.TestCase):
         self.assertEqual(node.incoming_queue_size, 0)
 
     def test_handshake_exempt_from_window(self):
-        # Handshake messages are plaintext with no timestamp; first contact
-        # must not be affected by the freshness check.
+        # The processor does not apply the encrypted-message window to a
+        # handshake. handle_handshake checks the handshake timestamp itself.
         node = _FakeNode({"message_timestamp_window": 60}, self.peer)
-        handshake = Message(
-            handshake=True,
-            sender_public_key_bytes=self.sender_bytes,
-            content=self.peer_relay_public_key.public_bytes(
+        sender = SimpleNamespace(
+            storage_secret_key=Ed25519PrivateKey.generate(),
+            relay_public_key_bytes=self.peer_relay_public_key.public_bytes(
                 encoding=serialization.Encoding.Raw,
                 format=serialization.PublicFormat.Raw,
             ),
+        )
+        sender.storage_public_key_bytes = sender.storage_secret_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        handshake = build_handshake(
+            sender, reply_requested=True, now=int(time_module.time()) - 3600
         )
 
         with mock.patch.object(incoming_processor, "handle_handshake", return_value=True):
