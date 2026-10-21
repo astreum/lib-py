@@ -90,19 +90,11 @@ def _hash_at_height(node: Any, head: Any, height: int) -> Optional[bytes]:
     Returns:
         The block hash or None.
     """
-    from astreum.consensus.block.encoding.decode import get_block_from_storage
+    from astreum.consensus.block.previous import get_previous_block
 
     block = head
     while block is not None and block.height > height:
-        parent = block.previous_block
-        if parent is None:
-            try:
-                parent = get_block_from_storage(
-                    node, block.previous_block_hash, load_bloom=False
-                )
-            except Exception:
-                return None
-        block = parent
+        block = get_previous_block(node, block)
     if block is None or block.height != height:
         return None
     return _block_hash(block)

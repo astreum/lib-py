@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 from astreum.expression import ZERO32
 from astreum.consensus.block.encoding.decode import get_block_from_storage
+from astreum.consensus.block.previous import get_previous_block
 from astreum.crypto.bloom_search.search import ERA_SIZE
 
 
@@ -33,7 +34,7 @@ def find_block_by_height(astreum_node: Any, *,
     # (its bloom_tree is the most complete).
     current = starting_block
     while current is not None and current.height // ERA_SIZE > target_era:
-        current = current.previous_block
+        current = get_previous_block(astreum_node, current)
 
     if current is None or current.height // ERA_SIZE != target_era:
         return None  # target era not reachable from this starting block
@@ -50,14 +51,7 @@ def find_block_by_height(astreum_node: Any, *,
     if not current.bloom_hash or current.bloom_hash == ZERO32:
         target = current
         while target is not None and target.height > target_height:
-            if target.previous_block is not None:
-                target = target.previous_block
-            else:
-                prev_hash = getattr(target, "previous_block_hash", None)
-                if prev_hash:
-                    target = get_block_from_storage(astreum_node=astreum_node, block_hash=prev_hash)
-                else:
-                    target = None
+            target = get_previous_block(astreum_node, target)
         return target
 
     # Binary-descent by offset to locate the leaf's start_hash.
@@ -71,14 +65,7 @@ def find_block_by_height(astreum_node: Any, *,
     # Walk backward from current to find it.
     target = current
     while target is not None and target.height > target_height:
-        if target.previous_block is not None:
-            target = target.previous_block
-        else:
-            prev_hash = getattr(target, "previous_block_hash", None)
-            if prev_hash:
-                target = get_block_from_storage(astreum_node=astreum_node, block_hash=prev_hash)
-            else:
-                target = None
+        target = get_previous_block(astreum_node, target)
     return target
 
 

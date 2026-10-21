@@ -19,13 +19,8 @@ def calculate_discount_rate(block: object, node=None, range_blocks: int = 0) -> 
         ValueError: If rate fraction unavailable.
     """
     if node is not None and block.previous_block is None:
-        prev_hash = getattr(block, "previous_block_hash", None)
-        if prev_hash:
-            from astreum.consensus.block.encoding.decode import get_block_from_storage
-            try:
-                block.previous_block = get_block_from_storage(astreum_node=node, block_hash=prev_hash)
-            except Exception:
-                pass
+        from astreum.consensus.block.previous import get_previous_block
+        block.previous_block = get_previous_block(node, block)
 
     rate_fraction = windowed_rate_fraction(block, range_blocks)
     if rate_fraction is None:

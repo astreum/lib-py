@@ -7,6 +7,7 @@ from astreum.storage.exprs import get_expr_list, prefetch_exprs_from_network
 from astreum.crypto.bloom_filter import bloom_test
 from astreum.crypto.bloom_tree.tree import bloom_search_leaves
 from astreum.expression.helpers import get_expr_builtin_tag
+from astreum.consensus.block.previous import get_previous_block
 
 if TYPE_CHECKING:
     from astreum.consensus.transaction.model import Transaction
@@ -71,7 +72,7 @@ def bloom_search_tx(astreum_node: Any, *,
 
             bloom_hash = current_block.bloom_hash
             if not bloom_hash or bloom_hash == ZERO32:
-                current_block = current_block.previous_block
+                current_block = get_previous_block(astreum_node, current_block)
                 continue
 
             era_results = bloom_search_leaves(
@@ -109,7 +110,7 @@ def bloom_search_tx(astreum_node: Any, *,
                         if len(results) >= limit:
                             return results
 
-        current_block = current_block.previous_block
+        current_block = get_previous_block(astreum_node, current_block)
 
     return results
 
