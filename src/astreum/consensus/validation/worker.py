@@ -40,6 +40,27 @@ from astreum.consensus.models.accounts import extract_accounts_exprs
 from astreum.crypto.bloom_search import make_search_variants, ERA_SIZE
 
 
+
+def _next_signed_transaction(node: Any) -> Transaction:
+    """Take the next transaction with a valid signature from the queue.
+
+    A transaction with an invalid signature is dropped.
+
+    Args:
+        node: The node that holds the transaction queue.
+
+    Returns:
+        The next valid transaction.
+
+    Raises:
+        queue.Empty: If the queue holds no valid transaction.
+    """
+    while True:
+        transaction = node._validation_transaction_queue.get_nowait()
+        if transaction.verify_signature():
+            return transaction
+        node.logger.debug("Dropped queued transaction: invalid signature")
+
 def included_transaction_exprs(node: Any, transactions: list) -> list:
     """Every expr of the given transactions' trees, each once.
 
@@ -217,7 +238,7 @@ def make_validation_worker(
                 continue
 
             try:
-                current_tx = node._validation_transaction_queue.get_nowait()
+                current_tx = _next_signed_transaction(node)
                 queue_empty = False
             except Empty:
                 current_tx = None
@@ -332,7 +353,7 @@ def make_validation_worker(
                     node.logger.exception("Failed applying transaction %s", tx_hex)
 
                 try:
-                    current_tx = node._validation_transaction_queue.get_nowait()
+                    current_tx = _next_signed_transaction(node)
                 except Empty:
                     current_tx = None
 

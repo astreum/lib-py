@@ -204,6 +204,12 @@ def process_incoming_messages(node: "Node") -> None:
                             peer.address,
                         )
                         continue
+                    if not transaction.verify_signature():
+                        node.logger.debug(
+                            "TRANSACTION dropped from %s: invalid signature",
+                            peer.address,
+                        )
+                        continue
                     node._validation_transaction_queue.put(transaction)
 
                 case MessageTopic.BLOCK:

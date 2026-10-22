@@ -13,7 +13,8 @@ ZERO32 = b"\x00" * 32
 from astreum.consensus.models.receipt import Receipt
 from astreum.consensus.block.create import create_block
 from astreum.consensus.block.encoding.expr import get_block_expr
-from astreum.consensus.transaction import apply_transaction
+from astreum.consensus.transaction import apply_transaction_obj
+from astreum.consensus.transaction.from_storage import get_transaction_from_storage
 from astreum.consensus.transaction.storage.initial import (
     UnresolvedRecordExpr,
     generate_initial_storage_record,
@@ -307,7 +308,16 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         node, tx_hashes, RESOLUTION_FULL, contact=block.contact, block_hash=block.expr_id
     )
     for tx_hash in tx_hashes:
-        apply_transaction(node, work_block, tx_hash)
+        transaction = get_transaction_from_storage(
+            node, tx_hash, contact=block.contact, block_hash=block.expr_id
+        )
+        if not transaction.verify_signature():
+            node.logger.debug(
+                "Block verify invalid transaction signature block=%s tx=%s",
+                _hex(block.expr_id), _hex(tx_hash),
+            )
+            return False, f"invalid transaction signature tx={_hex(tx_hash)}"
+        apply_transaction_obj(node, work_block, transaction)
 
     # Derive totals from collected receipts
     total_transaction_fee = sum(r.transaction_fee for r in work_block.receipts)
