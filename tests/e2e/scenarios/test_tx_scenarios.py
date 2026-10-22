@@ -67,13 +67,11 @@ class TestTxRejects(_UserTestCase):
         self.assertEqual(receipt(self.v, block, over.hash).status, STATUS_FAILED)
         self.assertEqual(balance(self.v, self.recipient, block), 0)
 
-    @unittest.expectedFailure
     def test_bad_signature_is_not_included(self) -> None:
-        # BUG: no code path verifies a transaction signature (ingress, worker,
-        # apply). Only channel withdraw checks one. A forged signature is
-        # applied and charged to the sender.
+        # A forged signature is dropped at ingress and in the worker queue.
         forged = transfer(self.u, self.wallet, 0, self.recipient, 9)
         forged.signature = b"\x00" * 64
+        forged._expr = None  # transfer() cached the expr with the real signature
         forged.hash = forged.expr().hash()
         good = transfer(self.u, self.wallet, 0, self.recipient, 10)
         push_transaction(self.u, forged)
