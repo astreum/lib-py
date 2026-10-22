@@ -8,10 +8,13 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
 from astreum.communication.outgoing_queue import enqueue_outgoing
 from astreum.communication.models.peer import Peer, add_peer, get_peer
 from astreum.communication.models.message import Message, MessageTopic
-from astreum.communication.models.handshake import build_handshake
+from astreum.communication.models.handshake import (
+    build_handshake,
+    parse_handshake,
+    verify_handshake,
+)
 from astreum.communication.models.ping import Ping
 from astreum.communication.difficulty import message_difficulty
-from astreum.communication.models.handshake import verify_handshake
 from astreum.utils.config import DEFAULT_MESSAGE_TIMESTAMP_WINDOW_SECONDS
 
 if TYPE_CHECKING:
@@ -71,14 +74,18 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
     window = node.config.get(
         "message_timestamp_window", DEFAULT_MESSAGE_TIMESTAMP_WINDOW_SECONDS
     )
-    result = verify_handshake(message, time.time(), window)
-    if result is None:
+    handshake = parse_handshake(message)
+    if handshake is None or not verify_handshake(
+        message, handshake, time.time(), window
+    ):
         node.logger.debug(
             "Handshake dropped from %s: bad length, reply_requested, time or signature",
             addr,
         )
         return True
-    relay_key_bytes, handshake_timestamp, reply_requested = result
+    relay_key_bytes = handshake.relay_key
+    handshake_timestamp = handshake.timestamp
+    reply_requested = handshake.reply_requested
 
     port = addr[1]
     peer_address = (host, port)

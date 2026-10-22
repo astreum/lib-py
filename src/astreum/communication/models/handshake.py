@@ -8,6 +8,9 @@ Content layout (105 bytes)::
     reply_requested(1) + relay_key(32) + timestamp(8) + signature(64)
 
 The signature covers ``storage_id + reply_requested + relay_key + timestamp``.
+
+``parse_handshake`` reads the content into a ``Handshake``.
+``verify_handshake`` checks the time and the signature of that ``Handshake``.
 """
 
 from __future__ import annotations
@@ -35,6 +38,34 @@ HANDSHAKE_TIMESTAMP_END = 41
 HANDSHAKE_SIGNATURE_START = 41
 HANDSHAKE_SIGNATURE_END = 105
 HANDSHAKE_CONTENT_SIZE = 105
+
+
+class Handshake:
+    """Fields of a signed handshake.
+
+    Attributes:
+        relay_key (bytes): X25519 relay public key of the sender (32 bytes).
+        timestamp (int): Handshake time in unix seconds.
+        reply_requested (bool): True if the sender asks for a handshake back.
+        signature (bytes): Ed25519 signature of the sender (64 bytes).
+    """
+
+    relay_key: bytes
+    timestamp: int
+    reply_requested: bool
+    signature: bytes
+
+    def __init__(
+        self,
+        relay_key: bytes,
+        timestamp: int,
+        reply_requested: bool,
+        signature: bytes,
+    ) -> None:
+        self.relay_key = relay_key
+        self.timestamp = timestamp
+        self.reply_requested = reply_requested
+        self.signature = signature
 
 
 def handshake_signed_bytes(
@@ -97,22 +128,18 @@ def build_handshake(
     )
 
 
-def verify_handshake(
-    message: Message,
-    now: float,
-    window: int,
-) -> tuple[bytes, int, bool] | None:
-    """Check the length, fields, time and signature of a handshake.
+def parse_handshake(message: Message) -> Handshake | None:
+    """Read the fields of a handshake message.
+
+    This function checks the length and the reply byte only. It does not
+    check the time or the signature.
 
     Args:
         message (Message): The received handshake message.
-        now (float): Current time in unix seconds.
-        window (int): Allowed time difference in seconds. 0 disables the
-            time check.
 
     Returns:
-        tuple[bytes, int, bool] | None: ``(relay_key, timestamp,
-            reply_requested)`` if the handshake is valid, otherwise None.
+        Handshake | None: The parsed fields, or None if the length is wrong
+            or the reply byte is not 0x00 or 0x01.
     """
     content = message.content
     if len(content) != HANDSHAKE_CONTENT_SIZE:
@@ -121,35 +148,58 @@ def verify_handshake(
     reply_requested_byte = content[
         HANDSHAKE_REPLY_REQUESTED_START:HANDSHAKE_REPLY_REQUESTED_END
     ]
-    relay_key = content[HANDSHAKE_RELAY_KEY_START:HANDSHAKE_RELAY_KEY_END]
-    timestamp = int.from_bytes(
-        content[HANDSHAKE_TIMESTAMP_START:HANDSHAKE_TIMESTAMP_END], "big"
-    )
-    signature = content[HANDSHAKE_SIGNATURE_START:HANDSHAKE_SIGNATURE_END]
-
     if reply_requested_byte not in (
         bytes([REPLY_REQUESTED_YES]),
         bytes([REPLY_REQUESTED_NO]),
     ):
         return None
-    if window > 0 and abs(now - timestamp) > window:
-        return None
+
+    return Handshake(
+        relay_key=content[HANDSHAKE_RELAY_KEY_START:HANDSHAKE_RELAY_KEY_END],
+        timestamp=int.from_bytes(
+            content[HANDSHAKE_TIMESTAMP_START:HANDSHAKE_TIMESTAMP_END], "big"
+        ),
+        reply_requested=reply_requested_byte == bytes([REPLY_REQUESTED_YES]),
+        signature=content[HANDSHAKE_SIGNATURE_START:HANDSHAKE_SIGNATURE_END],
+    )
+
+
+def verify_handshake(
+    message: Message,
+    handshake: Handshake,
+    now: float,
+    window: int,
+) -> bool:
+    """Check the time and the signature of a handshake.
+
+    Args:
+        message (Message): The received handshake message.
+        handshake (Handshake): The fields that ``parse_handshake`` read from
+            the message.
+        now (float): Current time in unix seconds.
+        window (int): Allowed time difference in seconds. 0 disables the
+            time check.
+
+    Returns:
+        bool: True if the time and the signature are valid, otherwise False.
+    """
+    if window > 0 and abs(now - handshake.timestamp) > window:
+        return False
 
     try:
         public_key = Ed25519PublicKey.from_public_bytes(
             message.sender_public_key_bytes
         )
     except ValueError:
-        return None
+        return False
 
+    reply_requested_byte = bytes(
+        [REPLY_REQUESTED_YES if handshake.reply_requested else REPLY_REQUESTED_NO]
+    )
     signed = handshake_signed_bytes(
-        message.sender_public_key_bytes, reply_requested_byte, relay_key, timestamp
+        message.sender_public_key_bytes,
+        reply_requested_byte,
+        handshake.relay_key,
+        handshake.timestamp,
     )
-    if not verify_signature(public_key, signed, signature):
-        return None
-
-    return (
-        relay_key,
-        timestamp,
-        reply_requested_byte == bytes([REPLY_REQUESTED_YES]),
-    )
+    return verify_signature(public_key, signed, handshake.signature)

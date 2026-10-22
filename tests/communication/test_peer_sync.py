@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 from astreum.communication.handlers.handshake import handle_handshake
-from astreum.communication.models.handshake import build_handshake, verify_handshake
+from astreum.communication.models.handshake import build_handshake, parse_handshake, verify_handshake
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import Peer
 from astreum.communication.models.route import Route
@@ -320,9 +320,10 @@ class TestKeepAlive(unittest.TestCase):
         message, address = sent[0]
         self.assertEqual(address, self.addr)
         self.assertTrue(message.handshake)
-        result = verify_handshake(message, time_module.time(), 60)
+        result = parse_handshake(message)
         self.assertIsNotNone(result)
-        self.assertFalse(result[2])
+        self.assertTrue(verify_handshake(message, result, time_module.time(), 60))
+        self.assertFalse(result.reply_requested)
         self.assertIn(self.key, self.node.peers)
         self.assertEqual(self.probed, {self.key: 100.0})
 

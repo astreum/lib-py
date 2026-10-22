@@ -17,7 +17,9 @@ from astreum.communication.handlers.route_response import handle_route_response
 from astreum.communication.models.handshake import (
     HANDSHAKE_CONTENT_SIZE,
     build_handshake,
+    Handshake,
     handshake_signed_bytes,
+    parse_handshake,
     verify_handshake,
 )
 from astreum.communication.models.message import Message, MessageTopic
@@ -75,9 +77,13 @@ def _handshakes(node):
 
 
 def _verify(message, now=None, window=WINDOW):
-    return verify_handshake(
-        message, time_module.time() if now is None else now, window
-    )
+    handshake = parse_handshake(message)
+    if handshake is None:
+        return None
+    now = time_module.time() if now is None else now
+    if not verify_handshake(message, handshake, now, window):
+        return None
+    return handshake
 
 
 def _tamper(message, index):
@@ -129,6 +135,41 @@ class TestBuild(unittest.TestCase):
         self.assertIsNotNone(_verify(decoded))
 
 
+class TestParse(unittest.TestCase):
+    def setUp(self):
+        self.node = _node()
+
+    def test_parse_returns_fields(self):
+        message = build_handshake(self.node, reply_requested=True, now=1000)
+        result = parse_handshake(message)
+        self.assertIsInstance(result, Handshake)
+        self.assertEqual(result.relay_key, self.node.relay_public_key_bytes)
+        self.assertEqual(result.timestamp, 1000)
+        self.assertTrue(result.reply_requested)
+        self.assertEqual(result.signature, message.content[41:105])
+        self.assertEqual(len(result.signature), 64)
+
+    def test_parse_reply_requested_false(self):
+        message = build_handshake(self.node, reply_requested=False)
+        self.assertFalse(parse_handshake(message).reply_requested)
+
+    def test_parse_rejects_bad_length(self):
+        message = build_handshake(self.node, reply_requested=True)
+        message.content = message.content[:-1]
+        self.assertIsNone(parse_handshake(message))
+        message.content = message.content + b"\x00\x00"
+        self.assertIsNone(parse_handshake(message))
+
+    def test_parse_rejects_invalid_reply_byte(self):
+        message = build_handshake(self.node, reply_requested=True)
+        message.content = b"\x02" + message.content[1:]
+        self.assertIsNone(parse_handshake(message))
+
+    def test_parse_does_not_check_signature(self):
+        message = _tamper(build_handshake(self.node, reply_requested=True), 104)
+        self.assertIsNotNone(parse_handshake(message))
+
+
 class TestVerify(unittest.TestCase):
     def setUp(self):
         self.node = _node()
@@ -139,15 +180,28 @@ class TestVerify(unittest.TestCase):
     def test_verify_accepts_valid(self):
         now = int(time_module.time())
         message = self._built(True, now=now)
-        self.assertEqual(
-            _verify(message, now=now),
-            (self.node.relay_public_key_bytes, now, True),
-        )
+        result = _verify(message, now=now)
+        self.assertIsInstance(result, Handshake)
+        self.assertEqual(result.relay_key, self.node.relay_public_key_bytes)
+        self.assertEqual(result.timestamp, now)
+        self.assertTrue(result.reply_requested)
 
     def test_verify_returns_false_reply_requested(self):
         now = int(time_module.time())
         result = _verify(self._built(False, now=now), now=now)
-        self.assertFalse(result[2])
+        self.assertFalse(result.reply_requested)
+
+    def test_verify_returns_bool(self):
+        now = int(time_module.time())
+        message = self._built(True, now=now)
+        handshake = parse_handshake(message)
+        self.assertIs(verify_handshake(message, handshake, now, WINDOW), True)
+
+    def test_verify_false_for_tampered_signature(self):
+        now = int(time_module.time())
+        message = _tamper(self._built(True, now=now), 104)
+        handshake = parse_handshake(message)
+        self.assertIs(verify_handshake(message, handshake, now, WINDOW), False)
 
     def test_verify_rejects_old_form(self):
         message = Message(
@@ -265,8 +319,8 @@ class TestHandleHandshake(unittest.TestCase):
         self.assertEqual(address, self.addr)
         result = _verify(reply)
         self.assertIsNotNone(result)
-        self.assertEqual(result[0], self.node.relay_public_key_bytes)
-        self.assertFalse(result[2])
+        self.assertEqual(result.relay_key, self.node.relay_public_key_bytes)
+        self.assertFalse(result.reply_requested)
 
 
 class TestSenders(unittest.TestCase):
@@ -277,7 +331,7 @@ class TestSenders(unittest.TestCase):
         self.assertEqual(len(sent), 1)
         result = _verify(sent[0][0])
         self.assertIsNotNone(result)
-        self.assertTrue(result[2])
+        self.assertTrue(result.reply_requested)
         self.assertEqual(
             sent[0][0].sender_public_key_bytes, node.storage_public_key_bytes
         )
@@ -301,7 +355,7 @@ class TestSenders(unittest.TestCase):
         self.assertEqual(sent[0][1], ("10.0.0.7", 7000))
         result = _verify(sent[0][0])
         self.assertIsNotNone(result)
-        self.assertTrue(result[2])
+        self.assertTrue(result.reply_requested)
 
     def _run_processor(self, node):
         thread = threading.Thread(
@@ -336,7 +390,7 @@ class TestSenders(unittest.TestCase):
         self.assertEqual(sent[0][1], addr)
         result = _verify(sent[0][0])
         self.assertIsNotNone(result)
-        self.assertTrue(result[2])
+        self.assertTrue(result.reply_requested)
 
     def test_decrypt_failure_handshake_signed(self):
         node = _node()
@@ -363,7 +417,7 @@ class TestSenders(unittest.TestCase):
         self.assertEqual(len(sent), 1)
         result = _verify(sent[0][0])
         self.assertIsNotNone(result)
-        self.assertTrue(result[2])
+        self.assertTrue(result.reply_requested)
 
 
 if __name__ == "__main__":

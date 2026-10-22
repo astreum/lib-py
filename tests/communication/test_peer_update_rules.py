@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 from astreum.communication.handlers.handshake import handle_handshake
-from astreum.communication.models.handshake import build_handshake, verify_handshake
+from astreum.communication.models.handshake import build_handshake, parse_handshake
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import Peer
 from astreum.communication.models.route import Route
@@ -153,7 +153,7 @@ class TestKnownPeerHandshake(unittest.TestCase):
         )
         _restart(self.remote)
         message = _handshake_from(self.remote, False)
-        _, new_stamp, _ = verify_handshake(message, time_module.time(), WINDOW)
+        new_stamp = parse_handshake(message).timestamp
         handle_handshake(self.node, self.addr, message)
         self.assertIs(self.node.peers[self.remote.storage_public_key_bytes], self.peer)
         self.assertEqual(
@@ -197,9 +197,9 @@ class TestKnownPeerHandshake(unittest.TestCase):
         pings = [m for m, _ in sent if not m.handshake]
         self.assertEqual(len(handshakes), 1)
         self.assertEqual(len(pings), 1)
-        result = verify_handshake(handshakes[0], time_module.time(), WINDOW)
+        result = parse_handshake(handshakes[0])
         self.assertIsNotNone(result)
-        self.assertFalse(result[2])
+        self.assertFalse(result.reply_requested)
         self.assertEqual(_decrypts(pings[0], self.node, self.remote), MessageTopic.PING)
 
     def test_no_reply_requested_gets_ping_only(self):
@@ -220,7 +220,7 @@ class TestNewPeerHandshake(unittest.TestCase):
     def test_new_peer_gets_handshake_timestamp(self):
         node, remote = _node(), _node()
         message = build_handshake(remote, True, now=int(time_module.time()) - 3)
-        _, stamp, _ = verify_handshake(message, time_module.time(), WINDOW)
+        stamp = parse_handshake(message).timestamp
         handle_handshake(node, ("10.0.0.5", 5000), message)
         peer = node.peers[remote.storage_public_key_bytes]
         self.assertEqual(peer.handshake_timestamp, stamp)
