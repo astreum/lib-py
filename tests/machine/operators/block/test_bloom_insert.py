@@ -16,6 +16,7 @@ from astreum.crypto.bloom_search.variants import make_search_variants
 from astreum.consensus.transaction.bloom.pending import finalize_pending_bloom_inserts
 from astreum.consensus.models.receipt import STATUS_SUCCESS, STATUS_FAILED
 from astreum.expression.helpers import get_expr_builtin_tag
+from astreum.consensus.constants import PROVIDERS_PER_RECORD
 
 
 def _make_tx(hash_val=None, sender=None, recipient=None):
@@ -205,8 +206,8 @@ class TestFinalizePendingBloomInserts(unittest.TestCase):
         self.assertEqual(tx.pending_bloom_inserts, set())
         self.assertIn(k1, block.pending_bloom_keys)
         self.assertIn(k2, block.pending_bloom_keys)
-        # 2 keys * 8 bytes per key = 16 bytes
-        self.assertEqual(fee, 16)
+        # 2 keys * 8 bytes per key, for each provider of the record
+        self.assertEqual(fee, 2 * 8 * PROVIDERS_PER_RECORD)
 
     def test_failed_clears_without_mutation(self):
         tx = _make_tx()
@@ -237,8 +238,8 @@ class TestFinalizePendingBloomInserts(unittest.TestCase):
             tx.pending_bloom_inserts |= _variant_hashes(tx, k)
         block = _make_block()
         fee = finalize_pending_bloom_inserts(None, block, tx, STATUS_SUCCESS)
-        # 4 keys * 8 bytes per key = 32 bytes
-        self.assertEqual(fee, 32)
+        # 4 keys * 8 bytes per key, for each provider of the record
+        self.assertEqual(fee, 4 * 8 * PROVIDERS_PER_RECORD)
 
 
 if __name__ == "__main__":

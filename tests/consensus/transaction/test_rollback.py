@@ -274,14 +274,15 @@ class TestLogBudget(_Base):
 
     def test_last_log_dropped_earlier_logs_kept_and_paid(self):
         _, two, _, _ = self._run(2, 10_000_000, nested=True)
-        # The balance covers 2 logs and the 3rd log does not fit.
-        block, receipt, sender, contract = self._run(3, 300, nested=True)
+        # Each log costs 131 units. A balance of 460 covers 2 logs (from 398)
+        # and does not cover the 3rd log (from 529).
+        block, receipt, sender, contract = self._run(3, 460, nested=True)
         self.assertEqual(receipt.status, STATUS_FAILED)
         self.assertEqual(receipt.logs_hash, two.logs_hash)
         self.assertIn(receipt.logs_hash, {e.hash() for e in block.pending_exprs})
         # The sender pays what it has.
         self.assertEqual(sender.balance, 0)
-        self.assertEqual(receipt.total_fee, 300)
+        self.assertEqual(receipt.total_fee, 460)
         # The state of the call is rolled back.
         self.assertEqual(contract.counter, 0)
         self.assertEqual(block.involved_accounts, set())
