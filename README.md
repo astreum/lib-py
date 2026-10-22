@@ -768,9 +768,14 @@ Every `Node` instance wires up structured logging automatically:
 python3 -m venv venv
 source venv/bin/activate
 pip install -e .
-python3 -m unittest discover -s tests
+python3 -m unittest discover -s tests/unit -t .
 ```
 
 ### Test summary
 
-Each package under `tests/` (`machine`, `consensus`, `communication`, `crypto`, `storage`, `node`, `utils`) is covered by its own suite. Run a single package, e.g. `python3 -m unittest discover -s tests/machine`.
+Tests are split in two folders:
+
+- `tests/unit/` runs fast and never opens a live network. Run it with `python3 -m unittest discover -s tests/unit -t .`.
+- `tests/e2e/` starts real nodes on localhost and waits for real blocks (2 s slots). Run it with `python3 -m unittest discover -s tests/e2e -t .`.
+
+Each package under `tests/unit/` (`machine`, `consensus`, `communication`, `crypto`, `expression`, `storage`, `node`, `utils`) is covered by its own suite. Run a single package, e.g. `python3 -m unittest discover -s tests/unit/machine -t .`.
