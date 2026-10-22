@@ -15,7 +15,7 @@ from astreum.communication.handlers.route_request import handle_route_request
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import Peer
 from astreum.communication.models.route import Route
-from astreum.communication.models.route_entry import decode_route_entries
+from astreum.communication.models.peer_info import decode_peer_infos
 from astreum.communication.self_lookup import (
     SelfLookupTimer,
     refresh_one_bucket,
@@ -81,7 +81,7 @@ def _reply_keys(node, requester):
     payload, _address = node.outgoing_queue.get_nowait()
     message = Message.from_bytes(payload[8:])
     message.decrypt(requester.shared_key_bytes)
-    return [key for key, _relay, _addr in decode_route_entries(message.content[1:], False)]
+    return [info.storage_key for info in decode_peer_infos(message.content[1:], False)]
 
 
 def _sent(node):

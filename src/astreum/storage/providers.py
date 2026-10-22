@@ -59,9 +59,7 @@ def index_provider(node, expr_id: bytes, provider_id: int) -> None:
         None. A provider id with no payload, or a payload that does not
         decode, is dropped.
     """
-    from astreum.communication.storage_response.storage_provider import (
-        decode_storage_provider,
-    )
+    from astreum.communication.models.peer_info import decode_peer_info
     from astreum.communication.util import xor_distance
     from astreum.consensus.constants import PROVIDERS_PER_RECORD
 
@@ -69,7 +67,7 @@ def index_provider(node, expr_id: bytes, provider_id: int) -> None:
     if payload is None:
         return
     try:
-        key = decode_storage_provider(payload)[0]
+        key = decode_peer_info(payload, False).storage_key
     except ValueError:
         return
 
@@ -79,7 +77,7 @@ def index_provider(node, expr_id: bytes, provider_id: int) -> None:
         if existing_payload is None:
             continue
         try:
-            existing_key = decode_storage_provider(existing_payload)[0]
+            existing_key = decode_peer_info(existing_payload, False).storage_key
         except ValueError:
             continue
         if existing_key != key:

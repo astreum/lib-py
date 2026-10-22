@@ -4,7 +4,7 @@ from astreum.communication.outgoing_queue import enqueue_outgoing
 from astreum.communication.models.message import Message
 from astreum.communication.models.handshake import build_handshake
 from astreum.communication.models.peer import get_peer
-from astreum.communication.models.route_entry import decode_route_entries
+from astreum.communication.models.peer_info import decode_peer_infos
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -39,7 +39,8 @@ def handle_route_response(node: "Node", peer: "Peer", message: Message) -> None:
         node.logger.warning("ROUTE_RESPONSE unknown route id %s from %s", route_id, peer.address)
         return
     try:
-        entries = decode_route_entries(payload[1:], bool(node.use_ipv6))
+        body = payload[1:]
+        entries = decode_peer_infos(body, bool(node.use_ipv6)) if body else []
     except ValueError:
         node.logger.warning(
             "ROUTE_RESPONSE payload size mismatch (%s bytes) from %s",
@@ -49,7 +50,9 @@ def handle_route_response(node: "Node", peer: "Peer", message: Message) -> None:
         return
 
     targets = []
-    for storage_key, _relay_key, address in entries:
+    for info in entries:
+        storage_key = info.storage_key
+        address = info.address
         if storage_key == node.storage_public_key_bytes:
             continue
         if get_peer(node, storage_key) is not None:

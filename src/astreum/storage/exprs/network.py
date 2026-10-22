@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import socket
-
 from time import sleep
 from typing import Optional
 
@@ -248,9 +246,7 @@ def _resend_to_next_provider(
     Returns:
         The set of hashes for which a GET was queued.
     """
-    from astreum.communication.storage_response.storage_provider import (
-        decode_storage_provider,
-    )
+    from astreum.communication.models.peer_info import decode_peer_info
     from astreum.storage.providers import provider_payload_for_id
     from astreum.storage.requests import has_expr_req, rearm_expr_req, take_next_contact
     from astreum.storage.workers.requests import queue_storage_get
@@ -268,10 +264,10 @@ def _resend_to_next_provider(
             if payload is None:
                 continue
             try:
-                _, relay_key, address, port = decode_storage_provider(payload)
+                info = decode_peer_info(payload, False)
             except ValueError:
                 continue
-            contact = (relay_key, address, port)
+            contact = (info.relay_key, *info.address)
         live = has_expr_req(node, expr_id)
         if live:
             rearm_expr_req(node, expr_id)
@@ -376,16 +372,16 @@ def build_provider_payload(node) -> bytes:
         70-byte encoded provider payload.
 
     Raises:
-        OSError: If the IP address is invalid.
+        ValueError: If the relay IP address or the port is invalid.
     """
-    provider_ip_bytes = socket.inet_aton(node.relay_ip_address)
-    provider_port_bytes = int(node.config["port"]).to_bytes(2, "big", signed=False)
-    return (
-        node.config["storage_public_key_bytes"]
-        + node.config["relay_public_key_bytes"]
-        + provider_ip_bytes
-        + provider_port_bytes
+    from astreum.communication.models.peer_info import PeerInfo, encode_peer_info
+
+    info = PeerInfo(
+        node.config["storage_public_key_bytes"],
+        node.config["relay_public_key_bytes"],
+        (node.relay_ip_address, int(node.config["port"])),
     )
+    return encode_peer_info(info, False)
 
 
 def destination_peer(node, expr_id: bytes):
@@ -478,10 +474,11 @@ def send_put_entries(
         StorageRequest,
         max_batch_entries,
     )
+    from astreum.communication.models.peer_info import PEER_INFO_BYTES
     from astreum.utils.config import DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES
 
     budget = node.config.get("storage_put_batch_max_bytes", DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES)
-    per_batch = max(1, max_batch_entries(budget, len(provider_payload) // 70))
+    per_batch = max(1, max_batch_entries(budget, len(provider_payload) // PEER_INFO_BYTES))
 
     results = []
     for start in range(0, len(entries), per_batch):

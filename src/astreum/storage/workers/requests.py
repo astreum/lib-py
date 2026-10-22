@@ -105,9 +105,7 @@ def _resolve_destination(node: "Node", expr_id: bytes, contact=None, block_hash=
             route_id = block_hash
 
         for provider_id in node.storage_index.get(route_id, ()):
-            from astreum.communication.storage_response.storage_provider import (
-                decode_storage_provider,
-            )
+            from astreum.communication.models.peer_info import decode_peer_info
             from astreum.storage.providers import provider_payload_for_id
 
             payload = provider_payload_for_id(node, provider_id)
@@ -115,10 +113,10 @@ def _resolve_destination(node: "Node", expr_id: bytes, contact=None, block_hash=
                 node.logger.debug("Unknown provider id %s for %s", provider_id, route_id.hex())
                 continue
             try:
-                _, relay_key_bytes, address, port = decode_storage_provider(payload)
+                info = decode_peer_info(payload, False)
             except ValueError:
                 continue
-            return _provider_destination(node, relay_key_bytes, address, port)
+            return _provider_destination(node, info.relay_key, *info.address)
 
         peer = node.peer_route.closest_peer_for_hash(route_id)
         if peer is None or peer.address is None:

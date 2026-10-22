@@ -9,7 +9,7 @@ from astreum.communication.models.peer import get_peer
 from astreum.communication.self_lookup import SelfLookupTimer, self_lookup_timer_step
 from astreum.communication.storage_request.code import StorageRequestCode
 from astreum.communication.storage_request.model import StorageRequest
-from astreum.communication.storage_response.storage_provider import decode_storage_provider
+from astreum.communication.models.peer_info import decode_peer_info
 from astreum.expression import RESOLUTION_SINGLE
 from astreum.storage.advertisements import advertise_exprs
 from astreum.storage.exprs.network import (
@@ -300,7 +300,7 @@ def _serve_one_index_request(node: "Node") -> bool:
             if payload is None:
                 continue
             try:
-                provider_keys.append(decode_storage_provider(payload)[0])
+                provider_keys.append(decode_peer_info(payload, False).storage_key)
             except ValueError:
                 continue
         place = node.peer_route.count_nearer(

@@ -21,11 +21,9 @@ from astreum.communication.storage_response.storage_found import (
     decode_found_page,
     encode_found_pages,
 )
-from astreum.communication.storage_response.storage_provider import decode_storage_provider
+from astreum.communication.models.peer_info import PEER_INFO_BYTES, decode_peer_info
 from astreum.expression import Expr
 from astreum.expression.expr import TAG_BYTE_ENCODINGS, bytes_
-
-PROVIDER_PAYLOAD_BYTES = 70
 
 Contact = Tuple[bytes, str, int]
 
@@ -92,7 +90,7 @@ def encode_block_message(provider_payload: bytes, block_expr: Expr) -> bytes:
         ValueError: if the provider payload is not 70 bytes or the header does
             not fit one datagram.
     """
-    if len(provider_payload) != PROVIDER_PAYLOAD_BYTES:
+    if len(provider_payload) != PEER_INFO_BYTES:
         raise ValueError("provider payload must be 70 bytes")
 
     def _no_skip(expr: Expr, size: int) -> None:
@@ -133,15 +131,13 @@ def decode_block_message(content: bytes) -> Optional[Tuple[Contact, List[Expr]]]
     Returns:
         Tuple of (contact, expressions) or None on failure.
     """
-    if not content or len(content) <= PROVIDER_PAYLOAD_BYTES:
+    if not content or len(content) <= PEER_INFO_BYTES:
         return None
     try:
-        _storage_key, relay_key, address, port = decode_storage_provider(
-            content[:PROVIDER_PAYLOAD_BYTES]
-        )
-        page, total, exprs = decode_found_page(content[PROVIDER_PAYLOAD_BYTES:])
+        info = decode_peer_info(content[:PEER_INFO_BYTES], False)
+        page, total, exprs = decode_found_page(content[PEER_INFO_BYTES:])
     except Exception:
         return None
     if page != 1 or total != 1 or not exprs:
         return None
-    return (relay_key, address, port), exprs
+    return (info.relay_key, *info.address), exprs

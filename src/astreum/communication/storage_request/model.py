@@ -2,12 +2,12 @@ from astreum.communication.message_pow import (
     MAX_INLINE_MESSAGE_BYTES,
     MESSAGE_FRAMING_BYTES,
 )
+from astreum.communication.models.peer_info import PEER_INFO_BYTES
 from astreum.communication.storage_request.code import StorageRequestCode
 
 # STORAGE_PUT layout (after the 1-byte request code):
 #   provider_count u8 (1 or 2) + provider_count * provider_payload (70B)
 #   + count u16 + count * (expr_id 32B + payload_type 1B)
-PROVIDER_PAYLOAD_BYTES = 70
 MAX_PUT_PROVIDERS = 2
 BATCH_COUNT_BYTES = 2
 BATCH_ENTRY_BYTES = 32 + 1
@@ -47,7 +47,7 @@ def batch_header_bytes(providers: int = 1) -> int:
     Returns:
         int: The count of provider bytes plus the count fields.
     """
-    return 1 + providers * PROVIDER_PAYLOAD_BYTES + BATCH_COUNT_BYTES
+    return 1 + providers * PEER_INFO_BYTES + BATCH_COUNT_BYTES
 
 
 def max_batch_entries(budget_bytes: int, providers: int = 1) -> int:
@@ -165,11 +165,11 @@ class StorageRequest:
         Returns:
             bytes: The encoded STORAGE_PUT bytes.
         """
-        providers, remainder = divmod(len(self.data), PROVIDER_PAYLOAD_BYTES)
+        providers, remainder = divmod(len(self.data), PEER_INFO_BYTES)
         if remainder or not 1 <= providers <= MAX_PUT_PROVIDERS:
             raise ValueError(
                 f"STORAGE_PUT provider data must be 1 to {MAX_PUT_PROVIDERS} "
-                f"payloads of {PROVIDER_PAYLOAD_BYTES} bytes"
+                f"payloads of {PEER_INFO_BYTES} bytes"
             )
         if not self.entries:
             raise ValueError("STORAGE_PUT requires at least one entry")
@@ -290,7 +290,7 @@ class StorageRequest:
         header_end = 1 + batch_header_bytes(providers)
         if len(data) < header_end:
             raise ValueError(f"STORAGE_PUT too short ({len(data)} bytes)")
-        provider_end = 2 + providers * PROVIDER_PAYLOAD_BYTES
+        provider_end = 2 + providers * PEER_INFO_BYTES
         provider_payload = data[2:provider_end]
         count = int.from_bytes(data[provider_end:header_end], "big")
         if count < 1:

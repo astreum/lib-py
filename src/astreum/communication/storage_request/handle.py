@@ -3,12 +3,12 @@ from typing import TYPE_CHECKING
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import increment_peer_metric
 from astreum.communication.storage_request.code import StorageRequestCode
-from astreum.communication.storage_request.model import PROVIDER_PAYLOAD_BYTES, StorageRequest
+from astreum.communication.models.peer_info import PEER_INFO_BYTES, PeerInfo, encode_peer_info
+from astreum.communication.storage_request.model import StorageRequest
 from astreum.communication.storage_request.payment_required import (
     _queue_storage_payment_required,
     _requires_storage_channel,
 )
-from astreum.communication.storage_request.peer_contact import encode_peer_contact_bytes
 from astreum.communication.storage_response.code import StorageResponseCode
 from astreum.communication.storage_response.model import StorageResponse
 from astreum.communication.storage_response.storage_found import (
@@ -129,8 +129,8 @@ def _handle_put(
         storage_account = get_latest_storage_account(node)
         data = storage_request.data
         provider_ids = [
-            provider_id_for_payload(node, data[i : i + PROVIDER_PAYLOAD_BYTES])
-            for i in range(0, len(data), PROVIDER_PAYLOAD_BYTES)
+            provider_id_for_payload(node, data[i : i + PEER_INFO_BYTES])
+            for i in range(0, len(data), PEER_INFO_BYTES)
         ]
         fetch_budget = BATCH_INLINE_FETCH_LIMIT if getattr(node, "is_storage_provider", False) else 0
         indexed = 0
@@ -311,7 +311,14 @@ def _serve_get(
     nearest_peer = node.peer_route.closest_peer_for_hash(route_id)
     if nearest_peer:
         node.logger.debug("Forwarding requester %s to nearest peer for %s", peer.address, route_id.hex())
-        peer_info = encode_peer_contact_bytes(nearest_peer)
+        peer_info = encode_peer_info(
+            PeerInfo(
+                nearest_peer.public_key_bytes,
+                nearest_peer.relay_public_key_bytes,
+                nearest_peer.address,
+            ),
+            False,
+        )
         resp = StorageResponse(
             code=StorageResponseCode.STORAGE_PROVIDER,
             data=peer_info,

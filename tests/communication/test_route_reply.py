@@ -19,9 +19,12 @@ from astreum.communication.message_pow import MESSAGE_FRAMING_BYTES
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import Peer
 from astreum.communication.models.route import Route
+from astreum.communication.models.peer_info import (
+    PeerInfo,
+    decode_peer_infos,
+    encode_peer_info,
+)
 from astreum.communication.models.route_entry import (
-    decode_route_entries,
-    encode_route_entry,
     max_route_entries,
     route_entry_size,
 )
@@ -50,6 +53,11 @@ def _peer(key: bytes, host: str = "10.0.0.1", port: int = 5000, address=True) ->
         storage_public_key_bytes=key,
         address=(host, port) if address else None,
     )
+
+
+def _encode(peer, use_ipv6):
+    info = PeerInfo(peer.public_key_bytes, peer.relay_public_key_bytes, peer.address)
+    return encode_peer_info(info, use_ipv6)
 
 
 def _node(use_ipv6=False, bucket_size=16):
@@ -92,50 +100,63 @@ def _reply(node, requester):
 
 
 def _entry_keys(content, use_ipv6=False):
-    return [key for key, _relay, _addr in decode_route_entries(content[1:], use_ipv6)]
+    body = content[1:]
+    if not body:
+        return []
+    return [info.storage_key for info in decode_peer_infos(body, use_ipv6)]
 
 
 class TestEntryCodec(unittest.TestCase):
     def test_entry_round_trip_ipv4(self):
         peer = _peer(_key(1), "10.1.2.3", 6000)
-        entry = encode_route_entry(peer, False)
+        entry = _encode(peer, False)
         self.assertEqual(len(entry), 70)
-        self.assertEqual(
-            decode_route_entries(entry, False),
-            [(_key(1), peer.relay_public_key_bytes, ("10.1.2.3", 6000))],
-        )
+        [info] = decode_peer_infos(entry, False)
+        self.assertEqual(info.storage_key, _key(1))
+        self.assertEqual(info.relay_key, peer.relay_public_key_bytes)
+        self.assertEqual(info.address, ("10.1.2.3", 6000))
 
     def test_entry_round_trip_ipv6(self):
         peer = _peer(_key(1), "2001:db8::1", 6000)
-        entry = encode_route_entry(peer, True)
+        entry = _encode(peer, True)
         self.assertEqual(len(entry), 82)
-        self.assertEqual(
-            decode_route_entries(entry, True),
-            [(_key(1), peer.relay_public_key_bytes, ("2001:db8::1", 6000))],
-        )
+        [info] = decode_peer_infos(entry, True)
+        self.assertEqual(info.storage_key, _key(1))
+        self.assertEqual(info.relay_key, peer.relay_public_key_bytes)
+        self.assertEqual(info.address, ("2001:db8::1", 6000))
 
     def test_max_entries(self):
         self.assertEqual(max_route_entries(False, 16), 16)
         self.assertEqual(max_route_entries(True, 16), 14)
         self.assertEqual(max_route_entries(False, 4), 4)
 
-    def test_entry_of_other_family_is_not_encoded(self):
-        self.assertIsNone(encode_route_entry(_peer(_key(1), "10.0.0.1"), True))
-        self.assertIsNone(encode_route_entry(_peer(_key(1), "2001:db8::1"), False))
-        self.assertIsNone(encode_route_entry(_peer(_key(1), address=False), False))
+    def test_entry_of_other_family_raises(self):
+        with self.assertRaises(ValueError):
+            _encode(_peer(_key(1), "10.0.0.1"), True)
+        with self.assertRaises(ValueError):
+            _encode(_peer(_key(1), "2001:db8::1"), False)
 
     def test_bad_length_raises(self):
         with self.assertRaises(ValueError):
-            decode_route_entries(b"\x00" * 71, False)
+            decode_peer_infos(b"\x00" * 71, False)
 
 
 class TestReply(unittest.TestCase):
+    def test_reply_skips_peer_of_other_family_or_without_address(self):
+        node = _node(use_ipv6=True)
+        requester = _add(node, _peer(SENDER_KEY, "2001:db8::9"))
+        _add(node, _peer(_key(0x10), "10.0.0.1"))
+        _add(node, _peer(_key(0x20), address=False))
+        _add(node, _peer(_key(0x30), "2001:db8::1"))
+        self.assertTrue(_request(node, requester)[0])
+        self.assertEqual(_entry_keys(_reply(node, requester), True), [_key(0x30)])
+
     def test_reply_nearest_first(self):
         node = _node()
         for k in (_key(0x40), _key(0x10), _key(0x20)):
             _add(node, _peer(k))
         keys = [
-            decode_route_entries(e, False)[0][0]
+            decode_peer_infos(e, False)[0].storage_key
             for e in route_reply_entries(node, node.peer_route, SENDER_KEY, SENDER_KEY)
         ]
         # XOR with 0x80...: 0x10 -> 0x90, 0x20 -> 0xA0, 0x40 -> 0xC0.
@@ -204,7 +225,7 @@ class TestReply(unittest.TestCase):
 
 class TestResponse(unittest.TestCase):
     def _respond(self, node, peers, route_id=0):
-        content = bytes([route_id]) + b"".join(encode_route_entry(p, False) for p in peers)
+        content = bytes([route_id]) + b"".join(_encode(p, False) for p in peers)
         handle_route_response(node, _peer(SENDER_KEY), SimpleNamespace(content=content))
         out = []
         while not node.outgoing_queue.empty():

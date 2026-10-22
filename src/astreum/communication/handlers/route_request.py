@@ -3,10 +3,8 @@ from __future__ import annotations
 from astreum.communication.outgoing_queue import enqueue_outgoing
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import get_peer
-from astreum.communication.models.route_entry import (
-    encode_route_entry,
-    max_route_entries,
-)
+from astreum.communication.models.peer_info import PeerInfo, encode_peer_info
+from astreum.communication.models.route_entry import max_route_entries
 from astreum.communication.util import xor_distance
 
 from typing import TYPE_CHECKING
@@ -46,8 +44,14 @@ def route_reply_entries(
             peer = get_peer(node, peer_key)
             if peer is None:
                 continue
-            entry = encode_route_entry(peer, use_ipv6)
-            if entry is None:
+            if peer.address is None:
+                continue
+            try:
+                entry = encode_peer_info(
+                    PeerInfo(peer.public_key_bytes, peer.relay_public_key_bytes, peer.address),
+                    use_ipv6,
+                )
+            except ValueError:
                 continue
             ranked.append((xor_distance(rank_key, peer_key), entry))
     ranked.sort(key=lambda item: item[0])

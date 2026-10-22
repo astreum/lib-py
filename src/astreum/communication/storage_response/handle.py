@@ -7,7 +7,7 @@ from astreum.communication.storage_response.storage_found import decode_found_pa
 from astreum.communication.storage_response.code import StorageResponseCode
 from astreum.communication.storage_response.model import StorageResponse
 from astreum.communication.storage_response.storage_payment_required import decode_storage_payment_required
-from astreum.communication.storage_response.storage_provider import decode_storage_providers
+from astreum.communication.models.peer_info import decode_peer_infos
 from astreum.communication.storage_response.retry import _retry_pending_storage_get_via_peer_contact
 from astreum.expression import Expr
 from astreum.expression.encoding import encode_expr_to_bytes
@@ -121,7 +121,7 @@ def handle_storage_response(node: "Node", peer: "Peer", message: Message) -> tup
 
         case StorageResponseCode.STORAGE_PROVIDER:
             try:
-                pieces = decode_storage_providers(storage_response.data)
+                pieces = decode_peer_infos(storage_response.data, False)
             except Exception as exc:
                 node.logger.debug("Invalid STORAGE_PROVIDER payload from %s: %s", peer.address, exc)
                 return False, "invalid STORAGE_PROVIDER payload"
@@ -129,8 +129,8 @@ def handle_storage_response(node: "Node", peer: "Peer", message: Message) -> tup
             # The reply order is not trusted. Ask the provider nearest to the
             # key first. The reply is used here and never stored in the index.
             route_id = get_expr_req_block(node, storage_response.expr_id) or storage_response.expr_id
-            pieces.sort(key=lambda piece: xor_distance(route_id, piece[0]))
-            contacts = [(relay, address, port) for _, relay, address, port in pieces]
+            pieces.sort(key=lambda piece: xor_distance(route_id, piece.storage_key))
+            contacts = [(info.relay_key, *info.address) for info in pieces]
             for position, contact in enumerate(contacts):
                 if _retry_pending_storage_get_via_peer_contact(
                     node, expr_id=storage_response.expr_id, peer_contact=contact

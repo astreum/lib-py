@@ -25,7 +25,7 @@ from astreum.communication.models.handshake import (
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import Peer
 from astreum.communication.models.route import Route
-from astreum.communication.models.route_entry import encode_route_entry
+from astreum.communication.models.peer_info import PeerInfo, encode_peer_info
 from astreum.communication.processors import incoming as incoming_processor
 from astreum.communication.processors.peer import _queue_bootstrap_handshakes
 
@@ -345,7 +345,14 @@ class TestSenders(unittest.TestCase):
             storage_public_key_bytes=remote.storage_public_key_bytes,
             address=("10.0.0.7", 7000),
         )
-        content = b"\x00" + encode_route_entry(entry_peer, False)
+        content = b"\x00" + encode_peer_info(
+            PeerInfo(
+                entry_peer.public_key_bytes,
+                entry_peer.relay_public_key_bytes,
+                entry_peer.address,
+            ),
+            False,
+        )
         node.use_ipv6 = False
         handle_route_response(
             node, entry_peer, SimpleNamespace(content=content)
