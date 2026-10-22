@@ -1,6 +1,6 @@
 
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
@@ -40,16 +40,77 @@ DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS = 0.25
 DEFAULT_STORAGE_FOUND_MAX_PAGES = 64
 
 
-def config_setup(config: Dict = {}):
-    """
-    Normalize configuration values before the node starts.
+def _parse_int(name: str, raw, minimum: Optional[int] = None) -> int:
+    """Convert a raw config value to an integer.
 
     Args:
-        config: Configuration dictionary to normalize. Modified in place.
+        name: Config key name, used in error messages.
+        raw: Raw value from the caller.
+        minimum: ``None`` for no range check, ``0`` to require a non-negative
+            value, or ``1`` to require a positive value.
 
     Returns:
-        The normalized configuration dictionary.
+        The integer value.
+
+    Raises:
+        ValueError: If ``raw`` is not an integer or is below ``minimum``.
     """
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer: {raw!r}") from exc
+    if minimum == 0 and value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    if minimum == 1 and value < 1:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def _parse_float(name: str, raw, allow_zero: bool) -> float:
+    """Convert a raw config value to a float.
+
+    Args:
+        name: Config key name, used in error messages.
+        raw: Raw value from the caller.
+        allow_zero: ``True`` to accept 0, ``False`` to require a positive value.
+
+    Returns:
+        The float value.
+
+    Raises:
+        ValueError: If ``raw`` is not a number or is out of range.
+    """
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a number: {raw!r}") from exc
+    if allow_zero and value < 0:
+        raise ValueError(f"{name} must be a non-negative number")
+    if not allow_zero and value <= 0:
+        raise ValueError(f"{name} must be a positive number")
+    return value
+
+
+def _parse_bool(name: str, raw) -> bool:
+    """Check that a raw config value is a boolean.
+
+    Args:
+        name: Config key name, used in error messages.
+        raw: Raw value from the caller.
+
+    Returns:
+        The boolean value.
+
+    Raises:
+        ValueError: If ``raw`` is not a ``bool``.
+    """
+    if not isinstance(raw, bool):
+        raise ValueError(f"{name} must be a boolean")
+    return raw
+
+
+def _setup_chain(config: Dict) -> None:
+    """Normalize ``chain`` and ``chain_id``."""
     chain_str = config.get("chain")
     if chain_str not in {"main", "test"}:
         chain_str = None
@@ -68,23 +129,20 @@ def config_setup(config: Dict = {}):
     config["chain"] = chain_str
     config["chain_id"] = chain_id
 
-    hot_limit_raw = config.get(
-        "hot_storage_limit", config.get("hot_storage_default_limit", DEFAULT_HOT_STORAGE_LIMIT)
-    )
-    try:
-        config["hot_storage_limit"] = int(hot_limit_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"hot_storage_limit must be an integer: {hot_limit_raw!r}"
-        ) from exc
 
-    cold_limit_raw = config.get("cold_storage_limit", DEFAULT_COLD_STORAGE_LIMIT)
-    try:
-        config["cold_storage_limit"] = int(cold_limit_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"cold_storage_limit must be an integer: {cold_limit_raw!r}"
-        ) from exc
+def _setup_storage_limits(config: Dict) -> None:
+    """Normalize hot and cold storage keys and create the cold directory."""
+    config["hot_storage_limit"] = _parse_int(
+        "hot_storage_limit",
+        config.get(
+            "hot_storage_limit",
+            config.get("hot_storage_default_limit", DEFAULT_HOT_STORAGE_LIMIT),
+        ),
+    )
+    config["cold_storage_limit"] = _parse_int(
+        "cold_storage_limit",
+        config.get("cold_storage_limit", DEFAULT_COLD_STORAGE_LIMIT),
+    )
 
     cold_scale_raw = config.get("cold_storage_scale", DEFAULT_COLD_STORAGE_SCALE)
     if isinstance(cold_scale_raw, str):
@@ -108,200 +166,101 @@ def config_setup(config: Dict = {}):
     else:
         config["cold_storage_path"] = None
 
-    retention_raw = config.get(
+
+def _setup_logging(config: Dict) -> None:
+    """Normalize logging keys."""
+    config["logging_retention_days"] = _parse_int(
         "logging_retention_days",
-        config.get("logging_retention", config.get("retention_days", DEFAULT_LOGGING_RETENTION_DAYS)),
+        config.get(
+            "logging_retention_days",
+            config.get(
+                "logging_retention",
+                config.get("retention_days", DEFAULT_LOGGING_RETENTION_DAYS),
+            ),
+        ),
     )
-    try:
-        config["logging_retention_days"] = int(retention_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"logging_retention_days must be an integer: {retention_raw!r}"
-        ) from exc
+    config["logging_enabled"] = _parse_bool(
+        "logging_enabled", config.get("logging_enabled", DEFAULT_LOGGING_ENABLED)
+    )
 
-    logging_enabled_raw = config.get("logging_enabled", DEFAULT_LOGGING_ENABLED)
-    if isinstance(logging_enabled_raw, bool):
-        config["logging_enabled"] = logging_enabled_raw
-    else:
-        raise ValueError("logging_enabled must be a boolean")
 
-    if "port" in config:
-        port_raw = config["port"]
-    else:
-        port_raw = DEFAULT_PORT
-    try:
-        config["port"] = int(port_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"port must be an integer: {port_raw!r}"
-        ) from exc
+def _setup_network(config: Dict) -> None:
+    """Normalize port, queue, peer, bootstrap and self lookup keys."""
+    config["port"] = _parse_int("port", config.get("port", DEFAULT_PORT))
     if config["port"] < 0:
         raise ValueError("port must be 0 or a positive integer")
 
-    incoming_queue_limit_raw = config.get(
-        "incoming_queue_size_limit", DEFAULT_INCOMING_QUEUE_SIZE_LIMIT_BYTES
+    config["incoming_queue_size_limit"] = _parse_int(
+        "incoming_queue_size_limit",
+        config.get("incoming_queue_size_limit", DEFAULT_INCOMING_QUEUE_SIZE_LIMIT_BYTES),
+        0,
     )
-    try:
-        incoming_queue_limit = int(incoming_queue_limit_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"incoming_queue_size_limit must be an integer: {incoming_queue_limit_raw!r}"
-        ) from exc
-    if incoming_queue_limit < 0:
-        raise ValueError("incoming_queue_size_limit must be a non-negative integer")
-    config["incoming_queue_size_limit"] = incoming_queue_limit
-
-    incoming_queue_timeout_raw = config.get(
-        "incoming_queue_timeout", DEFAULT_INCOMING_QUEUE_TIMEOUT_SECONDS
+    config["incoming_queue_timeout"] = _parse_float(
+        "incoming_queue_timeout",
+        config.get("incoming_queue_timeout", DEFAULT_INCOMING_QUEUE_TIMEOUT_SECONDS),
+        True,
     )
-    try:
-        incoming_queue_timeout = float(incoming_queue_timeout_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"incoming_queue_timeout must be a number: {incoming_queue_timeout_raw!r}"
-        ) from exc
-    if incoming_queue_timeout < 0:
-        raise ValueError("incoming_queue_timeout must be a non-negative number")
-    config["incoming_queue_timeout"] = incoming_queue_timeout
-
-    peer_timeout_raw = config.get("peer_timeout", DEFAULT_PEER_TIMEOUT_SECONDS)
-    try:
-        peer_timeout = int(peer_timeout_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"peer_timeout must be an integer: {peer_timeout_raw!r}"
-        ) from exc
-
-    if peer_timeout <= 0:
-        raise ValueError("peer_timeout must be a positive integer")
-
-    config["peer_timeout"] = peer_timeout
-
-    interval_raw = config.get("peer_timeout_interval", DEFAULT_PEER_TIMEOUT_INTERVAL_SECONDS)
-    try:
-        interval = int(interval_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"peer_timeout_interval must be an integer: {interval_raw!r}"
-        ) from exc
-
-    if interval <= 0:
-        raise ValueError("peer_timeout_interval must be a positive integer")
-
+    config["peer_timeout"] = _parse_int(
+        "peer_timeout", config.get("peer_timeout", DEFAULT_PEER_TIMEOUT_SECONDS), 1
+    )
+    interval = _parse_int(
+        "peer_timeout_interval",
+        config.get("peer_timeout_interval", DEFAULT_PEER_TIMEOUT_INTERVAL_SECONDS),
+        1,
+    )
     config["peer_timeout_interval"] = interval
-    verify_interval_raw = config.get("verify_blockchain_interval", interval)
-    try:
-        verify_interval = float(verify_interval_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"verify_blockchain_interval must be a number: {verify_interval_raw!r}"
-        ) from exc
-    if verify_interval <= 0:
-        raise ValueError("verify_blockchain_interval must be a positive number")
-    config["verify_blockchain_interval"] = verify_interval
-
-    bootstrap_retry_raw = config.get(
-        "bootstrap_retry_interval", DEFAULT_BOOTSTRAP_RETRY_INTERVAL_SECONDS
+    config["verify_blockchain_interval"] = _parse_float(
+        "verify_blockchain_interval",
+        config.get("verify_blockchain_interval", interval),
+        False,
     )
-    try:
-        bootstrap_retry_interval = int(bootstrap_retry_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"bootstrap_retry_interval must be an integer: {bootstrap_retry_raw!r}"
-        ) from exc
-    if bootstrap_retry_interval <= 0:
-        raise ValueError("bootstrap_retry_interval must be a positive integer")
-    config["bootstrap_retry_interval"] = bootstrap_retry_interval
-
-    self_lookup_rounds_raw = config.get("self_lookup_rounds", DEFAULT_SELF_LOOKUP_ROUNDS)
-    try:
-        self_lookup_rounds = int(self_lookup_rounds_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"self_lookup_rounds must be an integer: {self_lookup_rounds_raw!r}"
-        ) from exc
-    if self_lookup_rounds < 0:
-        raise ValueError("self_lookup_rounds must be a non-negative integer")
-    config["self_lookup_rounds"] = self_lookup_rounds
-
-    self_lookup_interval_raw = config.get(
-        "self_lookup_interval", DEFAULT_SELF_LOOKUP_INTERVAL_SECONDS
+    config["bootstrap_retry_interval"] = _parse_int(
+        "bootstrap_retry_interval",
+        config.get("bootstrap_retry_interval", DEFAULT_BOOTSTRAP_RETRY_INTERVAL_SECONDS),
+        1,
     )
-    try:
-        self_lookup_interval = int(self_lookup_interval_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"self_lookup_interval must be an integer: {self_lookup_interval_raw!r}"
-        ) from exc
-    if self_lookup_interval < 0:
-        raise ValueError("self_lookup_interval must be a non-negative integer")
-    config["self_lookup_interval"] = self_lookup_interval
-
-    storage_index_raw = config.get(
-        "storage_index_interval", DEFAULT_STORAGE_INDEX_INTERVAL_SECONDS
+    config["self_lookup_rounds"] = _parse_int(
+        "self_lookup_rounds",
+        config.get("self_lookup_rounds", DEFAULT_SELF_LOOKUP_ROUNDS),
+        0,
     )
-    try:
-        storage_index_interval = int(storage_index_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"storage_index_interval must be an integer: {storage_index_raw!r}"
-        ) from exc
-    if storage_index_interval <= 0:
-        raise ValueError("storage_index_interval must be a positive integer")
-    config["storage_index_interval"] = storage_index_interval
-
-    storage_request_minimum_price_raw = config.get(
-        "storage_request_minimum_price", DEFAULT_STORAGE_REQUEST_MINIMUM_PRICE
+    config["self_lookup_interval"] = _parse_int(
+        "self_lookup_interval",
+        config.get("self_lookup_interval", DEFAULT_SELF_LOOKUP_INTERVAL_SECONDS),
+        0,
     )
-    try:
-        storage_request_minimum_price = int(storage_request_minimum_price_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "storage_request_minimum_price must be an integer: "
-            f"{storage_request_minimum_price_raw!r}"
-        ) from exc
-    if storage_request_minimum_price < 0:
-        raise ValueError("storage_request_minimum_price must be a non-negative integer")
-    config["storage_request_minimum_price"] = storage_request_minimum_price
 
-    storage_request_price_interval_raw = config.get(
-        "storage_request_price_interval", DEFAULT_STORAGE_REQUEST_PRICE_INTERVAL_SECONDS
-    )
-    try:
-        storage_request_price_interval = float(storage_request_price_interval_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "storage_request_price_interval must be a number: "
-            f"{storage_request_price_interval_raw!r}"
-        ) from exc
-    if storage_request_price_interval <= 0:
-        raise ValueError("storage_request_price_interval must be a positive number")
-    config["storage_request_price_interval"] = storage_request_price_interval
 
-    storage_fetch_interval_raw = config.get(
-        "storage_fetch_interval", DEFAULT_STORAGE_FETCH_INTERVAL_SECONDS
+def _setup_storage_requests(config: Dict) -> None:
+    """Normalize storage index, price, fetch, provider and batch keys."""
+    config["storage_index_interval"] = _parse_int(
+        "storage_index_interval",
+        config.get("storage_index_interval", DEFAULT_STORAGE_INDEX_INTERVAL_SECONDS),
+        1,
     )
-    try:
-        storage_fetch_interval = float(storage_fetch_interval_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"storage_fetch_interval must be a number: {storage_fetch_interval_raw!r}"
-        ) from exc
-    if storage_fetch_interval < 0:
-        raise ValueError("storage_fetch_interval must be a non-negative number")
+    config["storage_request_minimum_price"] = _parse_int(
+        "storage_request_minimum_price",
+        config.get("storage_request_minimum_price", DEFAULT_STORAGE_REQUEST_MINIMUM_PRICE),
+        0,
+    )
+    config["storage_request_price_interval"] = _parse_float(
+        "storage_request_price_interval",
+        config.get(
+            "storage_request_price_interval", DEFAULT_STORAGE_REQUEST_PRICE_INTERVAL_SECONDS
+        ),
+        False,
+    )
+    storage_fetch_interval = _parse_float(
+        "storage_fetch_interval",
+        config.get("storage_fetch_interval", DEFAULT_STORAGE_FETCH_INTERVAL_SECONDS),
+        True,
+    )
     config["storage_fetch_interval"] = storage_fetch_interval
-
-    storage_fetch_retries_raw = config.get(
-        "storage_fetch_retries", DEFAULT_STORAGE_FETCH_RETRIES
+    storage_fetch_retries = _parse_int(
+        "storage_fetch_retries",
+        config.get("storage_fetch_retries", DEFAULT_STORAGE_FETCH_RETRIES),
+        0,
     )
-    try:
-        storage_fetch_retries = int(storage_fetch_retries_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"storage_fetch_retries must be an integer: {storage_fetch_retries_raw!r}"
-        ) from exc
-    if storage_fetch_retries < 0:
-        raise ValueError("storage_fetch_retries must be a non-negative integer")
     config["storage_fetch_retries"] = storage_fetch_retries
 
     expr_request_ttl_raw = config.get("expr_request_ttl")
@@ -321,23 +280,22 @@ def config_setup(config: Dict = {}):
             raise ValueError("expr_request_ttl must be a positive number")
     config["expr_request_ttl"] = expr_request_ttl
 
-    storage_provider_raw = config.get("is_storage_provider", False)
-    if not isinstance(storage_provider_raw, bool):
-        raise ValueError("is_storage_provider must be a boolean")
-    config["is_storage_provider"] = storage_provider_raw
-
-    long_term_interval_raw = config.get(
-        "long_term_storage_interval", DEFAULT_LONG_TERM_STORAGE_INTERVAL_SECONDS
+    config["is_storage_provider"] = _parse_bool(
+        "is_storage_provider", config.get("is_storage_provider", False)
     )
-    try:
-        long_term_interval = float(long_term_interval_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"long_term_storage_interval must be a number: {long_term_interval_raw!r}"
-        ) from exc
-    if long_term_interval <= 0:
-        raise ValueError("long_term_storage_interval must be a positive number")
-    config["long_term_storage_interval"] = long_term_interval
+    config["long_term_storage_interval"] = _parse_float(
+        "long_term_storage_interval",
+        config.get(
+            "long_term_storage_interval", DEFAULT_LONG_TERM_STORAGE_INTERVAL_SECONDS
+        ),
+        False,
+    )
+
+    from astreum.communication.message_pow import MAX_UDP_DATAGRAM_BYTES
+    from astreum.communication.storage_request.model import (
+        max_batch_entries,
+        max_get_entries,
+    )
 
     batch_budget_raw = config.get(
         "storage_put_batch_max_bytes", DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES
@@ -346,15 +304,7 @@ def config_setup(config: Dict = {}):
         raise ValueError(
             f"storage_put_batch_max_bytes must be an integer: {batch_budget_raw!r}"
         )
-    try:
-        batch_budget = int(batch_budget_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"storage_put_batch_max_bytes must be an integer: {batch_budget_raw!r}"
-        ) from exc
-    from astreum.communication.message_pow import MAX_UDP_DATAGRAM_BYTES
-    from astreum.communication.storage_request.model import max_batch_entries
-
+    batch_budget = _parse_int("storage_put_batch_max_bytes", batch_budget_raw)
     if batch_budget > MAX_UDP_DATAGRAM_BYTES:
         raise ValueError(
             f"storage_put_batch_max_bytes must be at most {MAX_UDP_DATAGRAM_BYTES}"
@@ -372,14 +322,7 @@ def config_setup(config: Dict = {}):
         raise ValueError(
             f"storage_get_batch_max_bytes must be an integer: {get_budget_raw!r}"
         )
-    try:
-        get_budget = int(get_budget_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"storage_get_batch_max_bytes must be an integer: {get_budget_raw!r}"
-        ) from exc
-    from astreum.communication.storage_request.model import max_get_entries
-
+    get_budget = _parse_int("storage_get_batch_max_bytes", get_budget_raw)
     if get_budget > MAX_UDP_DATAGRAM_BYTES:
         raise ValueError(
             f"storage_get_batch_max_bytes must be at most {MAX_UDP_DATAGRAM_BYTES}"
@@ -398,15 +341,9 @@ def config_setup(config: Dict = {}):
         raise ValueError(
             f"storage_request_flush_interval must be a number: {flush_interval_raw!r}"
         )
-    try:
-        flush_interval = float(flush_interval_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"storage_request_flush_interval must be a number: {flush_interval_raw!r}"
-        ) from exc
-    if flush_interval <= 0:
-        raise ValueError("storage_request_flush_interval must be a positive number")
-    config["storage_request_flush_interval"] = flush_interval
+    config["storage_request_flush_interval"] = _parse_float(
+        "storage_request_flush_interval", flush_interval_raw, False
+    )
 
     found_pages_raw = config.get(
         "storage_found_max_pages", DEFAULT_STORAGE_FOUND_MAX_PAGES
@@ -421,67 +358,38 @@ def config_setup(config: Dict = {}):
         raise ValueError("storage_found_max_pages must be at most 65535")
     config["storage_found_max_pages"] = found_pages_raw
 
-    fair_use_limit_raw = config.get("fair_use_limit", DEFAULT_FAIR_USE_LIMIT_BYTES)
-    try:
-        fair_use_limit = int(fair_use_limit_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"fair_use_limit must be an integer: {fair_use_limit_raw!r}"
-        ) from exc
-    if fair_use_limit < 0:
-        raise ValueError("fair_use_limit must be a non-negative integer")
-    config["fair_use_limit"] = fair_use_limit
 
-    fair_use_ratio_raw = config.get("fair_use_ratio", DEFAULT_FAIR_USE_RATIO)
-    try:
-        fair_use_ratio = float(fair_use_ratio_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"fair_use_ratio must be a number: {fair_use_ratio_raw!r}"
-        ) from exc
-    if fair_use_ratio < 0:
-        raise ValueError("fair_use_ratio must be a non-negative number")
-    config["fair_use_ratio"] = fair_use_ratio
-
-    max_stale_raw = config.get(
-        "verification_max_stale_seconds", DEFAULT_VERIFICATION_MAX_STALE_SECONDS
+def _setup_verification(config: Dict) -> None:
+    """Normalize fair use, verification and message timestamp keys."""
+    config["fair_use_limit"] = _parse_int(
+        "fair_use_limit", config.get("fair_use_limit", DEFAULT_FAIR_USE_LIMIT_BYTES), 0
     )
-    try:
-        max_stale = int(max_stale_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"verification_max_stale_seconds must be an integer: {max_stale_raw!r}"
-        ) from exc
-    if max_stale < 0:
-        raise ValueError("verification_max_stale_seconds must be a non-negative integer")
-    config["verification_max_stale_seconds"] = max_stale
-
-    max_future_raw = config.get(
-        "verification_max_future_skew", DEFAULT_VERIFICATION_MAX_FUTURE_SKEW_SECONDS
+    config["fair_use_ratio"] = _parse_float(
+        "fair_use_ratio", config.get("fair_use_ratio", DEFAULT_FAIR_USE_RATIO), True
     )
-    try:
-        max_future = int(max_future_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"verification_max_future_skew must be an integer: {max_future_raw!r}"
-        ) from exc
-    if max_future < 0:
-        raise ValueError("verification_max_future_skew must be a non-negative integer")
-    config["verification_max_future_skew"] = max_future
-
-    timestamp_window_raw = config.get(
-        "message_timestamp_window", DEFAULT_MESSAGE_TIMESTAMP_WINDOW_SECONDS
+    config["verification_max_stale_seconds"] = _parse_int(
+        "verification_max_stale_seconds",
+        config.get(
+            "verification_max_stale_seconds", DEFAULT_VERIFICATION_MAX_STALE_SECONDS
+        ),
+        0,
     )
-    try:
-        timestamp_window = int(timestamp_window_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"message_timestamp_window must be an integer: {timestamp_window_raw!r}"
-        ) from exc
-    if timestamp_window < 0:
-        raise ValueError("message_timestamp_window must be a non-negative integer")
-    config["message_timestamp_window"] = timestamp_window
+    config["verification_max_future_skew"] = _parse_int(
+        "verification_max_future_skew",
+        config.get(
+            "verification_max_future_skew", DEFAULT_VERIFICATION_MAX_FUTURE_SKEW_SECONDS
+        ),
+        0,
+    )
+    config["message_timestamp_window"] = _parse_int(
+        "message_timestamp_window",
+        config.get("message_timestamp_window", DEFAULT_MESSAGE_TIMESTAMP_WINDOW_SECONDS),
+        0,
+    )
 
+
+def _setup_seeds(config: Dict) -> None:
+    """Normalize seed and verified head keys."""
     if "default_seeds" in config:
         raise ValueError("default_seeds is no longer supported; use default_seed")
 
@@ -497,9 +405,6 @@ def config_setup(config: Dict = {}):
     else:
         raise ValueError("default_seed must be a string or None")
 
-    if "default_seed" not in config:
-        config["default_seed"] = None
-
     additional_seeds_raw = config.get("additional_seeds", [])
     if isinstance(additional_seeds_raw, (list, tuple)):
         config["additional_seeds"] = list(additional_seeds_raw)
@@ -514,6 +419,12 @@ def config_setup(config: Dict = {}):
     else:
         raise ValueError("verified_up_to must be a hex string or None")
 
+
+def _setup_keys(config: Dict) -> None:
+    """Load or generate secret keys and derive public keys.
+
+    Reads and may write ``storage.txt`` in the user data directory.
+    """
     validation_secret_key_str_raw = config.get("validation_secret_key_str")
     if validation_secret_key_str_raw and isinstance(validation_secret_key_str_raw, str):
         secret_bytes = bytes.fromhex(validation_secret_key_str_raw.strip())
@@ -602,4 +513,26 @@ def config_setup(config: Dict = {}):
         else None
     )
 
+
+def config_setup(config: Optional[Dict] = None):
+    """
+    Normalize configuration values before the node starts.
+
+    Args:
+        config: Configuration dictionary to normalize. Modified in place. When
+            ``None``, a new dictionary is used.
+
+    Returns:
+        The normalized configuration dictionary.
+    """
+    if config is None:
+        config = {}
+    _setup_chain(config)
+    _setup_storage_limits(config)
+    _setup_logging(config)
+    _setup_network(config)
+    _setup_storage_requests(config)
+    _setup_verification(config)
+    _setup_seeds(config)
+    _setup_keys(config)
     return config

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from threading import Lock
+from typing import Optional
 
 from astreum.communication.util import get_bootstrap_peers
 from astreum.storage.setup import setup_storage
@@ -11,11 +12,12 @@ from astreum.utils.logging import logging_setup
 
 
 class Node:
-    def __init__(self, config: dict = {}):
+    def __init__(self, config: Optional[dict] = None):
         """Initialize an Astreum node with the given configuration.
 
         Args:
-            config: Configuration dictionary for node settings.
+            config: Configuration dictionary for node settings. When ``None``,
+                a new dictionary with default settings is used.
 
         Returns: None
         """
