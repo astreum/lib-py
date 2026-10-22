@@ -23,7 +23,7 @@ def get_radix_node_from_storage(
     Args:
         astreum_node: A Node instance for fetching expressions from storage.
         head_hash: The content hash of the serialized node.
-        contact: Optional ``(relay_key, address, port)`` for network fetches.
+        contact: Optional ``RelayEndpoint`` for network fetches.
         block_hash: The block whose record holds this node. Its cells are
             fetched from that block's provider, and a child or value held by a
             plain hash is in the same block. A child or value written as a

@@ -22,7 +22,7 @@ def get_expr_list(
         node: A Node instance providing config and storage access.
         root: The content hash of the root expression, or an Expr
             instance that has already been fetched.
-        contact: Optional ``(relay_key, address, port)`` passed to every
+        contact: Optional ``RelayEndpoint`` passed to every
             network fetch along the chain.
         block_hash: Optional block passed to every network fetch along the
             chain (the tail of a cell is in the block of the cell).

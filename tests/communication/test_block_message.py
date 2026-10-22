@@ -28,6 +28,7 @@ from astreum.consensus.block.create import create_block  # noqa: E402
 from astreum.consensus.block.difficulty import calculate_block_difficulty  # noqa: E402
 from astreum.consensus.block.encoding.decode import get_block_from_storage  # noqa: E402
 from astreum.consensus.block.encoding.expr import get_block_expr  # noqa: E402
+from astreum.communication.models.relay_endpoint import RelayEndpoint  # noqa: E402
 from astreum.consensus.block.holders import (  # noqa: E402
     MAX_BLOCK_HOLDERS,
     block_holder,
@@ -46,7 +47,13 @@ from astreum.expression import NIL, ZERO32, bytes_, link  # noqa: E402
 
 RELAY_KEY = b"\x21" * 32
 PROVIDER = b"\x11" * 32 + RELAY_KEY + bytes([10, 0, 0, 9]) + (9000).to_bytes(2, "big")
-CONTACT = (RELAY_KEY, "10.0.0.9", 9000)
+CONTACT = RelayEndpoint(RELAY_KEY, ("10.0.0.9", 9000))
+
+
+def assert_is_contact(test, endpoint):
+    test.assertIsInstance(endpoint, RelayEndpoint)
+    test.assertEqual(endpoint.relay_key, CONTACT.relay_key)
+    test.assertEqual(endpoint.address, CONTACT.address)
 
 
 def _pub(key: Ed25519PrivateKey) -> bytes:
@@ -179,7 +186,7 @@ class _Chain(unittest.TestCase):
 class TestBlockCodec(_Chain):
     def test_round_trip_keeps_the_block_hash_and_contact(self):
         contact, exprs = decode_block_message(self.payload)
-        self.assertEqual(contact, CONTACT)
+        assert_is_contact(self, contact)
         self.assertEqual(exprs[0].hash(), self.block_hash)
 
     def test_fits_one_datagram(self):
@@ -219,7 +226,7 @@ class TestBlockHolders(unittest.TestCase):
         node = SimpleNamespace()
         init_block_holders(node)
         self.assertTrue(record_block_holder(node, b"a" * 32, CONTACT))
-        self.assertFalse(record_block_holder(node, b"a" * 32, (b"\x00" * 32, "1.1.1.1", 1)))
+        self.assertFalse(record_block_holder(node, b"a" * 32, RelayEndpoint(b"\x00" * 32, ("1.1.1.1", 1))))
         self.assertEqual(block_holder(node, b"a" * 32), CONTACT)
         for i in range(MAX_BLOCK_HOLDERS * 2):
             record_block_holder(node, bytes([i]) * 32, CONTACT)
@@ -250,7 +257,7 @@ class TestBlockHandler(_Chain):
     def test_valid_block_records_the_holder_and_stores_the_header(self):
         node = _node(self.genesis)
         relay = self._handle(node)
-        self.assertEqual(block_holder(node, self.block_hash), CONTACT)
+        assert_is_contact(self, block_holder(node, self.block_hash))
         loaded = get_block_from_storage(node, self.block_hash, load_bloom=False)
         self.assertEqual(loaded.height, 1)
         self.assertEqual(relay.sent, [])
@@ -266,7 +273,7 @@ class TestBlockHandler(_Chain):
         self._handle(node)
         self.assertEqual(node.latest_block_hash, self.block_hash)
         self.assertEqual(node.latest_block.expr_id, self.block_hash)
-        self.assertEqual(node.latest_block.contact, CONTACT)
+        assert_is_contact(self, node.latest_block.contact)
 
     def test_validator_forwards_to_validators_but_not_back_to_the_sender(self):
         node = _node(self.genesis, validator=True)
@@ -282,8 +289,8 @@ class TestBlockHandler(_Chain):
         node = _node(self.genesis)
         forwarder = _peer(7)
         self._handle(node, sender=forwarder)
-        self.assertEqual(block_holder(node, self.block_hash), CONTACT)
-        self.assertNotEqual(block_holder(node, self.block_hash)[1], forwarder.address[0])
+        assert_is_contact(self, block_holder(node, self.block_hash))
+        self.assertNotEqual(block_holder(node, self.block_hash).address[0], forwarder.address[0])
 
     def test_a_block_seen_before_is_not_recorded_or_forwarded_again(self):
         node = _node(self.genesis, validator=True)
@@ -380,7 +387,7 @@ class TestWorkerAnnounce(_Chain):
         for _, message in sent:
             self.assertEqual(message.topic, MessageTopic.BLOCK)
             contact, exprs = decode_block_message(message.content)
-            self.assertEqual(contact, CONTACT)
+            assert_is_contact(self, contact)
             self.assertEqual(exprs[0].hash(), self.block_hash)
 
     def test_a_failure_building_the_message_is_logged_not_raised(self):

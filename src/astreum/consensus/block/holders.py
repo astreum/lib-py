@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import threading
 from collections import OrderedDict
-from typing import Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from astreum.communication.models.relay_endpoint import RelayEndpoint
 
 MAX_BLOCK_HOLDERS = 16
-
-Contact = Tuple[bytes, str, int]
-
 
 def init_block_holders(node: Any) -> None:
     """Initialize block holders storage on the node.
@@ -28,15 +28,15 @@ def init_block_holders(node: Any) -> None:
     node.block_holders_lock = threading.Lock()
 
 
-def block_holder(node: Any, block_hash: Optional[bytes]) -> Optional[Contact]:
-    """Return the ``(relay_key, address, port)`` holding *block_hash*, or None.
+def block_holder(node: Any, block_hash: Optional[bytes]) -> Optional["RelayEndpoint"]:
+    """Return the ``RelayEndpoint`` holding *block_hash*, or None.
 
     Args:
         node: The node to query.
         block_hash: The block hash to look up.
 
     Returns:
-        Contact tuple if found, else None.
+        The endpoint if found, else None.
     """
     holders = getattr(node, "block_holders", None)
     if holders is None or not block_hash:
@@ -58,7 +58,7 @@ def has_block_holder(node: Any, block_hash: bytes) -> bool:
     return block_holder(node, block_hash) is not None
 
 
-def record_block_holder(node: Any, block_hash: bytes, contact: Contact) -> bool:
+def record_block_holder(node: Any, block_hash: bytes, contact: "RelayEndpoint") -> bool:
     """Remember *contact* as the holder of *block_hash*.
 
     Keeps the first holder seen. Returns False if one was already recorded.
@@ -67,7 +67,7 @@ def record_block_holder(node: Any, block_hash: bytes, contact: Contact) -> bool:
     Args:
         node: The node to record on.
         block_hash: The block hash.
-        contact: The contact tuple.
+        contact: The endpoint of the holder.
 
     Returns:
         True if recorded, False if already exists.

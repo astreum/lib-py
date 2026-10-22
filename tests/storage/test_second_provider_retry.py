@@ -13,6 +13,7 @@ for path in (ROOT, ROOT / "src"):
         sys.path.insert(0, str(path))
 
 import astreum.storage.exprs.network as net
+from astreum.communication.models.relay_endpoint import RelayEndpoint
 from astreum.expression import RESOLUTION_FULL, RESOLUTION_SINGLE, bytes_
 from astreum.storage.requests import (
     claim_expr_req,
@@ -24,7 +25,7 @@ from astreum.storage.requests import (
 )
 
 H = b"\x11" * 32
-CONTACT = (b"\x21" * 32, "10.0.0.9", 7000)
+CONTACT = RelayEndpoint(b"\x21" * 32, ("10.0.0.9", 7000))
 RELAY_B = b"\x32" * 32
 PAYLOAD_B = b"\x31" * 32 + RELAY_B + socket.inet_aton("10.0.0.8") + (6000).to_bytes(2, "big")
 PAYLOAD_A = b"\x41" * 32 + b"\x42" * 32 + socket.inet_aton("10.0.0.7") + (5000).to_bytes(2, "big")
@@ -78,7 +79,8 @@ class TestSecondTry(unittest.TestCase):
         run = _Run(node, [None, bytes_(b"x")])
         result = run()
         self.assertEqual(len(run.queued), 2)
-        self.assertEqual(run.queued[1][1]["contact"], (RELAY_B, "10.0.0.8", 6000))
+        queued = run.queued[1][1]["contact"]
+        self.assertEqual((queued.relay_key, queued.address), (RELAY_B, ("10.0.0.8", 6000)))
         self.assertIsNotNone(result[H])
 
     def test_resend_to_pending_next_contact(self):

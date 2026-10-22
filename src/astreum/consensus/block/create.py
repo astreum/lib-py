@@ -5,6 +5,7 @@ from astreum.consensus.models.accounts import Accounts
 from astreum.consensus.models.block import Block
 
 if TYPE_CHECKING:
+    from astreum.communication.models.relay_endpoint import RelayEndpoint
     from astreum.storage.radix import RadixTree
     from astreum.consensus.transaction.model import Transaction
 
@@ -38,7 +39,7 @@ def create_block(
     global_loaned: int = 0,
     global_defaulted: int = 0,
     global_loan_count: int = 0,
-    contact: Optional[tuple] = None,
+    contact: Optional["RelayEndpoint"] = None,
 ) -> Block:
     previous_block_hash = previous_block_hash or ZERO32
     accounts_hash = accounts_hash or ZERO32

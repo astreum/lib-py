@@ -1,5 +1,6 @@
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
+from astreum.communication.models.relay_endpoint import RelayEndpoint
 from astreum.expression import RESOLUTION_SINGLE
 from astreum.storage.requests import get_expr_req_block, get_expr_req_payload
 from astreum.storage.workers.requests import queue_storage_get
@@ -12,7 +13,7 @@ def _retry_pending_storage_get_via_peer_contact(
     node: "Node",
     *,
     expr_id: bytes,
-    peer_contact: Tuple[bytes, str, int],
+    peer_contact: RelayEndpoint,
 ) -> bool:
     """Retry a pending STORAGE_GET via a provider/hint peer contact.
 
@@ -41,7 +42,7 @@ def _retry_pending_storage_get_via_peer_contact(
             **scope,
         )
     except Exception as exc:
-        provider_address, provider_port = peer_contact[1], peer_contact[2]
+        provider_address, provider_port = peer_contact.address
         node.logger.warning(
             "Failed retrying STORAGE_GET for %s via %s:%s: %s",
             expr_id.hex(),

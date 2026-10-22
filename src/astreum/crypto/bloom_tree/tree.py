@@ -71,7 +71,7 @@ class BloomTree:
         self.root: BloomNode | None = None
         # Nodes written by this tree (new or changed), by identity.
         self._touched: dict[int, BloomNode] = {}
-        # (relay_key, address, port) of the peer holding uncommitted nodes.
+        # RelayEndpoint of the peer holding uncommitted nodes.
         self.contact = contact
         # The block whose header holds root_hash: its provider holds the
         # nodes, and a child reached by plain hash is in the same block.

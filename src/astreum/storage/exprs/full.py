@@ -19,7 +19,7 @@ def get_expr_full(node, expr_id: bytes, contact=None, block_hash=None) -> Option
     Args:
         node: A Node instance providing config and storage access.
         expr_id: The content hash of the root expression.
-        contact: Optional ``(relay_key, address, port)`` passed to every
+        contact: Optional ``RelayEndpoint`` passed to every
             network fetch in the tree.
         block_hash: Optional block passed to every network fetch in the tree.
 

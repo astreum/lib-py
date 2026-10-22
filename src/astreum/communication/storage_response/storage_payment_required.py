@@ -1,6 +1,8 @@
 import socket
 from typing import Optional, Tuple
 
+from astreum.communication.models.relay_endpoint import RelayEndpoint
+
 
 STORAGE_PAYMENT_REQUIRED_NO_HINT_PAYLOAD_LEN = 32 + 8 + 8
 STORAGE_PAYMENT_REQUIRED_WITH_HINT_PAYLOAD_LEN = (
@@ -12,7 +14,7 @@ def encode_storage_payment_required(
     payment_public_key: bytes,
     storage_size_estimate: int,
     base_storage_fee: int,
-    hint_peer: Optional[Tuple[bytes, str, int]] = None,
+    hint_peer: Optional[RelayEndpoint] = None,
 ) -> bytes:
     """Encode payment-required payload with optional IPv4 relay hint.
 
@@ -24,7 +26,7 @@ def encode_storage_payment_required(
         payment_public_key (bytes): The payment public key (32 bytes).
         storage_size_estimate (int): The estimated storage size.
         base_storage_fee (int): The base storage fee.
-        hint_peer (Optional[Tuple[bytes, str, int]]): Optional hint peer tuple.
+        hint_peer (Optional[RelayEndpoint]): Optional hint endpoint.
 
     Returns:
         bytes: The encoded payment-required payload.
@@ -53,8 +55,8 @@ def encode_storage_payment_required(
     if hint_peer is None:
         return base_payload
 
-    hint_public_key, hint_host, hint_port = hint_peer
-    hint_key = hint_public_key
+    hint_key = hint_peer.relay_key
+    hint_host, hint_port = hint_peer.address
     if len(hint_key) != 32:
         raise ValueError("hint relay public key must be 32 bytes")
     try:
@@ -70,14 +72,14 @@ def encode_storage_payment_required(
 
 def decode_storage_payment_required(
     payload: bytes,
-) -> Tuple[bytes, int, int, Optional[Tuple[bytes, str, int]]]:
+) -> Tuple[bytes, int, int, Optional[RelayEndpoint]]:
     """Decode payment-required payload using length to determine optional hint.
 
     Args:
         payload (bytes): The encoded payload to decode.
 
     Returns:
-        Tuple[bytes, int, int, Optional[Tuple[bytes, str, int]]]: The decoded fields.
+        Tuple[bytes, int, int, Optional[RelayEndpoint]]: The decoded fields.
     """
     payload_bytes = payload
     if len(payload_bytes) == STORAGE_PAYMENT_REQUIRED_NO_HINT_PAYLOAD_LEN:
@@ -104,5 +106,5 @@ def decode_storage_payment_required(
         payment_public_key,
         storage_size_estimate,
         base_storage_fee,
-        (hint_public_key, hint_address, hint_port),
+        RelayEndpoint(hint_public_key, (hint_address, hint_port)),
     )

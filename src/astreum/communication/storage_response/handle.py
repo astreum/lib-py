@@ -8,6 +8,7 @@ from astreum.communication.storage_response.code import StorageResponseCode
 from astreum.communication.storage_response.model import StorageResponse
 from astreum.communication.storage_response.storage_payment_required import decode_storage_payment_required
 from astreum.communication.models.peer_info import decode_peer_infos
+from astreum.communication.models.relay_endpoint import RelayEndpoint
 from astreum.communication.storage_response.retry import _retry_pending_storage_get_via_peer_contact
 from astreum.expression import Expr
 from astreum.expression.encoding import encode_expr_to_bytes
@@ -130,7 +131,7 @@ def handle_storage_response(node: "Node", peer: "Peer", message: Message) -> tup
             # key first. The reply is used here and never stored in the index.
             route_id = get_expr_req_block(node, storage_response.expr_id) or storage_response.expr_id
             pieces.sort(key=lambda piece: xor_distance(route_id, piece.storage_key))
-            contacts = [(info.relay_key, *info.address) for info in pieces]
+            contacts = [RelayEndpoint(info.relay_key, info.address) for info in pieces]
             for position, contact in enumerate(contacts):
                 if _retry_pending_storage_get_via_peer_contact(
                     node, expr_id=storage_response.expr_id, peer_contact=contact
@@ -173,8 +174,8 @@ def handle_storage_response(node: "Node", peer: "Peer", message: Message) -> tup
                     "STORAGE_PAYMENT_REQUIRED for %s from %s but no local payment key; trying hint %s:%s",
                     storage_response.expr_id.hex(),
                     peer.address,
-                    hint_peer[1],
-                    hint_peer[2],
+                    hint_peer.address[0],
+                    hint_peer.address[1],
                 )
                 if _retry_pending_storage_get_via_peer_contact(
                     node,

@@ -491,18 +491,18 @@ class TestProviderResponseHandler(unittest.TestCase):
         near = self._payload(0x01, 5000)
         _, result, calls = self._handle(far + near, [True])
         self.assertEqual(result, (True, None))
-        self.assertEqual(calls[0][2], 5000)
+        self.assertEqual(calls[0].address[1], 5000)
 
     def test_second_provider_used_when_first_unusable(self):
         _, result, calls = self._handle(
             self._payload(0x01, 5000) + self._payload(0xF0, 6000), [False, True]
         )
         self.assertEqual(result, (True, None))
-        self.assertEqual([c[2] for c in calls], [5000, 6000])
+        self.assertEqual([c.address[1] for c in calls], [5000, 6000])
 
     def test_handler_saves_next_contact(self):
         node, _, _ = self._handle(self._payload(0x01, 5000) + self._payload(0xF0, 6000), [True])
-        self.assertEqual(node.expr_requests[self.H].next_contact[2], 6000)
+        self.assertEqual(node.expr_requests[self.H].next_contact.address[1], 6000)
 
     def test_handler_does_not_index_response(self):
         node, _, _ = self._handle(self._payload(0x01, 5000) + self._payload(0xF0, 6000), [True])

@@ -18,6 +18,7 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from astreum.communication.models.relay_endpoint import RelayEndpoint  # noqa: E402
 from astreum.consensus.block.create import create_block  # noqa: E402
 from astreum.consensus.block.encoding.decode import get_block_from_storage  # noqa: E402
 from astreum.consensus.block.encoding.expr import get_block_expr  # noqa: E402
@@ -50,7 +51,7 @@ from astreum.storage.radix import (  # noqa: E402
     put_in_radix_tree,
 )
 
-CONTACT = (b"\x07" * 32, "10.0.0.7", 7000)
+CONTACT = RelayEndpoint(b"\x07" * 32, ("10.0.0.7", 7000))
 QUEUE = "astreum.storage.workers.requests.queue_storage_get"
 
 
@@ -276,6 +277,42 @@ class TestBlockContact(unittest.TestCase):
         self.assertEqual(served.contacts, {CONTACT})
         self.assertEqual(loaded.contact, CONTACT)
         self.assertEqual(loaded.accounts._trie.contact, CONTACT)
+
+
+class TestDestination(unittest.TestCase):
+    def test_destination_uses_endpoint_fields(self) -> None:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
+        from astreum.storage.workers.requests import _resolve_destination
+
+        provider = X25519PrivateKey.generate()
+        relay = provider.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
+        node = SimpleNamespace(
+            relay_secret_key=X25519PrivateKey.generate(), logger=MagicMock()
+        )
+        endpoint = RelayEndpoint(relay, ("10.1.1.1", 6000))
+        key, address, shared, difficulty = _resolve_destination(
+            node, b"\x01" * 32, contact=endpoint
+        )
+        self.assertEqual(key, ("provider", relay, "10.1.1.1", 6000))
+        self.assertEqual(address, ("10.1.1.1", 6000))
+        self.assertEqual(shared, node.relay_secret_key.exchange(provider.public_key()))
+        self.assertEqual(difficulty, 1)
+
+    def test_tuple_contact_is_not_accepted(self) -> None:
+        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
+        from astreum.storage.workers.requests import _resolve_destination
+
+        node = SimpleNamespace(
+            relay_secret_key=X25519PrivateKey.generate(), logger=MagicMock()
+        )
+        self.assertIsNone(
+            _resolve_destination(node, b"\x01" * 32, contact=(b"\x07" * 32, "10.0.0.7", 7000))
+        )
 
 
 if __name__ == "__main__":

@@ -76,7 +76,7 @@ def fetch_and_store_record(
         node: A Node instance for fetching and storing data.
         storage_id: The 32-byte block hash (record key).
         record: The StorageRecord describing the block's storage.
-        contact: Optional ``(relay_key, address, port)`` for fetches.
+        contact: Optional ``RelayEndpoint`` for fetches.
 
     Returns:
         True on success, False if a cell could not be fetched, the replay

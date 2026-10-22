@@ -156,7 +156,7 @@ def get_exprs_from_network(
         node: A Node instance providing config and storage access.
         entries: ``(expr_id, resolution)`` pairs. A repeated ``expr_id`` is
             fetched once, at its first resolution.
-        contact: ``(relay_key, address, port)`` of the one peer to ask, instead
+        contact: ``RelayEndpoint`` of the one peer to ask, instead
             of routing each hash by the index or xor distance. Used for data
             only its creator holds (an uncommitted block's exprs). Local
             storage is still checked first.
@@ -247,6 +247,7 @@ def _resend_to_next_provider(
         The set of hashes for which a GET was queued.
     """
     from astreum.communication.models.peer_info import decode_peer_info
+    from astreum.communication.models.relay_endpoint import RelayEndpoint
     from astreum.storage.providers import provider_payload_for_id
     from astreum.storage.requests import has_expr_req, rearm_expr_req, take_next_contact
     from astreum.storage.workers.requests import queue_storage_get
@@ -267,7 +268,7 @@ def _resend_to_next_provider(
                 info = decode_peer_info(payload, False)
             except ValueError:
                 continue
-            contact = (info.relay_key, *info.address)
+            contact = RelayEndpoint(info.relay_key, info.address)
         live = has_expr_req(node, expr_id)
         if live:
             rearm_expr_req(node, expr_id)
@@ -286,7 +287,7 @@ def get_expr_from_network(
     Args:
         node: A Node instance providing config and storage access.
         expr_id: The content hash of the expression to fetch.
-        contact: Optional ``(relay_key, address, port)`` to ask directly.
+        contact: Optional ``RelayEndpoint`` to ask directly.
         block_hash: Optional block whose provider holds *expr_id*.
         resolution: The resolution strategy — ``RESOLUTION_SINGLE``
             (default), ``RESOLUTION_LIST`` or ``RESOLUTION_FULL``.

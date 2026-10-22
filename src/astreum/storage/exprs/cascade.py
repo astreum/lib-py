@@ -29,7 +29,7 @@ def get_expr(node, expr_id: bytes, contact=None, block_hash=None) -> Optional[Ex
     Args:
         node: A Node instance providing config and storage access.
         expr_id: The content hash of the expression to retrieve.
-        contact: Optional ``(relay_key, address, port)``. Only the network
+        contact: Optional ``RelayEndpoint``. Only the network
             step uses it: the GET goes straight to that peer instead of being
             routed. Hot and cold storage are still checked first.
         block_hash: Optional block whose provider holds *expr_id*. Only the

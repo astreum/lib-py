@@ -26,7 +26,7 @@ def cell_reader(node: Any, block_hash: Optional[bytes], contact: Any = None):
     Args:
         node: A Node instance for fetching expressions from storage.
         block_hash: The block whose provider holds the cell (None for local-only).
-        contact: Optional ``(relay_key, address, port)`` for network fetches.
+        contact: Optional ``RelayEndpoint`` for network fetches.
 
     Returns:
         A function ``part(cell, side)`` that returns the head or tail of a cell.
@@ -60,7 +60,7 @@ def read_pointer(
         node: A Node instance for fetching expressions from storage.
         cell: The cell expression to read the pointer from.
         block_hash: The block that holds the cell (None for new cells).
-        contact: Optional ``(relay_key, address, port)`` for network fetches.
+        contact: Optional ``RelayEndpoint`` for network fetches.
 
     Returns:
         A tuple of ``(expr_id, block_id)`` where ``expr_id`` is the 32-byte
@@ -84,7 +84,7 @@ def read_field(
         node: A Node instance for fetching expressions from storage.
         cell: The cell expression to read the field from.
         block_hash: The block that holds the record (None for new records).
-        contact: Optional ``(relay_key, address, port)`` for network fetches.
+        contact: Optional ``RelayEndpoint`` for network fetches.
 
     Returns:
         A tuple of ``(expr_id, block_id)`` or None if the cell is neither

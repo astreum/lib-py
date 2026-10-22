@@ -20,7 +20,7 @@ def get_block_from_storage(
     Args:
         astreum_node: A Node instance for fetching expressions from storage.
         block_hash: The content hash of the serialized block.
-        contact: Optional ``(relay_key, address, port)`` of the validator that
+        contact: Optional ``RelayEndpoint`` of the validator that
             holds the block's uncommitted exprs. Every network fetch for the
             block goes there, and the block keeps it (``block.contact``) so
             its tries and bloom tree do the same.

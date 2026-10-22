@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 from astreum.communication.models.message import Message, MessageTopic
+from astreum.communication.models.relay_endpoint import RelayEndpoint
 from astreum.communication.storage_request.model import StorageRequest, max_get_entries
 from astreum.expression import RESOLUTION_LIST, RESOLUTION_SINGLE
 from astreum.storage.requests import claim_expr_req, has_expr_req
@@ -279,7 +280,7 @@ class TestScoped(unittest.TestCase):
         provider, relay = self._provider()
         node = _node()
         init_block_holders(node)
-        record_block_holder(node, self.BLOCK, (relay, "10.9.9.9", 6100))
+        record_block_holder(node, self.BLOCK, RelayEndpoint(relay, ("10.9.9.9", 6100)))
         h = _ids(1)[0]
         queue_storage_get(node, h, RESOLUTION_SINGLE, block_hash=self.BLOCK)
         with patch(ENQUEUE, return_value=True) as enq:
@@ -307,7 +308,7 @@ class TestScoped(unittest.TestCase):
         claim_expr_req(node, h, RESOLUTION_SINGLE, self.BLOCK)
         self.assertTrue(
             _retry_pending_storage_get_via_peer_contact(
-                node, expr_id=h, peer_contact=(relay, "10.1.1.1", 6000)
+                node, expr_id=h, peer_contact=RelayEndpoint(relay, ("10.1.1.1", 6000))
             )
         )
         shared = provider.exchange(node.relay_secret_key.public_key())
@@ -323,7 +324,7 @@ class TestPreclaimed(unittest.TestCase):
         relay = provider.public_key().public_bytes(
             serialization.Encoding.Raw, serialization.PublicFormat.Raw
         )
-        return provider, (relay, "10.1.1.1", 6000)
+        return provider, RelayEndpoint(relay, ("10.1.1.1", 6000))
 
     def test_contact_overrides_routing_and_claim_is_not_repeated(self):
         node = _node()
@@ -349,7 +350,7 @@ class TestPreclaimed(unittest.TestCase):
         node = _node()
         self.assertFalse(
             queue_storage_get(node, _ids(1)[0], RESOLUTION_SINGLE,
-                              contact=(b"short", "1.1.1.1", 1), preclaimed=True)
+                              contact=RelayEndpoint(b"short", ("1.1.1.1", 1)), preclaimed=True)
         )
 
 

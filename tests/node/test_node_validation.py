@@ -11,6 +11,7 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from astreum.communication.models.relay_endpoint import RelayEndpoint  # noqa: E402
 from astreum.node import Node  # noqa: E402
 from astreum.consensus.validation.node import validate_blockchain  # noqa: E402
 from astreum.expression import Expr, ZERO32, resolve_inner_exprs  # noqa: E402
@@ -168,7 +169,7 @@ class TestNodeValidation(unittest.TestCase):
 
             # A new block's exprs exist only on node A, and node B is not a
             # validator, so it gets no BLOCK announcement. Give B the contact.
-            contact_a = (node_a.relay_public_key_bytes, "127.0.0.1", port_a)
+            contact_a = RelayEndpoint(node_a.relay_public_key_bytes, ("127.0.0.1", port_a))
 
             node_a_header = get_expr_list(node_a, latest_hash)
             self.assertIsNotNone(

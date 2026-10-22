@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from astreum import Node
+    from astreum.communication.models.relay_endpoint import RelayEndpoint
     from astreum.expression import Expr
 
 DEFAULT_EXPR_REQUEST_TTL_SECONDS = 4.0
@@ -28,7 +29,7 @@ class PendingExprRequest:
         sender: Peer key of the first accepted page, ``None`` until then.
         total: Page count declared by the first accepted page.
         pages: Staged exprs per received page number.
-        next_contact: ``(relay_key, address, port)`` of the second provider
+        next_contact: ``RelayEndpoint`` of the second provider
             from a STORAGE_PROVIDER reply, or ``None``. Dropped with the
             request.
     """
@@ -55,7 +56,7 @@ class PendingExprRequest:
         self.sender: Optional[bytes] = None
         self.total: Optional[int] = None
         self.pages: Dict[int, List["Expr"]] = {}
-        self.next_contact: Optional[Tuple[bytes, str, int]] = None
+        self.next_contact: Optional["RelayEndpoint"] = None
 
 
 class StageResult(enum.Enum):
@@ -277,14 +278,14 @@ def prune_expired_expr_reqs(node: "Node") -> int:
 
 
 def set_next_contact(
-    node: "Node", expr_id: bytes, contact: Tuple[bytes, str, int]
+    node: "Node", expr_id: bytes, contact: "RelayEndpoint"
 ) -> bool:
     """Save the second provider contact on a live request.
 
     Args:
         node: A Node instance with the ``expr_requests`` registry.
         expr_id: The content hash being requested.
-        contact: ``(relay_key, address, port)`` of the second provider.
+        contact: ``RelayEndpoint`` of the second provider.
 
     Returns:
         True if a live request holds the contact, False otherwise.
@@ -297,7 +298,7 @@ def set_next_contact(
         return True
 
 
-def take_next_contact(node: "Node", expr_id: bytes) -> Optional[Tuple[bytes, str, int]]:
+def take_next_contact(node: "Node", expr_id: bytes) -> Optional["RelayEndpoint"]:
     """Return the saved second provider contact and clear it.
 
     Args:

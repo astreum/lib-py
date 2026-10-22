@@ -23,6 +23,7 @@ from astreum.utils.config import (
 
 if TYPE_CHECKING:
     from astreum import Node
+    from astreum.communication.models.relay_endpoint import RelayEndpoint
 
 
 class _Destination:
@@ -52,20 +53,20 @@ def init_request_buffer(node: "Node") -> None:
     node.storage_request_flush_event = threading.Event()
 
 
-def _provider_destination(node: "Node", relay_key_bytes: bytes, address: str, port: int):
+def _provider_destination(node: "Node", endpoint: "RelayEndpoint"):
     """Build a destination tuple for a provider.
 
     Args:
         node: A Node instance with relay secret key.
-        relay_key_bytes: The provider's relay public key.
-        address: The provider's IP address.
-        port: The provider's port.
+        endpoint: The provider's relay key and address.
 
     Returns:
         A tuple of (key, address, shared_key_bytes, difficulty).
     """
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
 
+    relay_key_bytes = endpoint.relay_key
+    address, port = endpoint.address
     provider_public_key = X25519PublicKey.from_public_bytes(relay_key_bytes)
     shared_key_bytes = node.relay_secret_key.exchange(provider_public_key)
     return ("provider", relay_key_bytes, address, port), (address, port), shared_key_bytes, 1
@@ -74,7 +75,7 @@ def _provider_destination(node: "Node", relay_key_bytes: bytes, address: str, po
 def _resolve_destination(node: "Node", expr_id: bytes, contact=None, block_hash=None):
     """Return ``(key, address, shared_key_bytes, difficulty)`` or ``None``.
 
-    *contact* (``(relay_key, address, port)``) overrides routing, for redirects.
+    *contact* (a ``RelayEndpoint``) overrides routing, for redirects.
     A scoped request (*block_hash*) is routed by the block: its holder if there
     is one, else the provider indexed for it, else the peer nearest the block
     hash. Otherwise the nearest usable indexed provider wins for *expr_id*, then
@@ -83,7 +84,7 @@ def _resolve_destination(node: "Node", expr_id: bytes, contact=None, block_hash=
     Args:
         node: A Node instance for routing.
         expr_id: The content hash to route to.
-        contact: Optional ``(relay_key, address, port)`` for direct routing.
+        contact: Optional ``RelayEndpoint`` for direct routing.
         block_hash: Optional block hash for scoped routing.
 
     Returns:
@@ -91,8 +92,7 @@ def _resolve_destination(node: "Node", expr_id: bytes, contact=None, block_hash=
     """
     try:
         if contact is not None:
-            relay_key_bytes, address, port = contact
-            return _provider_destination(node, relay_key_bytes, address, port)
+            return _provider_destination(node, contact)
 
         route_id = expr_id
         if block_hash is not None:
@@ -100,12 +100,12 @@ def _resolve_destination(node: "Node", expr_id: bytes, contact=None, block_hash=
 
             holder = block_holder(node, block_hash)
             if holder is not None:
-                relay_key_bytes, address, port = holder
-                return _provider_destination(node, relay_key_bytes, address, port)
+                return _provider_destination(node, holder)
             route_id = block_hash
 
         for provider_id in node.storage_index.get(route_id, ()):
             from astreum.communication.models.peer_info import decode_peer_info
+            from astreum.communication.models.relay_endpoint import RelayEndpoint
             from astreum.storage.providers import provider_payload_for_id
 
             payload = provider_payload_for_id(node, provider_id)
@@ -116,7 +116,7 @@ def _resolve_destination(node: "Node", expr_id: bytes, contact=None, block_hash=
                 info = decode_peer_info(payload, False)
             except ValueError:
                 continue
-            return _provider_destination(node, info.relay_key, *info.address)
+            return _provider_destination(node, RelayEndpoint(info.relay_key, info.address))
 
         peer = node.peer_route.closest_peer_for_hash(route_id)
         if peer is None or peer.address is None:
@@ -160,7 +160,7 @@ def queue_storage_get(
     or one is already buffered or in flight and the caller should just poll.
 
     Args:
-        contact: ``(relay_key, address, port)`` to send to instead of the
+        contact: ``RelayEndpoint`` to send to instead of the
             routed destination (redirects and hints).
         preclaimed: The pending request was already claimed (redirect retries),
             so the flush must not claim it again.

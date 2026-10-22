@@ -22,10 +22,9 @@ from astreum.communication.storage_response.storage_found import (
     encode_found_pages,
 )
 from astreum.communication.models.peer_info import PEER_INFO_BYTES, decode_peer_info
+from astreum.communication.models.relay_endpoint import RelayEndpoint
 from astreum.expression import Expr
 from astreum.expression.expr import TAG_BYTE_ENCODINGS, bytes_
-
-Contact = Tuple[bytes, str, int]
 
 
 def block_header_exprs(block_expr: Expr) -> List[Expr]:
@@ -118,7 +117,7 @@ def encode_block_message(provider_payload: bytes, block_expr: Expr) -> bytes:
     return payload
 
 
-def decode_block_message(content: bytes) -> Optional[Tuple[Contact, List[Expr]]]:
+def decode_block_message(content: bytes) -> Optional[Tuple[RelayEndpoint, List[Expr]]]:
     """Decode a ``BLOCK`` payload to ``(contact, exprs)``, root first.
 
     Pure in-memory. Returns ``None`` on any structural failure. The exprs are
@@ -140,4 +139,4 @@ def decode_block_message(content: bytes) -> Optional[Tuple[Contact, List[Expr]]]
         return None
     if page != 1 or total != 1 or not exprs:
         return None
-    return (info.relay_key, *info.address), exprs
+    return RelayEndpoint(info.relay_key, info.address), exprs

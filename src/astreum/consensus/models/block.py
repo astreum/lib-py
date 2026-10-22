@@ -5,6 +5,7 @@ from astreum.expression import Expr, ZERO32
 from astreum.consensus.models.accounts import Accounts
 
 if TYPE_CHECKING:
+    from astreum.communication.models.relay_endpoint import RelayEndpoint
     from astreum.storage.radix import RadixTree
     from astreum.consensus.transaction.model import Transaction
     from astreum.crypto.bloom_tree import BloomTree
@@ -43,7 +44,7 @@ class Block:
     global_loaned: int
     global_defaulted: int
     global_loan_count: int
-    contact: Optional[tuple]
+    contact: Optional["RelayEndpoint"]
     _expr: Optional["Expr"]
     
     def __init__(
@@ -76,9 +77,9 @@ class Block:
         global_loaned: int = 0,
         global_defaulted: int = 0,
         global_loan_count: int = 0,
-        contact: Optional[tuple] = None,
+        contact: Optional["RelayEndpoint"] = None,
     ) -> None:
-        # ``(relay_key, address, port)`` of the peer to fetch from while
+        # ``RelayEndpoint`` of the peer to fetch from while
         # processing this block, or None for normal routing. A block that is
         # verified or built on top of an uncommitted block N reads N's state
         # (tries, transactions, bloom tree) from the validator holding it.

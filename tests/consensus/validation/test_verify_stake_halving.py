@@ -30,6 +30,7 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from astreum.communication.models.relay_endpoint import RelayEndpoint  # noqa: E402
 from astreum.communication.disconnect import disconnect_node  # noqa: E402
 from astreum.communication.node import connect_node  # noqa: E402
 from astreum.consensus.account import create_account  # noqa: E402
@@ -180,7 +181,7 @@ class TestVerifyStakeHalving(unittest.TestCase):
             self.assertTrue(verify_block_head(self.node, block), f"height {block.height}")
 
     def test_fresh_node_verifies_using_only_the_validators_contact(self) -> None:
-        contact = (b"\x07" * 32, "10.0.0.7", 7000)
+        contact = RelayEndpoint(b"\x07" * 32, ("10.0.0.7", 7000))
         verifier_dir = tempfile.TemporaryDirectory(prefix="astreum_cold_")
         self.addCleanup(verifier_dir.cleanup)
         verifier = Node(
