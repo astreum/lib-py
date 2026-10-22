@@ -41,6 +41,7 @@ from astreum.storage.exprs.network import (
     get_exprs_from_network,
 )
 from astreum.storage.exprs import get_expr_from_local_storage
+from astreum.utils.config import NodeConfig
 
 
 # ---------------------------------------------------------------------------
@@ -80,12 +81,12 @@ def _fake_node(
     node.is_connected = is_connected
     node.hot_storage = hot_storage or {}
     node.hot_storage_lock = threading.Lock()
-    node.config = {
-        "storage_fetch_interval": fetch_interval,
-        "storage_fetch_retries": fetch_retries,
-        "hot_storage_limit": 10 * 1024 * 1024,
-        "cold_storage_path": None,
-    }
+    node.config = NodeConfig(
+        storage_fetch_interval=fetch_interval,
+        storage_fetch_retries=fetch_retries,
+        hot_storage_limit=10 * 1024 * 1024,
+        cold_storage_path=None,
+    )
     node.storage_index = {}
     node.storage_providers = []
     node.expr_requests = {}

@@ -25,7 +25,6 @@ from astreum.expression import (
 )
 from astreum.expression.encoding import encode_expr_to_bytes
 from astreum.storage.exprs import get_expr_from_local_storage
-from astreum.storage.requests import DEFAULT_STORAGE_FOUND_MAX_PAGES
 from astreum.storage.records import get_record_from_cold_storage
 from astreum.communication.util import xor_distance
 from astreum.consensus.constants import PROVIDERS_PER_RECORD
@@ -100,7 +99,7 @@ def _handle_put(
 
     to_self: list[bytes] = []
     by_destination: dict[bytes, tuple[object, list[tuple[bytes, int]]]] = {}
-    own_key = node.config["storage_public_key_bytes"]
+    own_key = node.config.storage_public_key_bytes
     for expr_id, payload_type in survivors:
         try:
             target = destination_peer(node, expr_id)
@@ -234,9 +233,7 @@ def _serve_get(
                 "STORAGE_FOUND for %s not sent: %s", expr_id.hex(), exc
             )
             return False, "root expr too large"
-        max_pages = (getattr(node, "config", None) or {}).get(
-            "storage_found_max_pages", DEFAULT_STORAGE_FOUND_MAX_PAGES
-        )
+        max_pages = node.config.storage_found_max_pages
         if len(payloads) > max_pages:
             node.logger.error(
                 "STORAGE_FOUND for %s not sent: %d pages exceeds storage_found_max_pages=%d",

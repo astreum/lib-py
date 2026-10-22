@@ -17,6 +17,7 @@ from astreum.consensus.transaction.treasury.record import (
 from astreum.expression import Expr, ZERO32, resolve_list_exprs
 from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.expression.helpers import get_expr_builtin_tag
+from astreum.utils.config import NodeConfig
 
 
 class _FakeNode:
@@ -25,12 +26,12 @@ class _FakeNode:
         self.hot_storage_lock = threading.Lock()
         self.hot_storage_timestamps = {}
         self.hot_storage_size = 0
-        self.config = {
-            "expr_fetch_interval": 0,
-            "expr_fetch_retries": 0,
-            "hot_storage_limit": 10 * 1024 * 1024,
-            "cold_storage_path": None,
-        }
+        self.config = NodeConfig(
+            storage_fetch_interval=0,
+            storage_fetch_retries=0,
+            hot_storage_limit=10 * 1024 * 1024,
+            cold_storage_path=None,
+        )
         self.is_connected = False
         self.logger = type(
             "L", (), {"debug": lambda *a, **kw: None, "info": lambda *a, **kw: None}

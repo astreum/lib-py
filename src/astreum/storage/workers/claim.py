@@ -249,7 +249,7 @@ def _build_multi_claim_tx(
         claims_expr = link(_claim_expr(claim), claims_expr)
 
     return create_transaction(
-        chain_id=node.config["chain_id"],
+        chain_id=node.config.chain_id,
         sender=node.storage_public_key_bytes,
         counter=counter,
         recipient=b"\x00" * 32,

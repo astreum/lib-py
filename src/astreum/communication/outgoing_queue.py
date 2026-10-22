@@ -34,7 +34,7 @@ def enqueue_outgoing(
     #     raise RuntimeError("node is not connected; call node.connect() (communication_setup) first")
 
     if message.sender_public_key_bytes is None:
-        message.sender_public_key_bytes = node.config["relay_public_key_bytes"]
+        message.sender_public_key_bytes = node.config.relay_public_key_bytes
 
     payload = message.to_bytes()
 

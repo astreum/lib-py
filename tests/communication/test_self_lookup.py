@@ -13,6 +13,7 @@ from astreum.communication.models.peer import Peer
 from astreum.communication.models.route import Route
 from astreum.communication.self_lookup import SelfLookup, self_lookup_step
 from astreum.utils.config import DEFAULT_SELF_LOOKUP_ROUNDS, config_setup
+from astreum.utils.config import NodeConfig
 
 OWN_KEY = b"\x00" * 32
 TIMEOUT = 10
@@ -34,7 +35,7 @@ def _peer(first: int) -> Peer:
 def _node(rounds=8):
     return SimpleNamespace(
         storage_public_key_bytes=OWN_KEY,
-        config={"self_lookup_rounds": rounds, "peer_timeout_interval": TIMEOUT},
+        config=NodeConfig(self_lookup_rounds=rounds, peer_timeout_interval=TIMEOUT),
         peer_route=Route(OWN_KEY),
         outgoing_queue=queue.Queue(),
         logger=SimpleNamespace(debug=lambda *a, **k: None, warning=lambda *a, **k: None),
@@ -144,7 +145,7 @@ class TestWalkStep(unittest.TestCase):
 class TestWalkConfig(unittest.TestCase):
     def test_config_default_rounds(self):
         config = config_setup({"default_seed": None})
-        self.assertEqual(config["self_lookup_rounds"], DEFAULT_SELF_LOOKUP_ROUNDS)
+        self.assertEqual(config.self_lookup_rounds, DEFAULT_SELF_LOOKUP_ROUNDS)
         self.assertEqual(DEFAULT_SELF_LOOKUP_ROUNDS, 8)
 
     def test_config_negative_rounds_rejected(self):
@@ -153,7 +154,7 @@ class TestWalkConfig(unittest.TestCase):
 
     def test_config_zero_rounds_allowed(self):
         config = config_setup({"default_seed": None, "self_lookup_rounds": 0})
-        self.assertEqual(config["self_lookup_rounds"], 0)
+        self.assertEqual(config.self_lookup_rounds, 0)
 
 
 if __name__ == "__main__":

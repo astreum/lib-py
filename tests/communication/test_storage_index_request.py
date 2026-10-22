@@ -22,6 +22,7 @@ from astreum.storage.workers.advertisements import (
     _serve_one_index_request,
 )
 from astreum.utils.config import DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES
+from astreum.utils.config import NodeConfig
 
 SELF_KEY = b"\x00" * 32
 REQUESTER_KEY = b"\xff" * 32
@@ -51,13 +52,13 @@ def _peer(key: bytes, port: int):
 
 def _node(peers=(), synced=True):
     return SimpleNamespace(
-        config={
-            "storage_public_key_bytes": SELF_KEY,
-            "storage_put_batch_max_bytes": DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES,
-            "self_lookup_rounds": 8,
-            "self_lookup_interval": 900,
-            "peer_timeout_interval": 10,
-        },
+        config=NodeConfig(
+            storage_public_key_bytes=SELF_KEY,
+            storage_put_batch_max_bytes=DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES,
+            self_lookup_rounds=8,
+            self_lookup_interval=900,
+            peer_timeout_interval=10,
+        ),
         peer_route=Route(SELF_KEY),
         storage_public_key_bytes=SELF_KEY,
         logger=_silent_logger(),
@@ -289,7 +290,7 @@ class TestReplyUsesTrieCheck(unittest.TestCase):
         (_, req), = _sent(responder)
 
         requester = _node()
-        requester.config["storage_public_key_bytes"] = REQUESTER_KEY
+        requester.config.storage_public_key_bytes = REQUESTER_KEY
         requester.peer_route = SimpleNamespace(closest_peer_for_hash=lambda h: None)
         sender = _peer(SELF_KEY, 9100)
         message = SimpleNamespace(content=req.to_bytes())

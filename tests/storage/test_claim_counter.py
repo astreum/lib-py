@@ -19,6 +19,7 @@ from astreum.storage.workers.claim import (
     _next_claim_counter,
     _submit_claims,
 )
+from astreum.utils.config import NodeConfig
 
 
 def _make_keys():
@@ -47,7 +48,7 @@ class _AccountsStub:
 
 def _make_node(storage_public_key_bytes, accounts, chain_id=1):
     node = SimpleNamespace(
-        config={"chain_id": chain_id},
+        config=NodeConfig(chain_id=chain_id),
         storage_public_key_bytes=storage_public_key_bytes,
         storage_secret_key=None,
         latest_block=SimpleNamespace(accounts=accounts),
@@ -351,7 +352,7 @@ class TestBuildClaimsCollectsPayouts(unittest.TestCase):
 
     def _node(self, winner):
         node = SimpleNamespace(
-            config={"chain_id": 1},
+            config=NodeConfig(chain_id=1),
             storage_public_key_bytes=winner,
             logger=SimpleNamespace(info=lambda *a, **k: None, exception=lambda *a, **k: None),
         )

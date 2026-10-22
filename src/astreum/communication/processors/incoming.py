@@ -140,7 +140,7 @@ def process_incoming_messages(node: "Node") -> None:
             continue
 
         try:
-            window = node.config.get("message_timestamp_window", 0)
+            window = node.config.message_timestamp_window
             if window and abs(time() - message.timestamp) > window:
                 node.logger.debug(
                     "Stale message dropped from %s (timestamp=%s, window=%s)",
@@ -194,7 +194,7 @@ def process_incoming_messages(node: "Node") -> None:
                     handle_route_response(node, peer, message)
 
                 case MessageTopic.TRANSACTION:
-                    if node.config.get("validation_secret_key") is None:
+                    if node.config.validation_secret_key is None:
                         continue
                     from astreum.consensus.transaction.message import decode_transaction_message
                     transaction = decode_transaction_message(message.content)

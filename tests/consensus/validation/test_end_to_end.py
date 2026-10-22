@@ -197,7 +197,7 @@ class Fixture:
 
     def tx(self, node, counter, recipient, code=TransactionCode.TRANSFER, **kw):
         tx = create_transaction(
-            chain_id=node.config["chain_id"],
+            chain_id=node.config.chain_id,
             counter=counter,
             sender=self.sender,
             recipient=recipient,

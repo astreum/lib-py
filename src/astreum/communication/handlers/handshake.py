@@ -15,7 +15,6 @@ from astreum.communication.models.handshake import (
 )
 from astreum.communication.models.ping import Ping
 from astreum.communication.difficulty import message_difficulty
-from astreum.utils.config import DEFAULT_MESSAGE_TIMESTAMP_WINDOW_SECONDS
 
 if TYPE_CHECKING:
     from astreum import Node
@@ -41,7 +40,7 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
             latest_block = None
         try:
             ping_payload = Ping(
-                is_validator=bool(node.config.get("validation_public_key_bytes")),
+                is_validator=bool(node.config.validation_public_key_bytes),
                 difficulty=message_difficulty(node),
                 latest_block=latest_block,
             ).to_bytes()
@@ -71,9 +70,7 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
     except Exception:
         return True
 
-    window = node.config.get(
-        "message_timestamp_window", DEFAULT_MESSAGE_TIMESTAMP_WINDOW_SECONDS
-    )
+    window = node.config.message_timestamp_window
     handshake = parse_handshake(message)
     if handshake is None or not verify_handshake(
         message, handshake, time.time(), window

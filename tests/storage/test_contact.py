@@ -50,6 +50,7 @@ from astreum.storage.radix import (  # noqa: E402
     get_radix_node_expr,
     put_in_radix_tree,
 )
+from astreum.utils.config import NodeConfig
 
 CONTACT = RelayEndpoint(b"\x07" * 32, ("10.0.0.7", 7000))
 QUEUE = "astreum.storage.workers.requests.queue_storage_get"
@@ -76,12 +77,12 @@ def _store_node() -> SimpleNamespace:
         hot_storage_timestamps={},
         hot_storage_lock=threading.RLock(),
         hot_storage_size=0,
-        config={
-            "hot_storage_limit": 64 * 1024 * 1024,
-            "cold_storage_path": None,
-            "storage_fetch_interval": 0,
-            "storage_fetch_retries": 1,
-        },
+        config=NodeConfig(
+            hot_storage_limit=64 * 1024 * 1024,
+            cold_storage_path=None,
+            storage_fetch_interval=0,
+            storage_fetch_retries=1,
+        ),
         is_connected=True,
         logger=MagicMock(),
     )

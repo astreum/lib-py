@@ -50,21 +50,21 @@ def _silent_logger():
 class TestLongTermConfig(unittest.TestCase):
     def test_default_off_and_interval_default(self):
         config = config_setup({"default_seed": None})
-        self.assertFalse(config["is_storage_provider"])
+        self.assertFalse(config.is_storage_provider)
         self.assertEqual(
-            config["long_term_storage_interval"],
+            config.long_term_storage_interval,
             DEFAULT_LONG_TERM_STORAGE_INTERVAL_SECONDS,
         )
 
     def test_on_when_set(self):
         config = config_setup({"default_seed": None, "is_storage_provider": True})
-        self.assertTrue(config["is_storage_provider"])
+        self.assertTrue(config.is_storage_provider)
 
     def test_interval_parsed(self):
         config = config_setup(
             {"default_seed": None, "long_term_storage_interval": "2.5"}
         )
-        self.assertEqual(config["long_term_storage_interval"], 2.5)
+        self.assertEqual(config.long_term_storage_interval, 2.5)
 
     def test_interval_must_be_number(self):
         with self.assertRaises(ValueError):
@@ -81,7 +81,7 @@ class TestLongTermConfig(unittest.TestCase):
 
     def test_old_key_ignored(self):
         config = config_setup({"default_seed": None, "long_term_storage": True})
-        self.assertFalse(config["is_storage_provider"])
+        self.assertFalse(config.is_storage_provider)
 
 
 class TestLongTermSetup(unittest.TestCase):
@@ -366,6 +366,7 @@ from astreum.storage.workers.advertisements import (  # noqa: E402
     advertise_storage,
 )
 from astreum.storage.radix import RadixTree  # noqa: E402
+from astreum.utils.config import NodeConfig
 
 
 class TestAdvertiseStorageLoop(unittest.TestCase):
@@ -379,7 +380,7 @@ class TestAdvertiseStorageLoop(unittest.TestCase):
 
     def _loop_node(self, long_term, interval=0.05):
         return SimpleNamespace(
-            config={"storage_request_price_interval": interval, "self_lookup_rounds": 0},
+            config=NodeConfig(storage_request_price_interval=interval, self_lookup_rounds=0),
             is_storage_provider=long_term,
             long_term_storage_interval=interval,
             peers={},

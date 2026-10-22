@@ -30,6 +30,7 @@ from astreum.expression import (
     link,
 )
 from astreum.storage import requests as reqs
+from astreum.utils.config import NodeConfig
 from astreum.storage.requests import (
     PendingExprRequest,
     StageResult,
@@ -50,9 +51,9 @@ def _big(i: int):
 
 def _node(ttl: float = 60.0, max_pages=None):
     # Non-reentrant Lock on purpose: registry calls must take it once.
-    config = {"expr_request_ttl": ttl}
+    config = NodeConfig(expr_request_ttl=ttl)
     if max_pages is not None:
-        config["storage_found_max_pages"] = max_pages
+        config.storage_found_max_pages = max_pages
     return SimpleNamespace(
         logger=MagicMock(),
         config=config,

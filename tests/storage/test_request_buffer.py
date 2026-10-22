@@ -23,6 +23,7 @@ from astreum.storage.workers.requests import (
     queue_storage_get,
     request_storage,
 )
+from astreum.utils.config import NodeConfig
 
 PEER_KEY = b"\x11" * 32
 SHARED = b"\x01" * 32
@@ -46,7 +47,7 @@ def _node(peer_for=None, flush_interval: float = 0.05):
     """A node whose closest peer is ``peer_for(expr_id)`` (default: one peer)."""
     default = _peer()
     node = SimpleNamespace(
-        config={"storage_request_flush_interval": flush_interval},
+        config=NodeConfig(storage_request_flush_interval=flush_interval),
         logger=MagicMock(),
         storage_index={},
         storage_providers=[],

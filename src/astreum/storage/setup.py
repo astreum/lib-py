@@ -4,6 +4,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from astreum.utils.config import NodeConfig
+
 
 def _level_0_size(table_dir: str | Path | None) -> int:
     """Sum the sizes of the ``*.bin`` files in a table's ``level_0``.
@@ -28,7 +30,7 @@ def _level_0_size(table_dir: str | Path | None) -> int:
     return total
 
 
-def setup_storage(node: Any, config: dict) -> None:
+def setup_storage(node: Any, config: NodeConfig) -> None:
     """Initialize hot and cold storage infrastructure on a Node.
 
     Creates the in-memory hot storage cache, initializes the cold
@@ -38,7 +40,7 @@ def setup_storage(node: Any, config: dict) -> None:
 
     Args:
         node: A Node instance to attach storage attributes to.
-        config: The node configuration dict, expected to contain
+        config: The node configuration. Fields used are
             ``hot_storage_limit``, ``cold_storage_path``,
             ``cold_storage_limit``, ``storage_fetch_interval``,
             and ``storage_fetch_retries``.
@@ -67,10 +69,10 @@ def setup_storage(node: Any, config: dict) -> None:
     node.hot_storage_lock = threading.RLock()
     node.hot_storage_size = 0
     node.cold_storage_size = 0
-    node.storage_fetch_interval = config["storage_fetch_interval"]
-    node.storage_fetch_retries = config["storage_fetch_retries"]
+    node.storage_fetch_interval = config.storage_fetch_interval
+    node.storage_fetch_retries = config.storage_fetch_retries
 
-    cold_path = config.get("cold_storage_path")
+    cold_path = config.cold_storage_path
     if cold_path:
         try:
             cold_root = Path(cold_path)
@@ -79,29 +81,29 @@ def setup_storage(node: Any, config: dict) -> None:
             (cold_root / "records" / "level_0").mkdir(parents=True, exist_ok=True)
         except OSError:
             node.logger.warning("Disabling cold storage; unable to create tables in %s", cold_path)
-            config["cold_storage_path"] = None
+            config.cold_storage_path = None
 
     node.cold_storage_level_0_size = _level_0_size(
-        Path(config["cold_storage_path"]) / "exprs" if config.get("cold_storage_path") else None
+        Path(config.cold_storage_path) / "exprs" if config.cold_storage_path else None
     )
     node.records_level_0_size = _level_0_size(
-        Path(config["cold_storage_path"]) / "records" if config.get("cold_storage_path") else None
+        Path(config.cold_storage_path) / "records" if config.cold_storage_path else None
     )
 
-    node.is_storage_provider = bool(config.get("is_storage_provider"))
-    if node.is_storage_provider and not config.get("cold_storage_path"):
+    node.is_storage_provider = bool(config.is_storage_provider)
+    if node.is_storage_provider and not config.cold_storage_path:
         node.logger.error(
             "is_storage_provider requires cold_storage_path; disabling storage provider"
         )
         node.is_storage_provider = False
-    node.long_term_storage_interval = config["long_term_storage_interval"]
+    node.long_term_storage_interval = config.long_term_storage_interval
     node.long_term_cursor = 0
 
     node.logger.info(
         "Storage ready (hot_limit=%s bytes, cold_limit=%s bytes, cold_path=%s, storage_fetch_interval=%s, storage_fetch_retries=%s)",
-        config["hot_storage_limit"],
-        config["cold_storage_limit"],
-        config["cold_storage_path"] or "disabled",
-        config["storage_fetch_interval"],
-        config["storage_fetch_retries"],
+        config.hot_storage_limit,
+        config.cold_storage_limit,
+        config.cold_storage_path or "disabled",
+        config.storage_fetch_interval,
+        config.storage_fetch_retries,
     )

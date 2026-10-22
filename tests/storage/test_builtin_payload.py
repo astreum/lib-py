@@ -13,12 +13,13 @@ from astreum.expression.expr import Expr, _get_head_hash  # noqa: E402
 from astreum.expression.helpers import builtin_composite_payload  # noqa: E402
 from astreum.storage.exprs import put_expr_in_hot_storage  # noqa: E402
 from astreum.storage.exprs.hot import get_expr_from_hot_storage  # noqa: E402
+from astreum.utils.config import NodeConfig
 
 
 class _FakeNode:
     def __init__(self):
         import threading
-        self.config = {"hot_storage_limit": 1 << 20}
+        self.config = NodeConfig(hot_storage_limit=1 << 20)
         self.hot_storage = {}
         self.hot_storage_timestamps = {}
         self.hot_storage_size = 0

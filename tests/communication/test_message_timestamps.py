@@ -14,7 +14,7 @@ from astreum.communication.models.handshake import build_handshake
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import Peer
 from astreum.communication.processors import incoming as incoming_processor
-from astreum.utils.config import config_setup
+from astreum.utils.config import NodeConfig, config_setup
 
 
 def _make_keypair():
@@ -132,15 +132,15 @@ class TestMessageTimestamp(unittest.TestCase):
 class TestMessageTimestampWindowConfig(unittest.TestCase):
     def test_default_window_is_60(self):
         config = config_setup({})
-        self.assertEqual(config["message_timestamp_window"], 60)
+        self.assertEqual(config.message_timestamp_window, 60)
 
     def test_zero_disables_check(self):
         config = config_setup({"message_timestamp_window": 0})
-        self.assertEqual(config["message_timestamp_window"], 0)
+        self.assertEqual(config.message_timestamp_window, 0)
 
     def test_custom_window(self):
         config = config_setup({"message_timestamp_window": 120})
-        self.assertEqual(config["message_timestamp_window"], 120)
+        self.assertEqual(config.message_timestamp_window, 120)
 
     def test_negative_window_rejected(self):
         with self.assertRaises(ValueError):
@@ -208,7 +208,7 @@ class TestReceiverWindowCheck(unittest.TestCase):
         self.assertFalse(thread.is_alive(), "processor did not stop")
 
     def test_stale_timestamp_dropped_before_dispatch(self):
-        node = _FakeNode({"message_timestamp_window": 60}, self.peer)
+        node = _FakeNode(NodeConfig(message_timestamp_window=60), self.peer)
         stale = self._build_message(int(time_module.time()) - 3600)
 
         with mock.patch.object(incoming_processor, "handle_ping") as handler:
@@ -217,7 +217,7 @@ class TestReceiverWindowCheck(unittest.TestCase):
             handler.assert_not_called()
 
     def test_future_timestamp_beyond_window_dropped(self):
-        node = _FakeNode({"message_timestamp_window": 60}, self.peer)
+        node = _FakeNode(NodeConfig(message_timestamp_window=60), self.peer)
         future = self._build_message(int(time_module.time()) + 3600)
 
         with mock.patch.object(incoming_processor, "handle_ping") as handler:
@@ -226,7 +226,7 @@ class TestReceiverWindowCheck(unittest.TestCase):
             handler.assert_not_called()
 
     def test_in_window_timestamp_dispatches(self):
-        node = _FakeNode({"message_timestamp_window": 60}, self.peer)
+        node = _FakeNode(NodeConfig(message_timestamp_window=60), self.peer)
         fresh = self._build_message(int(time_module.time()))
 
         with mock.patch.object(incoming_processor, "handle_ping") as handler:
@@ -239,7 +239,7 @@ class TestReceiverWindowCheck(unittest.TestCase):
             self.assertEqual(args[2], b"ping")
 
     def test_window_zero_disables_check(self):
-        node = _FakeNode({"message_timestamp_window": 0}, self.peer)
+        node = _FakeNode(NodeConfig(message_timestamp_window=0), self.peer)
         stale = self._build_message(int(time_module.time()) - 3600)
 
         with mock.patch.object(incoming_processor, "handle_ping") as handler:
@@ -248,7 +248,7 @@ class TestReceiverWindowCheck(unittest.TestCase):
             handler.assert_called_once()
 
     def test_queue_size_accounting_on_drop(self):
-        node = _FakeNode({"message_timestamp_window": 60}, self.peer)
+        node = _FakeNode(NodeConfig(message_timestamp_window=60), self.peer)
         stale = self._build_message(int(time_module.time()) - 3600)
         node.incoming_queue.put((stale.to_bytes(), ("127.0.0.1", 52780), 100, 100))
         node.incoming_queue_size = 100
@@ -258,7 +258,7 @@ class TestReceiverWindowCheck(unittest.TestCase):
     def test_handshake_exempt_from_window(self):
         # The processor does not apply the encrypted-message window to a
         # handshake. handle_handshake checks the handshake timestamp itself.
-        node = _FakeNode({"message_timestamp_window": 60}, self.peer)
+        node = _FakeNode(NodeConfig(message_timestamp_window=60), self.peer)
         sender = SimpleNamespace(
             storage_secret_key=Ed25519PrivateKey.generate(),
             relay_public_key_bytes=self.peer_relay_public_key.public_bytes(

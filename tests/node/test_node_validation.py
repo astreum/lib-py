@@ -75,7 +75,7 @@ class TestNodeValidation(unittest.TestCase):
         self.assertEqual(b.chain_id, 0)
         self.assertEqual(node.latest_block_hash, get_block_expr(b).hash())
 
-        vk = node.config["validation_public_key_bytes"]
+        vk = node.config.validation_public_key_bytes
         validator_account = b.accounts.get_account(vk, node)
         self.assertIsNotNone(validator_account, "validator account should exist in genesis")
         treasury_account = b.accounts.get_account(TREASURY_ADDRESS, node)
@@ -109,7 +109,7 @@ class TestNodeValidation(unittest.TestCase):
                 time.sleep(0.1)
             self.assertIsNotNone(node_a.latest_block)
 
-            port_a = node_a.config["port"]
+            port_a = node_a.config.port
             port_b = self._get_free_port()
             node_b = Node(
                 config={

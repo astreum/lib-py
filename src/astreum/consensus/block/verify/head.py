@@ -57,11 +57,11 @@ def verify_block_head(node: Any, block: Any) -> bool:
         node.logger.debug("Block head verify failed missing previous block=%s", _hex(prev_hash))
         return False
 
-    if block.chain_id != node.config["chain_id"]:
+    if block.chain_id != node.config.chain_id:
         node.logger.debug(
             "Block head verify failed chain_id=%s expected=%s block=%s",
             block.chain_id,
-            node.config["chain_id"],
+            node.config.chain_id,
             _hex(block_hash),
         )
         return False

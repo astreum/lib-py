@@ -20,6 +20,7 @@ from astreum.communication.storage_response.storage_found import (
 )
 from astreum.expression import NIL, RESOLUTION_FULL, bytes_, link
 from astreum.expression.encoding import encode_expr_to_bytes
+from astreum.utils.config import NodeConfig
 
 BIG = 30000
 
@@ -116,7 +117,7 @@ class TestServer(unittest.TestCase):
             storage_public_key_bytes=b"\x00" * 32,
             storage_index={},
             outgoing_queue=queue.Queue(),
-            config=config if config is not None else {},
+            config=config if config is not None else NodeConfig(),
         )
         peer = SimpleNamespace(
             address=("127.0.0.1", 1), shared_key_bytes=b"\x01" * 32, difficulty=1,
@@ -176,7 +177,9 @@ class TestServer(unittest.TestCase):
 
     def test_more_pages_than_configured_limit_sends_nothing(self):
         exprs = [_root()] + [_big(i) for i in range(1, 8)]
-        node, result, sent, uploads = self._run(exprs, config={"storage_found_max_pages": 2})
+        node, result, sent, uploads = self._run(exprs, config=NodeConfig(
+            storage_found_max_pages=2,
+        ))
         self.assertEqual(result, (False, "response too large"))
         self.assertEqual(sent, [])
         self.assertEqual(uploads, [])
@@ -186,7 +189,7 @@ class TestServer(unittest.TestCase):
         exprs = [_root()] + [_big(i) for i in range(1, 8)]
         _, _, default_sent, _ = self._run(exprs)
         pages = len(default_sent)
-        _, result, sent, _ = self._run(exprs, config={"storage_found_max_pages": pages})
+        _, result, sent, _ = self._run(exprs, config=NodeConfig(storage_found_max_pages=pages))
         self.assertEqual(result, (True, None))
         self.assertEqual(len(sent), pages)
 

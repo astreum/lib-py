@@ -22,6 +22,7 @@ from astreum.communication.self_lookup import (
     self_lookup_timer_step,
 )
 from astreum.communication.util import xor_distance
+from astreum.utils.config import NodeConfig
 
 OWN_KEY = b"\x00" * 32
 SENDER_KEY = b"\x80" * 32
@@ -44,11 +45,11 @@ def _node(bucket_size=16, rounds=8, interval=900):
     return SimpleNamespace(
         use_ipv6=False,
         storage_public_key_bytes=OWN_KEY,
-        config={
-            "self_lookup_rounds": rounds,
-            "self_lookup_interval": interval,
-            "peer_timeout_interval": 10,
-        },
+        config=NodeConfig(
+            self_lookup_rounds=rounds,
+            self_lookup_interval=interval,
+            peer_timeout_interval=10,
+        ),
         peers={},
         peers_lock=threading.RLock(),
         peer_route=Route(OWN_KEY, bucket_size=bucket_size),

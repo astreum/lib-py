@@ -85,7 +85,7 @@ class TestStorageIndexing(unittest.TestCase):
         self.assertTrue(node_a.is_connected)
 
         bootstrap_host = "127.0.0.1"
-        bootstrap_port = node_a.config["port"]
+        bootstrap_port = node_a.config.port
         node_b_port = self._get_free_port()
 
         node_b = self._register_node(
@@ -144,7 +144,7 @@ class TestStorageIndexing(unittest.TestCase):
         tree = getattr(node, "_test_storage_tree", None)
         if tree is None:
             block = create_block(
-                chain_id=node.config["chain_id"],
+                chain_id=node.config.chain_id,
                 previous_block_hash=ZERO32,
                 previous_block=None,
                 height=0,

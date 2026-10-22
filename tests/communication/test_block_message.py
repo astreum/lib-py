@@ -44,6 +44,7 @@ from astreum.consensus.block.nonce import generate_block_nonce  # noqa: E402
 from astreum.consensus.block.utils.bits import count_leading_zero_bits  # noqa: E402
 from astreum.consensus.validation import worker as validation_worker  # noqa: E402
 from astreum.expression import NIL, ZERO32, bytes_, link  # noqa: E402
+from astreum.utils.config import NodeConfig
 
 RELAY_KEY = b"\x21" * 32
 PROVIDER = b"\x11" * 32 + RELAY_KEY + bytes([10, 0, 0, 9]) + (9000).to_bytes(2, "big")
@@ -119,12 +120,12 @@ def _node(latest, *, validator=False):
         latest_block_lock=threading.RLock(),
         latest_block_hash=latest.expr_id,
         latest_block=latest,
-        config={
-            "chain_id": 0,
-            "validation_secret_key": object() if validator else None,
-            "hot_storage_limit": 64 * 1024 * 1024,
-            "cold_storage_path": None,
-        },
+        config=NodeConfig(
+            chain_id=0,
+            validation_secret_key=object() if validator else None,
+            hot_storage_limit=64 * 1024 * 1024,
+            cold_storage_path=None,
+        ),
         hot_storage={},
         hot_storage_timestamps={},
         hot_storage_lock=threading.RLock(),

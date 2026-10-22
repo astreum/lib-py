@@ -70,8 +70,8 @@ def _poll_local(node, expr_ids: list[bytes]) -> dict[bytes, Optional[Expr]]:
     Returns:
         Dict mapping each expr_id to its Expr (or None if not found).
     """
-    interval = node.config["storage_fetch_interval"]
-    retries = node.config["storage_fetch_retries"]
+    interval = node.config.storage_fetch_interval
+    retries = node.config.storage_fetch_retries
     found: dict[bytes, Optional[Expr]] = {h: None for h in expr_ids}
     remaining = list(expr_ids)
 
@@ -113,8 +113,8 @@ def _resolve_structured(
     Returns:
         The fully resolved Expr, or None.
     """
-    interval = node.config["storage_fetch_interval"]
-    retries = node.config["storage_fetch_retries"]
+    interval = node.config.storage_fetch_interval
+    retries = node.config.storage_fetch_retries
 
     if resolution == RESOLUTION_LIST:
         from astreum.storage.exprs.list import get_expr_list_from_local_storage as read_local
@@ -378,9 +378,9 @@ def build_provider_payload(node) -> bytes:
     from astreum.communication.models.peer_info import PeerInfo, encode_peer_info
 
     info = PeerInfo(
-        node.config["storage_public_key_bytes"],
-        node.config["relay_public_key_bytes"],
-        (node.relay_ip_address, int(node.config["port"])),
+        node.config.storage_public_key_bytes,
+        node.config.relay_public_key_bytes,
+        (node.relay_ip_address, int(node.config.port)),
     )
     return encode_peer_info(info, False)
 
@@ -404,7 +404,7 @@ def destination_peer(node, expr_id: bytes):
     if closest_peer is None or closest_peer.address is None:
         return None
     try:
-        self_distance = xor_distance(expr_id, node.config["storage_public_key_bytes"])
+        self_distance = xor_distance(expr_id, node.config.storage_public_key_bytes)
         peer_distance = xor_distance(expr_id, closest_peer.public_key_bytes)
     except Exception as exc:
         node.logger.debug("Failed computing distance for expr %s: %s", expr_id.hex(), exc)
@@ -476,9 +476,8 @@ def send_put_entries(
         max_batch_entries,
     )
     from astreum.communication.models.peer_info import PEER_INFO_BYTES
-    from astreum.utils.config import DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES
 
-    budget = node.config.get("storage_put_batch_max_bytes", DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES)
+    budget = node.config.storage_put_batch_max_bytes
     per_batch = max(1, max_batch_entries(budget, len(provider_payload) // PEER_INFO_BYTES))
 
     results = []
@@ -519,7 +518,7 @@ def put_exprs_in_network(
         reason = f"unable to encode provider info: {exc}"
         return [(expr_id, False, reason) for expr_id, _ in entries]
 
-    own_key = node.config["storage_public_key_bytes"]
+    own_key = node.config.storage_public_key_bytes
     results: list[tuple[bytes, bool, str | None]] = []
     by_destination: dict[bytes, tuple[object, list[tuple[bytes, int]]]] = {}
     for expr_id, payload_type in entries:

@@ -32,6 +32,7 @@ from astreum.expression import Expr, NIL, ZERO32, bytes_
 from astreum.storage.radix import RadixTree
 from astreum.consensus.block.encoding.expr import get_block_expr
 from astreum.crypto.bloom_tree import BloomTree
+from astreum.utils.config import NodeConfig
 
 
 class _FakeNode:
@@ -42,7 +43,7 @@ class _FakeNode:
         self.hot_storage_lock = threading.Lock()
         self.hot_storage_timestamps: dict[bytes, float] = {}
         self.hot_storage_size = 0
-        self.config = {"hot_storage_limit": 10 * 1024 * 1024}
+        self.config = NodeConfig(hot_storage_limit=10 * 1024 * 1024)
         self.logger = type(
             "FakeLogger",
             (),

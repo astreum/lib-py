@@ -17,7 +17,8 @@ class Node:
 
         Args:
             config: Configuration dictionary for node settings. When ``None``,
-                a new dictionary with default settings is used.
+                the default settings are used. The dictionary does not change.
+                ``node.config`` holds the checked settings as a ``NodeConfig``.
 
         Returns: None
         """
@@ -29,7 +30,7 @@ class Node:
         self.logger.info("Starting Astreum Node")
 
         # Chain Configuration
-        self.logger.info(f"Chain configured as: {self.config['chain']} ({self.config['chain_id']})")
+        self.logger.info(f"Chain configured as: {self.config.chain} ({self.config.chain_id})")
 
         # Storage Setup
         setup_storage(self, config=self.config)

@@ -22,6 +22,7 @@ from astreum.expression import (
     bytes_,
 )
 from astreum.utils.config import DEFAULT_STORAGE_GET_BATCH_MAX_BYTES, config_setup
+from astreum.utils.config import NodeConfig
 
 PROVIDER = b"P" * 70
 
@@ -145,8 +146,8 @@ class TestGetCodec(unittest.TestCase):
 class TestGetConfig(unittest.TestCase):
     def test_defaults(self):
         config = config_setup({"default_seed": None})
-        self.assertEqual(config["storage_get_batch_max_bytes"], 1232)
-        self.assertEqual(config["storage_request_flush_interval"], 0.25)
+        self.assertEqual(config.storage_get_batch_max_bytes, 1232)
+        self.assertEqual(config.storage_request_flush_interval, 0.25)
 
     def test_overrides(self):
         config = config_setup(
@@ -156,8 +157,8 @@ class TestGetConfig(unittest.TestCase):
                 "storage_request_flush_interval": 1,
             }
         )
-        self.assertEqual(config["storage_get_batch_max_bytes"], 2000)
-        self.assertEqual(config["storage_request_flush_interval"], 1.0)
+        self.assertEqual(config.storage_get_batch_max_bytes, 2000)
+        self.assertEqual(config.storage_request_flush_interval, 1.0)
 
     def test_invalid_batch_bytes_rejected(self):
         for bad in (True, "abc", 100, 70000):
@@ -187,7 +188,7 @@ class TestGetServer(unittest.TestCase):
             storage_index={self.redirect_id: (0,)},
             storage_providers=[PROVIDER],
             outgoing_queue=queue.Queue(),
-            config={},
+            config=NodeConfig(),
             peer_route=SimpleNamespace(closest_peer_for_hash=lambda h: None),
         )
 

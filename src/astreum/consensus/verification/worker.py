@@ -120,15 +120,8 @@ def _select_latest_block(node: Any) -> None:
 
     Returns: None
     """
-    config = node.config or {}
-    try:
-        max_stale = int(config.get("verification_max_stale_seconds", 10))
-    except (TypeError, ValueError):
-        max_stale = 10
-    try:
-        max_future = int(config.get("verification_max_future_skew", 2))
-    except (TypeError, ValueError):
-        max_future = 2
+    max_stale = node.config.verification_max_stale_seconds
+    max_future = node.config.verification_max_future_skew
 
     now = int(time.time())
     with node.latest_block_lock:
@@ -225,8 +218,8 @@ def make_verify_worker(node: Any):
             while _merge_forks(node):
                 continue
 
-            if not node.config["default_seed"]:
+            if not node.config.default_seed:
                 _select_latest_block(node)
-            time.sleep(node.config.get("verify_blockchain_interval", 0))
+            time.sleep(node.config.verify_blockchain_interval)
 
     return _verify_worker

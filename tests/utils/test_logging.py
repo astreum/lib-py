@@ -12,6 +12,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from astreum.utils import logging as logging_utils
+from astreum.utils.config import NodeConfig
 
 
 class TestLoggingResilience(unittest.TestCase):
@@ -47,7 +48,7 @@ class TestLoggingResilience(unittest.TestCase):
             with patch.object(logging_utils, "_derive_instance_id", return_value="test-instance"):
                 with patch.object(logging_utils, "_log_root", return_value=log_dir):
                     logger = logging_utils.logging_setup(
-                        {"logging_enabled": False, "logger_name": "node a"}
+                        NodeConfig(logging_enabled=False, logger_name="node a")
                     )
 
             self.assertFalse(log_dir.exists())

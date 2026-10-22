@@ -18,6 +18,7 @@ from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import Peer
 from astreum.communication.models.route import Route
 from astreum.communication.processors import incoming as incoming_processor
+from astreum.utils.config import NodeConfig
 
 WINDOW = 60
 RAW = dict(
@@ -35,7 +36,7 @@ def _node(default_seed_ips=()):
         storage_public_key_bytes=storage_public,
         relay_secret_key=relay_secret,
         relay_public_key_bytes=relay_secret.public_key().public_bytes(**RAW),
-        config={"message_timestamp_window": WINDOW},
+        config=NodeConfig(message_timestamp_window=WINDOW),
         logger=logging.getLogger("test_peer_update_rules"),
         default_seed_ips=set(default_seed_ips),
         peers={},

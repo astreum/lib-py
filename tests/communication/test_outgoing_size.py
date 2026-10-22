@@ -8,6 +8,7 @@ sys.path.insert(0, "src")
 
 from astreum.communication import outgoing_queue
 from astreum.communication.message_pow import MAX_UDP_DATAGRAM_BYTES, NONCE_SIZE
+from astreum.utils.config import NodeConfig
 
 
 class _Msg:
@@ -23,7 +24,7 @@ class _Msg:
 
 def _node():
     return SimpleNamespace(
-        config={"relay_public_key_bytes": b"R" * 32},
+        config=NodeConfig(relay_public_key_bytes=b"R" * 32),
         logger=MagicMock(),
         outgoing_queue=queue.Queue(),
     )

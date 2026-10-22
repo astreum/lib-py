@@ -23,6 +23,7 @@ from astreum.storage.requests import (
     set_next_contact,
     take_next_contact,
 )
+from astreum.utils.config import NodeConfig
 
 H = b"\x11" * 32
 CONTACT = RelayEndpoint(b"\x21" * 32, ("10.0.0.9", 7000))
@@ -35,7 +36,7 @@ QUEUE = "astreum.storage.workers.requests.queue_storage_get"
 def _node():
     return SimpleNamespace(
         is_connected=True,
-        config={"storage_fetch_interval": 0.0, "storage_fetch_retries": 1},
+        config=NodeConfig(storage_fetch_interval=0.0, storage_fetch_retries=1),
         logger=MagicMock(),
         storage_index={},
         storage_providers=[PAYLOAD_A, PAYLOAD_B],

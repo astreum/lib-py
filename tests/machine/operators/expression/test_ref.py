@@ -17,6 +17,7 @@ from astreum.expression import NIL, ZERO32, int_, fp64_, bytes_, str_, symbol, l
 from astreum.storage.radix import RadixTree, put_in_radix_tree
 from astreum.consensus.account import create_account
 from astreum.expression.helpers import get_expr_builtin_tag
+from astreum.utils.config import NodeConfig
 
 BLOCK = b"\xb1" * 32
 BLOCK_HEX = BLOCK.hex()
@@ -41,7 +42,7 @@ class FakeNode:
         self.hot_storage = {}
         self.hot_storage_timestamps = {}
         self.hot_storage_lock = threading.Lock()
-        self.config = {"expr_fetch_interval": 0, "expr_fetch_retries": 0}
+        self.config = NodeConfig(storage_fetch_interval=0, storage_fetch_retries=0)
         self.logger = type(
             "L", (), {"debug": lambda *a, **kw: None, "info": lambda *a, **kw: None}
         )()

@@ -52,11 +52,11 @@ class TestNodeConnection(unittest.TestCase):
         connect_node(node_a)
 
         self.assertTrue(node_a.is_connected)
-        self.assertGreater(node_a.config["port"], 0)
-        print(f"node_a port={node_a.config['port']}")
+        self.assertGreater(node_a.config.port, 0)
+        print(f"node_a port={node_a.config.port}")
 
         bootstrap_host = "127.0.0.1"
-        bootstrap_port = node_a.config["port"]
+        bootstrap_port = node_a.config.port
         node_b_port = self._get_free_port()
 
         node_b = self._register_node(
@@ -73,7 +73,7 @@ class TestNodeConnection(unittest.TestCase):
 
         self.assertTrue(node_b.is_connected)
         print(
-            f"node_b port={node_b.config['port']} "
+            f"node_b port={node_b.config.port} "
             f"seed={bootstrap_host}:{bootstrap_port}"
         )
 

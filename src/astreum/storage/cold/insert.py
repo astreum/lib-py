@@ -42,7 +42,7 @@ def _level_limit(node: Any, level: int) -> int:
         ValueError: If cold_storage_base_size is missing or invalid.
     """
     try:
-        base_limit = int(node.config["cold_storage_base_size"])
+        base_limit = int(node.config.cold_storage_base_size)
     except (TypeError, ValueError) as exc:
         raise ValueError("cold_storage_base_size must be an integer") from exc
     if base_limit <= 0:
@@ -114,7 +114,7 @@ def put_expr_in_cold_storage(
         size += len(expr_bytes)
         setattr(node, size_attr, size)
 
-        if size > node.config["cold_storage_base_size"]:
+        if size > node.config.cold_storage_base_size:
             if not collate_exprs(store_dir):
                 return False
             setattr(node, size_attr, 0)

@@ -14,6 +14,7 @@ from astreum.storage.workers.advertisements import (
     advertise_storage,
 )
 from astreum.utils.config import DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES
+from astreum.utils.config import NodeConfig
 
 PUT = "astreum.storage.workers.advertisements.put_exprs_in_network"
 ITER = "astreum.storage.workers.advertisements.iter_records_in_cold_storage"
@@ -34,7 +35,7 @@ def _node(provider=True, synced=True, budget=DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES
         is_storage_provider=provider,
         latest_block=object() if synced else None,
         startup_announce=None,
-        config={"storage_put_batch_max_bytes": budget},
+        config=NodeConfig(storage_put_batch_max_bytes=budget),
         logger=_silent_logger(),
     )
 
@@ -120,9 +121,9 @@ class TestStartupAnnounceLoop(unittest.TestCase):
 
     def _loop_node(self, **kwargs):
         node = _node(**kwargs)
-        node.config["storage_request_price_interval"] = 0
-        node.config["expr_request_ttl"] = 0
-        node.config["self_lookup_rounds"] = 0
+        node.config.storage_request_price_interval = 0
+        node.config.expr_request_ttl = 0
+        node.config.self_lookup_rounds = 0
         node.long_term_storage_interval = 0
         node.peers = {}
         node.peers_lock = threading.RLock()

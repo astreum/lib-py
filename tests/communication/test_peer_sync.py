@@ -24,6 +24,7 @@ from astreum.communication.processors import incoming as incoming_processor
 from astreum.communication.processors.peer import _manage_peer_pass
 from astreum.communication.self_lookup import SelfLookup, SelfLookupTimer, self_lookup_timer_step
 from astreum.utils.config import DEFAULT_SELF_LOOKUP_INTERVAL_SECONDS, config_setup
+from astreum.utils.config import NodeConfig
 
 RAW = dict(
     encoding=serialization.Encoding.Raw,
@@ -47,12 +48,12 @@ def _full_node(window=60):
         storage_public_key_bytes=storage_public,
         relay_secret_key=relay_secret,
         relay_public_key_bytes=relay_secret.public_key().public_bytes(**RAW),
-        config={
-            "message_timestamp_window": window,
-            "peer_timeout": 900,
-            "peer_timeout_interval": TIMEOUT_INTERVAL,
-            "bootstrap_retry_interval": 0,
-        },
+        config=NodeConfig(
+            message_timestamp_window=window,
+            peer_timeout=900,
+            peer_timeout_interval=TIMEOUT_INTERVAL,
+            bootstrap_retry_interval=0,
+        ),
         logger=logging.getLogger("test_peer_sync"),
         default_seed_ips=set(),
         bootstrap_peers=[],
@@ -153,11 +154,11 @@ def _walk_peer(first: int, port: int = 5000) -> Peer:
 def _walk_node(rounds=8, interval=INTERVAL):
     return SimpleNamespace(
         storage_public_key_bytes=OWN_KEY,
-        config={
-            "self_lookup_rounds": rounds,
-            "self_lookup_interval": interval,
-            "peer_timeout_interval": TIMEOUT_INTERVAL,
-        },
+        config=NodeConfig(
+            self_lookup_rounds=rounds,
+            self_lookup_interval=interval,
+            peer_timeout_interval=TIMEOUT_INTERVAL,
+        ),
         peer_route=Route(OWN_KEY),
         outgoing_queue=queue.Queue(),
         logger=SimpleNamespace(debug=lambda *a, **k: None, warning=lambda *a, **k: None),
@@ -281,7 +282,7 @@ class TestTimerWalk(unittest.TestCase):
 
     def test_config_default_interval(self):
         config = config_setup({"default_seed": None})
-        self.assertEqual(config["self_lookup_interval"], DEFAULT_SELF_LOOKUP_INTERVAL_SECONDS)
+        self.assertEqual(config.self_lookup_interval, DEFAULT_SELF_LOOKUP_INTERVAL_SECONDS)
         self.assertEqual(DEFAULT_SELF_LOOKUP_INTERVAL_SECONDS, 900)
 
     def test_negative_interval_rejected(self):
@@ -294,7 +295,7 @@ class TestTimerWalk(unittest.TestCase):
 
     def test_zero_interval_accepted(self):
         config = config_setup({"default_seed": None, "self_lookup_interval": 0})
-        self.assertEqual(config["self_lookup_interval"], 0)
+        self.assertEqual(config.self_lookup_interval, 0)
 
 
 class TestKeepAlive(unittest.TestCase):

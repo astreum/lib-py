@@ -16,6 +16,7 @@ from astreum.expression import RESOLUTION_SINGLE
 from astreum.storage.providers import index_provider, provider_id_for_payload
 from astreum.storage.records import get_record_from_cold_storage
 from astreum.storage.records.fetch import _announce_record
+from astreum.utils.config import NodeConfig
 from tests.storage import test_long_term as lt
 
 PUT = "astreum.storage.exprs.network.put_exprs_in_network"
@@ -45,11 +46,11 @@ def _node(nearer_peer=None, extra_peers=()):
         storage_index={},
         storage_providers=[],
         relay_ip_address="10.0.0.9",
-        config={
-            "port": 7000,
-            "storage_public_key_bytes": OWN_KEY,
-            "relay_public_key_bytes": b"\x88" * 32,
-        },
+        config=NodeConfig(
+            port=7000,
+            storage_public_key_bytes=OWN_KEY,
+            relay_public_key_bytes=b"\x88" * 32,
+        ),
         peer_route=route,
         logger=_logger(),
     )

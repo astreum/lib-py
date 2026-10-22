@@ -24,6 +24,8 @@ Python library to interact with the Astreum blockchain and its virtual machine.
 
 When initializing an `astreum.Node`, pass a dictionary with any of the options below. Only the parameters you want to override need to be present – everything else falls back to its default.
 
+After startup, `node.config` is an `astreum.NodeConfig` object. Each option below is an attribute with the same name, for example `node.config.port` and `node.config.chain_id`. The values are checked when the node starts. `NodeConfig()` holds the default of every option.
+
 ### Core Configuration
 
 | Parameter                        | Type       | Default        | Description                                                                                                                                                                            |
@@ -123,7 +125,7 @@ from astreum.consensus.transaction import (
 )
 
 tx = create_transaction(
-    chain_id=node.config["chain_id"],
+    chain_id=node.config.chain_id,
     amount=100,
     counter=sender_account.counter + 1,
     recipient=recipient_public_key,
@@ -151,7 +153,7 @@ from astreum.consensus.transaction.code import TransactionCode
 from astreum.consensus.constants import TREASURY_ADDRESS
 
 tx = create_transaction(
-    chain_id=node.config["chain_id"],
+    chain_id=node.config.chain_id,
     counter=sender_account.counter + 1,
     sender=sender_public_key,
     recipient=TREASURY_ADDRESS,
@@ -205,7 +207,7 @@ An unsecured borrow assembles its principal by claiming one or more guarantees i
 
 ```python
 tx = create_transaction(
-    chain_id=node.config["chain_id"],
+    chain_id=node.config.chain_id,
     counter=sender_account.counter + 1,
     sender=sender_public_key,
     recipient=TREASURY_ADDRESS,

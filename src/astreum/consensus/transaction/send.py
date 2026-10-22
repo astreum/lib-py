@@ -94,7 +94,7 @@ def send_transaction(
                 difficulty=peer.difficulty,
             )
 
-        wait_deadline = time.time() + float(node.config.get("peer_timeout_interval", 10))
+        wait_deadline = time.time() + float(node.config.peer_timeout_interval)
         while time.time() < wait_deadline:
             if getattr(validation_route, "peers", None):
                 has_validators = True

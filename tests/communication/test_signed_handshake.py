@@ -28,6 +28,7 @@ from astreum.communication.models.route import Route
 from astreum.communication.models.peer_info import PeerInfo, encode_peer_info
 from astreum.communication.processors import incoming as incoming_processor
 from astreum.communication.processors.peer import _queue_bootstrap_handshakes
+from astreum.utils.config import NodeConfig
 
 WINDOW = 60
 RAW = dict(
@@ -46,7 +47,7 @@ def _node(window=WINDOW, bootstrap_peers=()):
         storage_public_key_bytes=storage_public,
         relay_secret_key=relay_secret,
         relay_public_key_bytes=relay_public,
-        config={"message_timestamp_window": window},
+        config=NodeConfig(message_timestamp_window=window),
         logger=logging.getLogger("test_signed_handshake"),
         default_seed_ips=set(),
         bootstrap_peers=list(bootstrap_peers),

@@ -76,7 +76,7 @@ def verify_fork(node: Any, head_id: bytes) -> bool:
                 contact=block_holder(node, block.previous_block_hash) or block_contact,
             )
         block.previous_block = previous_block
-        validator_bytes = node.config.get("validation_public_key_bytes")
+        validator_bytes = node.config.validation_public_key_bytes
         if validator_bytes and block.validator_public_key_bytes == validator_bytes:
             update_fork(node, head_id, {"transactions_verified_up_to": current_hash})
         else:

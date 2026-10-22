@@ -77,8 +77,8 @@ def get_bootstrap_peers(node: "Node") -> list[str]:
     Returns:
         list[str]: The list of bootstrap peer addresses.
     """
-    default_seed = node.config["default_seed"]
-    additional_seeds = node.config["additional_seeds"]
+    default_seed = node.config.default_seed
+    additional_seeds = node.config.additional_seeds
     peers = []
     if default_seed is not None:
         peers.append(default_seed)

@@ -9,9 +9,6 @@ if TYPE_CHECKING:
     from astreum.communication.models.relay_endpoint import RelayEndpoint
     from astreum.expression import Expr
 
-DEFAULT_EXPR_REQUEST_TTL_SECONDS = 4.0
-DEFAULT_STORAGE_FOUND_MAX_PAGES = 64
-
 
 class PendingExprRequest:
     """A pending network request plus the reply pages staged for it.
@@ -67,20 +64,12 @@ class StageResult(enum.Enum):
 
 def _ttl(node: "Node") -> float:
     """Return the configured pending-request lifetime in seconds."""
-    config = getattr(node, "config", None)
-    raw = config.get("expr_request_ttl") if isinstance(config, dict) else None
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and raw > 0:
-        return float(raw)
-    return DEFAULT_EXPR_REQUEST_TTL_SECONDS
+    return float(node.config.expr_request_ttl)
 
 
 def _max_pages(node: "Node") -> int:
     """Return the configured maximum pages per STORAGE_FOUND reply."""
-    config = getattr(node, "config", None)
-    raw = config.get("storage_found_max_pages") if isinstance(config, dict) else None
-    if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0:
-        return raw
-    return DEFAULT_STORAGE_FOUND_MAX_PAGES
+    return node.config.storage_found_max_pages
 
 
 def _live_entry(node: "Node", expr_id: bytes, now: float):

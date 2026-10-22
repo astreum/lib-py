@@ -172,7 +172,7 @@ def make_validation_worker(
             except Exception:
                 node.logger.exception("Unable to advertise committed records")
 
-            validation_public_key = node.config.get("validation_public_key_bytes")
+            validation_public_key = node.config.validation_public_key_bytes
             
             if not validation_public_key:
                 node.logger.debug("Validation public key unavailable; sleeping")
@@ -461,7 +461,7 @@ def make_validation_worker(
                 generate_block_nonce(
                     block=new_block,
                     difficulty=previous_block.difficulty,
-                    sign=node.config["validation_secret_key"].sign,
+                    sign=node.config.validation_secret_key.sign,
                 )
                 elapsed_ms = int((time.perf_counter() - nonce_started) * 1000)
                 setattr(node, "nonce_time_ms", elapsed_ms)

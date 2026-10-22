@@ -26,8 +26,8 @@ def _requires_storage_channel(node: "Node", peer: "Peer", next_upload_bytes: int
     if pending_upload <= 0:
         return False
 
-    fair_use_limit = node.config["fair_use_limit"]
-    fair_use_ratio = node.config["fair_use_ratio"]
+    fair_use_limit = node.config.fair_use_limit
+    fair_use_ratio = node.config.fair_use_ratio
     if fair_use_ratio <= 0:
         return False
 
@@ -61,7 +61,7 @@ def _queue_storage_payment_required(
     Returns:
         bool: True if the response was queued, False otherwise.
     """
-    payment_public_key = (getattr(node, "config", {}) or {}).get("storage_public_key_bytes")
+    payment_public_key = node.config.storage_public_key_bytes
     if not isinstance(payment_public_key, (bytes, bytearray)) or len(payment_public_key) != 32:
         node.logger.warning(
             "Cannot send STORAGE_PAYMENT_REQUIRED for %s to %s: relay payment public key is unavailable",

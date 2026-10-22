@@ -68,7 +68,7 @@ class TestIntegerKeys(_ConfigCase):
     def test_integer_keys_table(self):
         for key, minimum, default in INT_KEYS:
             with self.subTest(key=key):
-                self.assertEqual(self.build()[key], default)
+                self.assertEqual(getattr(self.build(), key), default)
                 with self.assertRaises(ValueError) as ctx:
                     self.build(**{key: "soon"})
                 self.assertEqual(str(ctx.exception), f"{key} must be an integer: 'soon'")
@@ -79,12 +79,12 @@ class TestIntegerKeys(_ConfigCase):
                         str(ctx.exception), f"{key} must be {RANGE_WORDS[minimum]}"
                     )
                 result = self.build(**{key: "7"})
-                self.assertEqual(result[key], 7)
-                self.assertIsInstance(result[key], int)
+                self.assertEqual(getattr(result, key), 7)
+                self.assertIsInstance(getattr(result, key), int)
 
     def test_port(self):
-        self.assertEqual(self.build()["port"], config_module.DEFAULT_PORT)
-        self.assertEqual(self.build(port=0)["port"], 0)
+        self.assertEqual(self.build().port, config_module.DEFAULT_PORT)
+        self.assertEqual(self.build(port=0).port, 0)
         with self.assertRaises(ValueError) as ctx:
             self.build(port=-1)
         self.assertEqual(str(ctx.exception), "port must be 0 or a positive integer")
@@ -97,7 +97,7 @@ class TestFloatKeys(_ConfigCase):
     def test_float_keys_table(self):
         for key, allow_zero, default in FLOAT_KEYS:
             with self.subTest(key=key):
-                self.assertEqual(self.build()[key], default)
+                self.assertEqual(getattr(self.build(), key), default)
                 with self.assertRaises(ValueError) as ctx:
                     self.build(**{key: "soon"})
                 self.assertEqual(str(ctx.exception), f"{key} must be a number: 'soon'")
@@ -107,25 +107,25 @@ class TestFloatKeys(_ConfigCase):
                     self.build(**{key: bad})
                 self.assertEqual(str(ctx.exception), f"{key} must be {word}")
                 result = self.build(**{key: "2.5"})
-                self.assertEqual(result[key], 2.5)
-                self.assertIsInstance(result[key], float)
+                self.assertEqual(getattr(result, key), 2.5)
+                self.assertIsInstance(getattr(result, key), float)
 
 
 class TestBoolKeys(_ConfigCase):
     def test_bool_keys(self):
         for key, default in (("is_storage_provider", False), ("logging_enabled", True)):
             with self.subTest(key=key):
-                self.assertEqual(self.build()[key], default)
+                self.assertEqual(getattr(self.build(), key), default)
                 for bad in ("yes", 1):
                     with self.assertRaises(ValueError) as ctx:
                         self.build(**{key: bad})
                     self.assertEqual(str(ctx.exception), f"{key} must be a boolean")
-                self.assertTrue(self.build(**{key: True})[key])
-                self.assertFalse(self.build(**{key: False})[key])
+                self.assertTrue(getattr(self.build(**{key: True}), key))
+                self.assertFalse(getattr(self.build(**{key: False}), key))
 
     def test_bool_accepted_as_int_where_it_is_today(self):
-        self.assertEqual(self.build(port=True)["port"], 1)
-        self.assertEqual(self.build(hot_storage_limit=True)["hot_storage_limit"], 1)
+        self.assertEqual(self.build(port=True).port, 1)
+        self.assertEqual(self.build(hot_storage_limit=True).hot_storage_limit, 1)
 
     def test_bool_rejected_where_it_is_today(self):
         for key in ("storage_put_batch_max_bytes", "storage_get_batch_max_bytes"):
@@ -147,32 +147,32 @@ class TestBoolKeys(_ConfigCase):
 
 class TestAliasesAndDefaults(_ConfigCase):
     def test_aliases(self):
-        self.assertEqual(self.build(hot_storage_default_limit="7")["hot_storage_limit"], 7)
-        self.assertEqual(self.build(logging_retention="4")["logging_retention_days"], 4)
-        self.assertEqual(self.build(retention_days="2")["logging_retention_days"], 2)
+        self.assertEqual(self.build(hot_storage_default_limit="7").hot_storage_limit, 7)
+        self.assertEqual(self.build(logging_retention="4").logging_retention_days, 4)
+        self.assertEqual(self.build(retention_days="2").logging_retention_days, 2)
 
     def test_primary_key_wins_over_alias(self):
         result = self.build(hot_storage_limit=5, hot_storage_default_limit=7)
-        self.assertEqual(result["hot_storage_limit"], 5)
+        self.assertEqual(result.hot_storage_limit, 5)
         result = self.build(
             logging_retention_days=1, logging_retention=2, retention_days=3
         )
-        self.assertEqual(result["logging_retention_days"], 1)
+        self.assertEqual(result.logging_retention_days, 1)
 
     def test_verify_interval_default_follows_peer_interval(self):
         result = self.build(peer_timeout_interval=30)
-        self.assertEqual(result["verify_blockchain_interval"], 30.0)
+        self.assertEqual(result.verify_blockchain_interval, 30.0)
 
     def test_expr_request_ttl_default_follows_fetch_settings(self):
         result = self.build(storage_fetch_retries=5, storage_fetch_interval=1)
-        self.assertEqual(result["expr_request_ttl"], 10.0)
+        self.assertEqual(result.expr_request_ttl, 10.0)
         result = self.build(storage_fetch_retries=0)
         self.assertEqual(
-            result["expr_request_ttl"], config_module.DEFAULT_EXPR_REQUEST_TTL_SECONDS
+            result.expr_request_ttl, config_module.DEFAULT_EXPR_REQUEST_TTL_SECONDS
         )
 
     def test_unknown_keys_are_ignored(self):
-        self.assertFalse(self.build(long_term_storage=True)["is_storage_provider"])
+        self.assertFalse(self.build(long_term_storage=True).is_storage_provider)
 
 
 class TestOrderAndMutation(_ConfigCase):
@@ -196,20 +196,17 @@ class TestOrderAndMutation(_ConfigCase):
         first = config_setup()
         second = config_setup()
         self.assertIsNot(first, second)
-        self.assertEqual(
-            inspect.signature(config_setup).parameters["config"].default, None
-        )
 
     def test_none_gives_fresh_dict_with_defaults(self):
         result = config_setup(None)
-        self.assertEqual(result["port"], config_module.DEFAULT_PORT)
-        self.assertIn("storage_secret_key", result)
+        self.assertEqual(result.port, config_module.DEFAULT_PORT)
+        self.assertIsNotNone(result.storage_secret_key)
 
-    def test_explicit_dict_changes_in_place(self):
-        given = {"default_seed": None}
+    def test_input_dict_unchanged(self):
+        given = {"default_seed": None, "port": "9"}
         returned = config_setup(given)
-        self.assertIs(returned, given)
-        self.assertIn("port", given)
+        self.assertEqual(given, {"default_seed": None, "port": "9"})
+        self.assertEqual(returned.port, 9)
 
 
 class TestParsers(unittest.TestCase):

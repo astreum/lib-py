@@ -125,8 +125,8 @@ def _manage_peer_pass(node: "Node", probed: dict, now: float) -> None:
     if not isinstance(peers, dict) or peer_route is None:
         return
 
-    timeout_seconds = node.config["peer_timeout"]
-    wait_seconds = 2 * node.config["peer_timeout_interval"]
+    timeout_seconds = node.config.peer_timeout
+    wait_seconds = 2 * node.config.peer_timeout_interval
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
     with node.peers_lock:
         stale = {key: peer for key, peer in peers.items() if peer.timestamp < cutoff}
@@ -156,7 +156,7 @@ def _manage_peer_pass(node: "Node", probed: dict, now: float) -> None:
     with node.peers_lock:
         peer_count = len(peers)
     if peer_count == 0:
-        bootstrap_interval = node.config.get("bootstrap_retry_interval", 0)
+        bootstrap_interval = node.config.bootstrap_retry_interval
         wall_now = time.time()
         last_attempt = getattr(node, "_bootstrap_last_attempt", 0.0)
         if bootstrap_interval and (wall_now - last_attempt) >= bootstrap_interval:
@@ -175,13 +175,13 @@ def manage_peer(node: "Node") -> None:
     """
     node.logger.info(
         "Peer manager started (timeout=%3ds, interval=%3ds)",
-        node.config["peer_timeout"],
-        node.config["peer_timeout_interval"],
+        node.config.peer_timeout,
+        node.config.peer_timeout_interval,
     )
     stop = node.communication_stop_event
     probed: dict[bytes, float] = {}
     while not stop.is_set():
-        interval_seconds = node.config["peer_timeout_interval"]
+        interval_seconds = node.config.peer_timeout_interval
         try:
             _manage_peer_pass(node, probed, time.monotonic())
         except Exception:

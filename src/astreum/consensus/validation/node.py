@@ -32,7 +32,7 @@ def validate_blockchain(self, validation_secret_key: Ed25519PrivateKey):
     connect_node(self)
     fork_setup(self)
 
-    default_seed = self.config.get("default_seed")
+    default_seed = self.config.default_seed
     if not default_seed:
         verify_blockchain(self)
     else:
@@ -42,7 +42,7 @@ def validate_blockchain(self, validation_secret_key: Ed25519PrivateKey):
 
     self.logger.info("Setting up node consensus")
 
-    latest_block_hex = self.config.get("latest_block_hash")
+    latest_block_hex = self.config.latest_block_hash
     if latest_block_hex is not None:
         self.latest_block_hash = hex_to_bytes(latest_block_hex, expected_length=32)
         try:
@@ -97,17 +97,17 @@ def validate_blockchain(self, validation_secret_key: Ed25519PrivateKey):
 
     self.logger.info(
         "Initializing block and transaction processing for chain %s",
-        self.config["chain"],
+        self.config.chain,
     )
 
-    self.config["validation_secret_key"] = validation_secret_key
-    validation_public_key_obj = self.config["validation_secret_key"].public_key()
+    self.config.validation_secret_key = validation_secret_key
+    validation_public_key_obj = self.config.validation_secret_key.public_key()
     validation_public_key_bytes = validation_public_key_obj.public_bytes(
         encoding=serialization.Encoding.Raw,
         format=serialization.PublicFormat.Raw,
     )
-    self.config["validation_public_key"] = validation_public_key_obj
-    self.config["validation_public_key_bytes"] = validation_public_key_bytes
+    self.config.validation_public_key = validation_public_key_obj
+    self.config.validation_public_key_bytes = validation_public_key_bytes
     self.logger.debug(
         "Derived validator public key %s", validation_public_key_bytes.hex()
     )
@@ -116,7 +116,7 @@ def validate_blockchain(self, validation_secret_key: Ed25519PrivateKey):
         genesis_block = create_genesis_block(
             self,
             validator_public_key=validation_public_key_bytes,
-            chain_id=self.config["chain_id"],
+            chain_id=self.config.chain_id,
         )
         from astreum.consensus.block.encoding.expr import get_block_expr
         genesis_hash = get_block_expr(genesis_block).hash()
@@ -194,7 +194,7 @@ def validate_blockchain(self, validation_secret_key: Ed25519PrivateKey):
 
     try:
         ping_payload = Ping(
-            is_validator=bool(self.config.get("validation_public_key_bytes")),
+            is_validator=bool(self.config.validation_public_key_bytes),
             difficulty=message_difficulty(self),
             latest_block=self.latest_block_hash,
         ).to_bytes()

@@ -109,7 +109,7 @@ def self_lookup_step(node: "Node", walk: SelfLookup, now: float) -> bool:
     """
     if walk.done:
         return True
-    cap = node.config["self_lookup_rounds"]
+    cap = node.config.self_lookup_rounds
     if cap == 0:
         walk.done = True
         return True
@@ -126,7 +126,7 @@ def self_lookup_step(node: "Node", walk: SelfLookup, now: float) -> bool:
         if _send_self_route_request(node, peer):
             walk.rounds += 1
             walk.distance = distance
-            walk.deadline = now + node.config["peer_timeout_interval"]
+            walk.deadline = now + node.config.peer_timeout_interval
         return False
     if walk.deadline is not None and (nearer or now >= walk.deadline):
         walk.done = True
@@ -200,7 +200,7 @@ def self_lookup_timer_step(node: "Node", timer: SelfLookupTimer, now: float) -> 
     Returns:
         True after the first walk is complete, False before.
     """
-    if node.config["self_lookup_rounds"] == 0:
+    if node.config.self_lookup_rounds == 0:
         timer.joined = True
         return True
     was_done = timer.walk.done
@@ -210,7 +210,7 @@ def self_lookup_timer_step(node: "Node", timer: SelfLookupTimer, now: float) -> 
     if done and not was_done:
         timer.completed += 1
         timer.cursor = refresh_one_bucket(node, timer.cursor)
-        interval = node.config["self_lookup_interval"]
+        interval = node.config.self_lookup_interval
         timer.next_walk_at = now + interval if interval > 0 else None
     elif done and timer.next_walk_at is not None and now >= timer.next_walk_at:
         timer.walk = SelfLookup()

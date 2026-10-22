@@ -26,7 +26,7 @@ from astreum.storage.workers.advertisements import advertise_storage
 from astreum.storage.workers.claim import claim_storage
 from astreum.storage.workers.requests import init_request_buffer, request_storage
 from astreum.utils.bytes import hex_to_bytes
-from astreum.utils.config import DEFAULT_SEED
+from astreum.utils.config import DEFAULT_SEED, NodeConfig
 
 def load_x25519(hex_key: Optional[str]) -> X25519PrivateKey:
     """DH key for relaying (always X25519).
@@ -128,28 +128,28 @@ def _resolve_relay_ip_address(node: "Node") -> Optional[str]:
     return None
 
 
-def communication_setup(node: "Node", config: dict):
+def communication_setup(node: "Node", config: NodeConfig):
     """Initialize node communication including sockets, queues, and threads.
 
     Args:
         node (Node): The node instance to configure.
-        config (dict): Configuration dictionary with keys for ports, keys, etc.
+        config (NodeConfig): Node configuration with ports, keys, etc.
 
     Returns: None
     """
     node.logger.info("Setting up node communication")
-    node.use_ipv6              = config.get('use_ipv6', False)
+    node.use_ipv6              = config.use_ipv6
     node.peers_lock = threading.RLock()
     node.communication_stop_event = threading.Event()
-    default_seed = config.get("default_seed")
+    default_seed = config.default_seed
     node.default_seed_ips = _resolve_default_seed_ips(node, default_seed)
     node.relay_ip_address = _resolve_relay_ip_address(node)
 
     # key loading
-    node.relay_secret_key      = load_x25519(config.get('relay_secret_key'))
-    node.storage_secret_key    = config["storage_secret_key"]
-    node.storage_public_key    = config["storage_public_key"]
-    node.storage_public_key_bytes = config["storage_public_key_bytes"]
+    node.relay_secret_key      = load_x25519(config.relay_secret_key)
+    node.storage_secret_key    = config.storage_secret_key
+    node.storage_public_key    = config.storage_public_key
+    node.storage_public_key_bytes = config.storage_public_key_bytes
 
     # derive pubs + routes
     node.relay_public_key      = node.relay_secret_key.public_key()
@@ -157,11 +157,11 @@ def communication_setup(node: "Node", config: dict):
         encoding=serialization.Encoding.Raw,
         format=serialization.PublicFormat.Raw,
     )
-    node.config["relay_public_key"] = node.relay_public_key
-    node.config["relay_public_key_bytes"] = node.relay_public_key_bytes
+    node.config.relay_public_key = node.relay_public_key
+    node.config.relay_public_key_bytes = node.relay_public_key_bytes
     node.peer_route, node.validation_route = make_routes(
         node.storage_public_key_bytes,
-        node.config.get("validation_secret_key")
+        node.config.validation_secret_key
     )
 
     # connection state & atom request tracking
@@ -175,7 +175,7 @@ def communication_setup(node: "Node", config: dict):
         node.peers = {}
 
 
-    port = config.get("port")
+    port = config.port
     if port is None:
         raise ValueError("port must be configured before communication setup")
     fam = socket.AF_INET6 if node.use_ipv6 else socket.AF_INET
@@ -188,18 +188,18 @@ def communication_setup(node: "Node", config: dict):
         raise OSError(
             f"port mismatch: requested {port}, got {bound_port}"
         )
-    node.config["port"] = bound_port if port == 0 else port
+    node.config.port = bound_port if port == 0 else port
     node.socket.settimeout(0.5)
     node.logger.info(
         "Incoming UDP socket bound to %s:%s",
         "::" if node.use_ipv6 else "0.0.0.0",
-        node.config["port"],
+        node.config.port,
     )
     node.incoming_queue = Queue()
     node.incoming_queue_size = 0
     node.incoming_queue_size_lock = threading.RLock()
-    node.incoming_queue_size_limit = node.config.get("incoming_queue_size_limit", 0)
-    node.incoming_queue_timeout = node.config.get("incoming_queue_timeout", 0)
+    node.incoming_queue_size_limit = node.config.incoming_queue_size_limit
+    node.incoming_queue_timeout = node.config.incoming_queue_timeout
     node.incoming_populate_thread = threading.Thread(
         target=populate_incoming_messages,
         args=(node,),
@@ -229,7 +229,7 @@ def communication_setup(node: "Node", config: dict):
     )
     node.peer_manager_thread.start()
 
-    latest_block_hex = config.get("latest_block_hash")
+    latest_block_hex = config.latest_block_hash
     if latest_block_hex:
         try:
             node.latest_block_hash = hex_to_bytes(latest_block_hex, expected_length=32)
@@ -242,7 +242,7 @@ def communication_setup(node: "Node", config: dict):
 
     node.logger.info(
         "Communication ready (port=%s, bootstrap_count=%s)",
-        node.config["port"],
+        node.config.port,
         len(node.bootstrap_peers),
     )
     node.is_connected = True
@@ -269,7 +269,7 @@ def communication_setup(node: "Node", config: dict):
     try:
         node.storage_request_current_price = max(
             0,
-            int(node.config.get("storage_request_minimum_price", 0) or 0),
+            int(node.config.storage_request_minimum_price),
         )
     except Exception:
         node.storage_request_current_price = 0

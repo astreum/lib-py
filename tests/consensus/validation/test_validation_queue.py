@@ -86,7 +86,7 @@ class TestValidationQueue(unittest.TestCase):
             # --- build the transfer tx ------------------------------------
             recipient = os.urandom(32)
             tx = Transaction(
-                chain_id=node.config["chain_id"],
+                chain_id=node.config.chain_id,
                 amount=1,
                 code=TransactionCode.TRANSFER,
                 counter=0,

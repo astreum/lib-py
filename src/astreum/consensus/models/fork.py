@@ -287,8 +287,7 @@ class Fork:
             return False
 
         node.logger.debug("Fork verify heavy pass head=%s anchor=%s", _hex(self.head), _hex(anchor_hash))
-        config = node.config or {}
-        current_validator = config.get("validation_public_key_bytes")
+        current_validator = node.config.validation_public_key_bytes
 
         def skip_slow_pass(block: Block) -> bool:
             """Check if slow pass can be skipped.

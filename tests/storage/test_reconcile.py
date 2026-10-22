@@ -55,7 +55,7 @@ class TestIterExprsInColdStorage(unittest.TestCase):
         ids = {e.hash() for e in exprs}
         for e in exprs:
             _store_expr(self.node, e)
-        self.assertTrue(collate_exprs(Path(self.node.config["cold_storage_path"]) / "exprs"))
+        self.assertTrue(collate_exprs(Path(self.node.config.cold_storage_path) / "exprs"))
         fresh_id = _store_expr(self.node, bytes_(b"fresh"))
         self.assertEqual(
             set(iter_exprs_in_cold_storage(self.node)), ids | {fresh_id}
@@ -64,7 +64,7 @@ class TestIterExprsInColdStorage(unittest.TestCase):
     def test_duplicate_across_levels(self):
         e = bytes_(b"dup")
         _store_expr(self.node, e)
-        self.assertTrue(collate_exprs(Path(self.node.config["cold_storage_path"]) / "exprs"))
+        self.assertTrue(collate_exprs(Path(self.node.config.cold_storage_path) / "exprs"))
         _store_expr(self.node, e)
         ids = list(iter_exprs_in_cold_storage(self.node))
         self.assertIn(e.hash(), ids)
@@ -89,7 +89,7 @@ class TestRecordsTable(unittest.TestCase):
         storage_id = b"\xbb" * 32
         slot_ids = [b"\x01" * 32, b"\x02" * 32]
         self.assertTrue(put_record_in_cold_storage(self.node, storage_id, slot_ids))
-        self.assertTrue(collate_exprs(Path(self.node.config["cold_storage_path"]) / "records"))
+        self.assertTrue(collate_exprs(Path(self.node.config.cold_storage_path) / "records"))
         self.assertEqual(get_record_from_cold_storage(self.node, storage_id), b"".join(slot_ids))
         self.assertEqual(set(iter_records_in_cold_storage(self.node)), {storage_id})
 

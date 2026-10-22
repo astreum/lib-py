@@ -18,7 +18,7 @@ from typing import Any, Dict, Optional
 
 from blake3 import blake3
 
-from astreum.utils.config import DEFAULT_LOGGING_RETENTION_DAYS
+from astreum.utils.config import NodeConfig
 
 # Fixed identity for all loggers in this library
 _ORG_NAME = "Astreum"
@@ -278,11 +278,11 @@ def _disabled_logger(product: str, instance_id: str, logger_name: str | None) ->
     )
 
 
-def logging_setup(config: dict) -> logging.LoggerAdapter:
+def logging_setup(config: NodeConfig) -> logging.LoggerAdapter:
     """Configure logging according to the runtime config and return an adapter.
 
     Args:
-        config: Configuration dictionary with keys:
+        config: Node configuration. Fields used:
             - logging_retention_days: Number of days to retain log files.
             - logging_enabled: Boolean to enable/disable logging.
             - logger_name: Optional logger name for extra context.
@@ -291,24 +291,18 @@ def logging_setup(config: dict) -> logging.LoggerAdapter:
     Returns:
         LoggerAdapter instance for logging.
     """
-    if config is None:
-        config = {}
-    elif not isinstance(config, dict):
-        config = dict(config)
-
     org = _ORG_NAME
     product = _PRODUCT_NAME
     instance_id = _derive_instance_id()
 
-    retention_value = config.get("logging_retention_days")
-    retention_days = int(retention_value) if retention_value is not None else DEFAULT_LOGGING_RETENTION_DAYS
+    retention_days = config.logging_retention_days
 
-    logging_enabled = config.get("logging_enabled", True)
-    logger_name = config.get("logger_name")
+    logging_enabled = config.logging_enabled
+    logger_name = config.logger_name
     if not logging_enabled:
         return _disabled_logger(product, instance_id, logger_name)
 
-    verbose = bool(config.get("verbose", False))
+    verbose = config.verbose
 
     log_dir = _log_root(org, product, instance_id)
     log_dir.mkdir(parents=True, exist_ok=True)

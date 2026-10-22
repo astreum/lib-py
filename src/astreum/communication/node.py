@@ -15,8 +15,8 @@ def connect_node(astreum_node):
         return exc
 
     # Load latest_block_hash from config
-    latest_block_hex = astreum_node.config.get("latest_block_hash")
-    verified_up_to_hex = astreum_node.config.get("verified_up_to")
+    latest_block_hex = astreum_node.config.latest_block_hash
+    verified_up_to_hex = astreum_node.config.verified_up_to
 
     if latest_block_hex and astreum_node.latest_block_hash is None:
         try:

@@ -13,6 +13,7 @@ from astreum.consensus.block.message import decode_block_message
 from astreum.consensus.block.verify.head import verify_block_head
 from astreum.consensus.validation.peers import validator_peers
 from astreum.storage.exprs import put_expr_in_hot_storage
+from astreum.utils.config import NodeConfig
 
 if TYPE_CHECKING:
     from astreum import Node
@@ -36,7 +37,7 @@ def _scratch_node(node: "Node", limit_bytes: int = 4 * 1024 * 1024) -> SimpleNam
         hot_storage_timestamps={},
         hot_storage_lock=threading.RLock(),
         hot_storage_size=0,
-        config={"hot_storage_limit": limit_bytes, "cold_storage_path": None},
+        config=NodeConfig(hot_storage_limit=limit_bytes),
         is_connected=False,
         logger=node.logger,
     )
@@ -97,7 +98,7 @@ def handle_block(node: "Node", peer: Peer, content: bytes) -> None:
     if not record_block_holder(node, block_hash, contact):
         return
 
-    is_validator = node.config.get("validation_secret_key") is not None
+    is_validator = node.config.validation_secret_key is not None
     if not is_validator:
         return
 

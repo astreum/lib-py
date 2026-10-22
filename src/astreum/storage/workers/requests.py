@@ -16,10 +16,6 @@ import threading
 from typing import TYPE_CHECKING, Optional
 
 from astreum.storage.requests import claim_expr_req, has_expr_req, pop_expr_req
-from astreum.utils.config import (
-    DEFAULT_STORAGE_GET_BATCH_MAX_BYTES,
-    DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS,
-)
 
 if TYPE_CHECKING:
     from astreum import Node
@@ -138,9 +134,7 @@ def _max_entries(node: "Node") -> int:
     """
     from astreum.communication.storage_request.model import max_get_entries
 
-    budget = (getattr(node, "config", None) or {}).get(
-        "storage_get_batch_max_bytes", DEFAULT_STORAGE_GET_BATCH_MAX_BYTES
-    )
+    budget = node.config.storage_get_batch_max_bytes
     return max(1, max_get_entries(budget))
 
 
@@ -299,12 +293,7 @@ def request_storage(node: "Node") -> None:
     """
     stop = node.communication_stop_event
     event = node.storage_request_flush_event
-    interval = float(
-        (getattr(node, "config", None) or {}).get(
-            "storage_request_flush_interval",
-            DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS,
-        )
-    )
+    interval = float(node.config.storage_request_flush_interval)
     node.logger.info("Storage request flusher started (interval=%ss)", interval)
     while not stop.is_set():
         event.wait(interval)

@@ -58,7 +58,7 @@ def put_expr_in_hot_storage(node, expr: "Expr") -> bool:
 
     key = expr.hash()
     with node.hot_storage_lock:
-        hot_limit = node.config["hot_storage_limit"]
+        hot_limit = node.config.hot_storage_limit
         size = expr.size()
         if size > hot_limit:
             return False

@@ -106,7 +106,7 @@ def _update_storage_request_price(node: "Node") -> None:
     pressure = _incoming_queue_pressure(node)
     factor = _price_movement_factor_for_pressure(pressure)
     previous_price = node.storage_request_current_price
-    target_price = max(node.config["storage_request_minimum_price"], round(previous_price * factor))
+    target_price = max(node.config.storage_request_minimum_price, round(previous_price * factor))
 
     
     node.storage_request_current_price = target_price
@@ -192,14 +192,11 @@ def _startup_announce_step(node: "Node") -> str:
 
     try:
         from astreum.communication.storage_request.model import max_batch_entries
-        from astreum.utils.config import DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES
 
         if state is None:
             state = iter_records_in_cold_storage(node)
             node.startup_announce = state
-        budget = node.config.get(
-            "storage_put_batch_max_bytes", DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES
-        )
+        budget = node.config.storage_put_batch_max_bytes
         per_batch = max(1, max_batch_entries(budget))
         batch = list(islice(state, per_batch))
         if batch:
@@ -291,7 +288,7 @@ def _serve_one_index_request(node: "Node") -> bool:
     if peer is None or peer.address is None:
         return True
 
-    own_key = node.config["storage_public_key_bytes"]
+    own_key = node.config.storage_public_key_bytes
     groups: dict[bytes, list[tuple[bytes, int]]] = {}
     for expr_id, provider_ids in list(node.storage_index.items()):
         payloads = [provider_payload_for_id(node, i) for i in provider_ids]
@@ -366,8 +363,8 @@ def advertise_storage(astreum_node: "Node") -> None:
     Returns:
         None. Runs indefinitely until ``communication_stop_event`` fires.
     """
-    price_interval = float(astreum_node.config.get("storage_request_price_interval") or 0)
-    prune_interval = float(astreum_node.config.get("expr_request_ttl") or 0)
+    price_interval = float(astreum_node.config.storage_request_price_interval or 0)
+    prune_interval = float(astreum_node.config.expr_request_ttl or 0)
 
     long_term_interval = float(
         getattr(astreum_node, "long_term_storage_interval", 0) or 0

@@ -49,6 +49,7 @@ from astreum.consensus.models.accounts import Accounts
 from astreum.consensus.models.block import Block
 from astreum.consensus.block.create import create_block
 from astreum.expression.helpers import get_expr_builtin_tag
+from astreum.utils.config import NodeConfig
 
 # Expr concrete types (Expr is a namespace class, not a base class).
 _EXPR_TYPES = (Expr,)
@@ -72,7 +73,7 @@ class _FakeNode:
         self.hot_storage_lock = threading.Lock()
         self.hot_storage_timestamps: dict[bytes, float] = {}
         self.hot_storage_size = 0
-        self.config = {"hot_storage_limit": 10 * 1024 * 1024, "cold_storage_path": None}
+        self.config = NodeConfig(hot_storage_limit=10 * 1024 * 1024, cold_storage_path=None)
         self.is_connected = False
         self.logger = type(
             "FakeLogger",

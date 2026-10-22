@@ -1,8 +1,8 @@
 
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives.asymmetric import ed25519, x25519
 
 DEFAULT_HOT_STORAGE_LIMIT = 1 << 30  # 1 GiB
 DEFAULT_COLD_STORAGE_LIMIT = 10 << 30  # 10 GiB
@@ -38,6 +38,133 @@ DEFAULT_STORAGE_GET_BATCH_MAX_BYTES = 1232
 DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS = 0.25
 # Most pages one STORAGE_FOUND reply may span (about 4 MiB at ~65 KB a page).
 DEFAULT_STORAGE_FOUND_MAX_PAGES = 64
+
+
+class NodeConfig:
+    """Runtime settings of a node.
+
+    Every setting is an attribute. ``NodeConfig()`` holds the defaults and does
+    no checks and no I/O. ``config_setup`` checks a user dictionary and returns
+    a filled ``NodeConfig``. The relay, validation and ``cold_storage_path``
+    fields can change after startup.
+    """
+
+    def __init__(
+        self,
+        chain: str = "test",
+        chain_id: int = 0,
+        hot_storage_limit: int = DEFAULT_HOT_STORAGE_LIMIT,
+        cold_storage_limit: int = DEFAULT_COLD_STORAGE_LIMIT,
+        cold_storage_scale: str = DEFAULT_COLD_STORAGE_SCALE,
+        cold_storage_base_size: int = 1_000_000,
+        cold_storage_path: Optional[str] = None,
+        logging_retention_days: int = DEFAULT_LOGGING_RETENTION_DAYS,
+        logging_enabled: bool = DEFAULT_LOGGING_ENABLED,
+        logger_name: Optional[str] = None,
+        verbose: bool = False,
+        port: int = DEFAULT_PORT,
+        use_ipv6: bool = False,
+        incoming_queue_size_limit: int = DEFAULT_INCOMING_QUEUE_SIZE_LIMIT_BYTES,
+        incoming_queue_timeout: float = DEFAULT_INCOMING_QUEUE_TIMEOUT_SECONDS,
+        peer_timeout: int = DEFAULT_PEER_TIMEOUT_SECONDS,
+        peer_timeout_interval: int = DEFAULT_PEER_TIMEOUT_INTERVAL_SECONDS,
+        verify_blockchain_interval: float = float(DEFAULT_PEER_TIMEOUT_INTERVAL_SECONDS),
+        bootstrap_retry_interval: int = DEFAULT_BOOTSTRAP_RETRY_INTERVAL_SECONDS,
+        self_lookup_rounds: int = DEFAULT_SELF_LOOKUP_ROUNDS,
+        self_lookup_interval: int = DEFAULT_SELF_LOOKUP_INTERVAL_SECONDS,
+        storage_index_interval: int = DEFAULT_STORAGE_INDEX_INTERVAL_SECONDS,
+        storage_request_minimum_price: int = DEFAULT_STORAGE_REQUEST_MINIMUM_PRICE,
+        storage_request_price_interval: float = DEFAULT_STORAGE_REQUEST_PRICE_INTERVAL_SECONDS,
+        storage_fetch_interval: float = DEFAULT_STORAGE_FETCH_INTERVAL_SECONDS,
+        storage_fetch_retries: int = DEFAULT_STORAGE_FETCH_RETRIES,
+        expr_request_ttl: float = DEFAULT_EXPR_REQUEST_TTL_SECONDS,
+        is_storage_provider: bool = False,
+        long_term_storage_interval: float = DEFAULT_LONG_TERM_STORAGE_INTERVAL_SECONDS,
+        storage_put_batch_max_bytes: int = DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES,
+        storage_get_batch_max_bytes: int = DEFAULT_STORAGE_GET_BATCH_MAX_BYTES,
+        storage_request_flush_interval: float = DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS,
+        storage_found_max_pages: int = DEFAULT_STORAGE_FOUND_MAX_PAGES,
+        fair_use_limit: int = DEFAULT_FAIR_USE_LIMIT_BYTES,
+        fair_use_ratio: float = DEFAULT_FAIR_USE_RATIO,
+        verification_max_stale_seconds: int = DEFAULT_VERIFICATION_MAX_STALE_SECONDS,
+        verification_max_future_skew: int = DEFAULT_VERIFICATION_MAX_FUTURE_SKEW_SECONDS,
+        message_timestamp_window: int = DEFAULT_MESSAGE_TIMESTAMP_WINDOW_SECONDS,
+        default_seed: Optional[str] = DEFAULT_SEED,
+        additional_seeds: Optional[List[str]] = None,
+        verified_up_to: Optional[str] = None,
+        latest_block_hash: Optional[str] = None,
+        storage_secret_key: Optional[ed25519.Ed25519PrivateKey] = None,
+        storage_public_key: Optional[ed25519.Ed25519PublicKey] = None,
+        storage_public_key_bytes: Optional[bytes] = None,
+        validation_secret_key: Optional[ed25519.Ed25519PrivateKey] = None,
+        validation_public_key: Optional[ed25519.Ed25519PublicKey] = None,
+        validation_public_key_bytes: Optional[bytes] = None,
+        relay_secret_key: Optional[str] = None,
+        relay_public_key: Optional[x25519.X25519PublicKey] = None,
+        relay_public_key_bytes: Optional[bytes] = None,
+    ):
+        """Store each setting as an attribute.
+
+        Args:
+            chain: Chain name.
+            chain_id: Chain identifier derived from ``chain``.
+            additional_seeds: Extra seed addresses. Copied into a new list.
+            The remaining arguments have the attribute of the same name. See
+            ``config_setup`` for the checks on each value.
+
+        Returns: None
+        """
+        self.chain = chain
+        self.chain_id = chain_id
+        self.hot_storage_limit = hot_storage_limit
+        self.cold_storage_limit = cold_storage_limit
+        self.cold_storage_scale = cold_storage_scale
+        self.cold_storage_base_size = cold_storage_base_size
+        self.cold_storage_path = cold_storage_path
+        self.logging_retention_days = logging_retention_days
+        self.logging_enabled = logging_enabled
+        self.logger_name = logger_name
+        self.verbose = verbose
+        self.port = port
+        self.use_ipv6 = use_ipv6
+        self.incoming_queue_size_limit = incoming_queue_size_limit
+        self.incoming_queue_timeout = incoming_queue_timeout
+        self.peer_timeout = peer_timeout
+        self.peer_timeout_interval = peer_timeout_interval
+        self.verify_blockchain_interval = verify_blockchain_interval
+        self.bootstrap_retry_interval = bootstrap_retry_interval
+        self.self_lookup_rounds = self_lookup_rounds
+        self.self_lookup_interval = self_lookup_interval
+        self.storage_index_interval = storage_index_interval
+        self.storage_request_minimum_price = storage_request_minimum_price
+        self.storage_request_price_interval = storage_request_price_interval
+        self.storage_fetch_interval = storage_fetch_interval
+        self.storage_fetch_retries = storage_fetch_retries
+        self.expr_request_ttl = expr_request_ttl
+        self.is_storage_provider = is_storage_provider
+        self.long_term_storage_interval = long_term_storage_interval
+        self.storage_put_batch_max_bytes = storage_put_batch_max_bytes
+        self.storage_get_batch_max_bytes = storage_get_batch_max_bytes
+        self.storage_request_flush_interval = storage_request_flush_interval
+        self.storage_found_max_pages = storage_found_max_pages
+        self.fair_use_limit = fair_use_limit
+        self.fair_use_ratio = fair_use_ratio
+        self.verification_max_stale_seconds = verification_max_stale_seconds
+        self.verification_max_future_skew = verification_max_future_skew
+        self.message_timestamp_window = message_timestamp_window
+        self.default_seed = default_seed
+        self.additional_seeds = list(additional_seeds) if additional_seeds is not None else []
+        self.verified_up_to = verified_up_to
+        self.latest_block_hash = latest_block_hash
+        self.storage_secret_key = storage_secret_key
+        self.storage_public_key = storage_public_key
+        self.storage_public_key_bytes = storage_public_key_bytes
+        self.validation_secret_key = validation_secret_key
+        self.validation_public_key = validation_public_key
+        self.validation_public_key_bytes = validation_public_key_bytes
+        self.relay_secret_key = relay_secret_key
+        self.relay_public_key = relay_public_key
+        self.relay_public_key_bytes = relay_public_key_bytes
 
 
 def _parse_int(name: str, raw, minimum: Optional[int] = None) -> int:
@@ -514,25 +641,62 @@ def _setup_keys(config: Dict) -> None:
     )
 
 
-def config_setup(config: Optional[Dict] = None):
-    """
-    Normalize configuration values before the node starts.
+_UNSET_BY_SETUP = (
+    "use_ipv6",
+    "verbose",
+    "logger_name",
+    "relay_secret_key",
+    "latest_block_hash",
+    "relay_public_key",
+    "relay_public_key_bytes",
+)
+
+
+def _build_node_config(values: Dict) -> NodeConfig:
+    """Build a ``NodeConfig`` from a normalized dictionary.
+
+    Keys that ``NodeConfig`` does not know are ignored. Keys in
+    ``_UNSET_BY_SETUP`` are optional because ``config_setup`` does not set them.
 
     Args:
-        config: Configuration dictionary to normalize. Modified in place. When
-            ``None``, a new dictionary is used.
+        values: The dictionary after all setup sections ran.
 
     Returns:
-        The normalized configuration dictionary.
+        A new ``NodeConfig``.
     """
-    if config is None:
-        config = {}
-    _setup_chain(config)
-    _setup_storage_limits(config)
-    _setup_logging(config)
-    _setup_network(config)
-    _setup_storage_requests(config)
-    _setup_verification(config)
-    _setup_seeds(config)
-    _setup_keys(config)
-    return config
+    fields = {}
+    for name in vars(NodeConfig()):
+        if name in _UNSET_BY_SETUP:
+            if name in values:
+                fields[name] = values[name]
+        else:
+            fields[name] = values[name]
+    return NodeConfig(**fields)
+
+
+def config_setup(config: Optional[Dict] = None) -> NodeConfig:
+    """Normalize configuration values before the node starts.
+
+    The caller's dictionary does not change. Cold storage and the account
+    ``storage.txt`` file can be created or read as before.
+
+    Args:
+        config: Configuration dictionary to normalize. When ``None``, the
+            defaults are used.
+
+    Returns:
+        A new ``NodeConfig`` with the normalized values.
+
+    Raises:
+        ValueError: If a value is not valid.
+    """
+    values = dict(config) if config is not None else {}
+    _setup_chain(values)
+    _setup_storage_limits(values)
+    _setup_logging(values)
+    _setup_network(values)
+    _setup_storage_requests(values)
+    _setup_verification(values)
+    _setup_seeds(values)
+    _setup_keys(values)
+    return _build_node_config(values)

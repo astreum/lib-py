@@ -21,6 +21,7 @@ from astreum.communication.storage_request.model import (
 )
 from astreum.storage.advertisements import advertise_exprs
 from astreum.utils.config import DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES, config_setup
+from astreum.utils.config import NodeConfig
 
 SELF_KEY = b"\x00" * 32
 PEER_A_KEY = b"\xff" * 32
@@ -52,12 +53,12 @@ def _make_node(peers=(), budget=DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES):
     for peer in peers:
         route.add_peer(peer.public_key_bytes, peer)
     return SimpleNamespace(
-        config={
-            "storage_public_key_bytes": SELF_KEY,
-            "relay_public_key_bytes": b"R" * 32,
-            "port": 52780,
-            "storage_put_batch_max_bytes": budget,
-        },
+        config=NodeConfig(
+            storage_public_key_bytes=SELF_KEY,
+            relay_public_key_bytes=b"R" * 32,
+            port=52780,
+            storage_put_batch_max_bytes=budget,
+        ),
         storage_public_key_bytes=SELF_KEY,
         relay_ip_address="10.0.0.1",
         logger=_silent_logger(),
@@ -191,7 +192,7 @@ class TestBudgetConfig(unittest.TestCase):
         self.assertEqual(DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES, 1232)
         self.assertEqual(max_batch_entries(1232), 32)
         config = config_setup({"default_seed": None})
-        self.assertEqual(config["storage_put_batch_max_bytes"], 1232)
+        self.assertEqual(config.storage_put_batch_max_bytes, 1232)
 
     def test_full_batch_fits_budget(self):
         entries = [(e, 1) for e in _ids(0xFF, 32)]
@@ -200,7 +201,7 @@ class TestBudgetConfig(unittest.TestCase):
 
     def test_custom_budget(self):
         config = config_setup({"default_seed": None, "storage_put_batch_max_bytes": 2000})
-        self.assertEqual(config["storage_put_batch_max_bytes"], 2000)
+        self.assertEqual(config.storage_put_batch_max_bytes, 2000)
         self.assertGreater(max_batch_entries(2000), max_batch_entries(1232))
 
     def test_invalid_budgets(self):

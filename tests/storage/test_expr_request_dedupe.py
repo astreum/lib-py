@@ -24,6 +24,7 @@ from astreum.storage.requests import (
     prune_expired_expr_reqs,
 )
 from astreum.utils.config import config_setup
+from astreum.utils.config import NodeConfig
 
 H1 = b"\x01" * 32
 H2 = b"\x02" * 32
@@ -40,7 +41,7 @@ class _Clock:
 def _node(ttl: float = 4.0):
     # Non-reentrant Lock on purpose: registry calls must take it once.
     return SimpleNamespace(
-        config={"expr_request_ttl": ttl},
+        config=NodeConfig(expr_request_ttl=ttl),
         expr_requests={},
         expr_requests_lock=threading.Lock(),
     )
@@ -143,15 +144,15 @@ class TestRegistry(unittest.TestCase):
 class TestTtlConfig(unittest.TestCase):
     def test_default_is_twice_poll_window(self):
         cfg = config_setup({"storage_fetch_retries": 8, "storage_fetch_interval": 0.25})
-        self.assertEqual(cfg["expr_request_ttl"], 4.0)
+        self.assertEqual(cfg.expr_request_ttl, 4.0)
 
     def test_default_derives_from_overrides(self):
         cfg = config_setup({"storage_fetch_retries": 5, "storage_fetch_interval": 1})
-        self.assertEqual(cfg["expr_request_ttl"], 10.0)
+        self.assertEqual(cfg.expr_request_ttl, 10.0)
 
     def test_override_honoured(self):
         cfg = config_setup({"expr_request_ttl": 7})
-        self.assertEqual(cfg["expr_request_ttl"], 7.0)
+        self.assertEqual(cfg.expr_request_ttl, 7.0)
 
     def test_invalid_values_rejected(self):
         for bad in (0, -1, "abc", True):
@@ -161,10 +162,10 @@ class TestTtlConfig(unittest.TestCase):
 
 class TestFoundMaxPagesConfig(unittest.TestCase):
     def test_default_is_64(self):
-        self.assertEqual(config_setup({})["storage_found_max_pages"], 64)
+        self.assertEqual(config_setup({}).storage_found_max_pages, 64)
 
     def test_override_honoured(self):
-        self.assertEqual(config_setup({"storage_found_max_pages": 5})["storage_found_max_pages"], 5)
+        self.assertEqual(config_setup({"storage_found_max_pages": 5}).storage_found_max_pages, 5)
 
     def test_invalid_values_rejected(self):
         for bad in (0, -1, "abc", True, 1.5, None, 65536):
@@ -178,7 +179,7 @@ class TestSweepWorker(unittest.TestCase):
 
         stop = threading.Event()
         node = SimpleNamespace(
-            config={"storage_request_price_interval": 0, "expr_request_ttl": 0.05},
+            config=NodeConfig(storage_request_price_interval=0, expr_request_ttl=0.05),
             logger=MagicMock(),
             communication_stop_event=stop,
             is_storage_provider=False,
