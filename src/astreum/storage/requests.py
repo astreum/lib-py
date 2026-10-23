@@ -14,15 +14,17 @@ class PendingExprRequest:
     """A pending network request plus the reply pages staged for it.
 
     Args:
-        payload_type: The requested resolution (SINGLE / LIST / FULL / RECORD).
+        payload_type: The requested resolution (DYNAMIC / SINGLE / LIST / FULL).
         expires_at: Idle deadline (``time.monotonic()``). Pushed out on every
             accepted page.
         block_hash: Optional block hash for scoped requests.
+        shape: The shape of a DYNAMIC request, else ``b""``.
 
     Attributes:
-        payload_type: The requested resolution (SINGLE / LIST / FULL / RECORD).
+        payload_type: The requested resolution (DYNAMIC / SINGLE / LIST / FULL).
         expires_at: Idle deadline (``time.monotonic()``). Pushed out on every
             accepted page.
+        shape: The shape of a DYNAMIC request, else ``b""``.
         sender: Peer key of the first accepted page, ``None`` until then.
         total: Page count declared by the first accepted page.
         pages: Staged exprs per received page number.
@@ -38,6 +40,7 @@ class PendingExprRequest:
         "total",
         "pages",
         "block_hash",
+        "shape",
         "next_contact",
     )
 
@@ -46,9 +49,11 @@ class PendingExprRequest:
         payload_type: Optional[int],
         expires_at: float,
         block_hash: Optional[bytes] = None,
+        shape: bytes = b"",
     ):
         self.payload_type = payload_type
         self.block_hash = block_hash
+        self.shape = shape
         self.expires_at = expires_at
         self.sender: Optional[bytes] = None
         self.total: Optional[int] = None
@@ -97,12 +102,14 @@ def claim_expr_req(
     expr_id: bytes,
     resolution: Optional[int] = None,
     block_hash: Optional[bytes] = None,
+    shape: bytes = b"",
 ) -> bool:
     """Atomically register a pending request unless one is already live.
 
-    Replies are matched by ``expr_id``, so a request is tracked by it even
-    when it is scoped to a block: a second request for the same expr, scoped
-    or not, waits for the first.
+    Replies are matched by ``expr_id`` alone, so a request is tracked by it
+    even when it is scoped to a block or has a shape: a second request for the
+    same expr, scoped or not, with any shape, waits for the first. The shape
+    is kept on the request so the reply is checked against it.
 
     Args:
         node: A Node instance with the ``expr_requests`` registry.
@@ -110,6 +117,8 @@ def claim_expr_req(
         resolution: The resolution strategy attached to the request.
         block_hash: The block whose provider was asked, kept so a redirect
             retry stays scoped.
+        shape: The shape of a DYNAMIC request, kept so a redirect retry asks
+            for the same shape.
 
     Returns:
         True if the request was registered (caller should send the GET),
@@ -120,7 +129,9 @@ def claim_expr_req(
         now = time.monotonic()
         if _live_entry(node, expr_id, now) is not None:
             return False
-        node.expr_requests[expr_id] = PendingExprRequest(resolution, now + ttl, block_hash)
+        node.expr_requests[expr_id] = PendingExprRequest(
+            resolution, now + ttl, block_hash, shape
+        )
         return True
 
 
@@ -244,6 +255,22 @@ def get_expr_req_block(node: "Node", expr_id: bytes) -> Optional[bytes]:
     with node.expr_requests_lock:
         entry = _live_entry(node, expr_id, time.monotonic())
         return None if entry is None else entry.block_hash
+
+
+def get_expr_req_shape(node: "Node", expr_id: bytes) -> bytes:
+    """Return the shape of a live request, or ``b""``.
+
+    Args:
+        node: A Node instance with the ``expr_requests`` registry.
+        expr_id: The content hash being requested.
+
+    Returns:
+        The shape the request was registered with, or ``b""`` if the request
+        has no shape or is not live.
+    """
+    with node.expr_requests_lock:
+        entry = _live_entry(node, expr_id, time.monotonic())
+        return b"" if entry is None else entry.shape
 
 
 def prune_expired_expr_reqs(node: "Node") -> int:

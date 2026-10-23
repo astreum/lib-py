@@ -4,7 +4,14 @@ from time import sleep
 from typing import Optional
 
 from astreum.storage.exprs.local import get_expr_from_local_storage
-from astreum.expression import Expr, ZERO32, RESOLUTION_SINGLE, RESOLUTION_LIST, RESOLUTION_FULL
+from astreum.expression import (
+    Expr,
+    ZERO32,
+    RESOLUTION_DYNAMIC,
+    RESOLUTION_SINGLE,
+    RESOLUTION_LIST,
+    RESOLUTION_FULL,
+)
 from astreum.expression.helpers import get_expr_builtin_tag
 
 
@@ -230,7 +237,7 @@ def get_exprs_from_network(
 
 
 def _resend_to_next_provider(
-    node, missing: list[tuple[bytes, int]], block_hash=None
+    node, missing: list[tuple[bytes, int]], block_hash=None, shape: bytes = b""
 ) -> set[bytes]:
     """Queue the GET of each missing hash to its second provider.
 
@@ -242,6 +249,7 @@ def _resend_to_next_provider(
         node: A Node instance with the request registry and the index.
         missing: ``(expr_id, resolution)`` pairs that the first poll missed.
         block_hash: Optional block hash of a scoped fetch.
+        shape: The shape sent again with every DYNAMIC pair in *missing*.
 
     Returns:
         The set of hashes for which a GET was queued.
@@ -272,7 +280,15 @@ def _resend_to_next_provider(
         live = has_expr_req(node, expr_id)
         if live:
             rearm_expr_req(node, expr_id)
-        if queue_storage_get(node, expr_id, resolution, contact=contact, preclaimed=live, **scope):
+        if queue_storage_get(
+            node,
+            expr_id,
+            resolution,
+            contact=contact,
+            preclaimed=live,
+            shape=shape if resolution == RESOLUTION_DYNAMIC else b"",
+            **scope,
+        ):
             queued.add(expr_id)
     return queued
 

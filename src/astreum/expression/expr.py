@@ -15,6 +15,8 @@ from astreum.expression.floats import (
 
 ZERO32 = b"\x00" * 32
 
+# 0 = the request carries a shape (see astreum.expression.shape).
+RESOLUTION_DYNAMIC = 0
 RESOLUTION_SINGLE = 1
 RESOLUTION_LIST = 2
 RESOLUTION_FULL = 3

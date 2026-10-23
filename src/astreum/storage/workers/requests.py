@@ -7,7 +7,8 @@ have not been sent yet.
 Requesters call :func:`queue_storage_get`. ``request_storage_thread`` runs
 :func:`request_storage`, which every ``storage_request_flush_interval`` (or as
 soon as one destination fills a datagram) sends one ``STORAGE_GET`` per
-destination per chunk of ``max_get_entries`` exprs.
+destination per chunk of entries that fit the datagram. The chunk is counted
+in bytes, because a shaped entry is longer than a plain one.
 """
 
 from __future__ import annotations
@@ -15,6 +16,12 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING, Optional
 
+from astreum.communication.storage_request.model import (
+    SCOPED_GET_ENTRY_BYTES,
+    get_entry_size,
+)
+from astreum.expression.expr import RESOLUTION_DYNAMIC
+from astreum.expression.shape import parse_shape
 from astreum.storage.requests import claim_expr_req, has_expr_req, pop_expr_req
 
 if TYPE_CHECKING:
@@ -25,14 +32,16 @@ if TYPE_CHECKING:
 class _Destination:
     """Pending GETs for one address: who to send to and how."""
 
-    __slots__ = ("address", "shared_key_bytes", "difficulty", "entries")
+    __slots__ = ("address", "shared_key_bytes", "difficulty", "entries", "size")
 
     def __init__(self, address, shared_key_bytes: bytes, difficulty: int):
         self.address = address
         self.shared_key_bytes = shared_key_bytes
         self.difficulty = difficulty
-        # expr_id -> (resolution, preclaimed, block_hash | None)
-        self.entries: dict[bytes, tuple[int, bool, bytes | None]] = {}
+        # expr_id -> (resolution, preclaimed, block_hash | None, shape)
+        self.entries: dict[bytes, tuple[int, bool, bytes | None, bytes]] = {}
+        # Encoded bytes of the buffered entries.
+        self.size = 0
 
 
 def init_request_buffer(node: "Node") -> None:
@@ -123,19 +132,18 @@ def _resolve_destination(node: "Node", expr_id: bytes, contact=None, block_hash=
         return None
 
 
-def _max_entries(node: "Node") -> int:
-    """Return the maximum number of entries per STORAGE_GET datagram.
+def _body_budget(node: "Node") -> int:
+    """Return the entry bytes that fit in one STORAGE_GET datagram.
 
     Args:
         node: A Node instance with config.
 
     Returns:
-        The maximum number of entries (>= 1).
+        The number of bytes available for entries.
     """
-    from astreum.communication.storage_request.model import max_get_entries
+    from astreum.communication.storage_request.model import get_body_budget
 
-    budget = node.config.storage_get_batch_max_bytes
-    return max(1, max_get_entries(budget))
+    return get_body_budget(node.config.storage_get_batch_max_bytes)
 
 
 def queue_storage_get(
@@ -146,6 +154,7 @@ def queue_storage_get(
     contact=None,
     preclaimed: bool = False,
     block_hash: Optional[bytes] = None,
+    shape: bytes = b"",
 ) -> bool:
     """Buffer a GET for *expr_id*. The flush thread sends it.
 
@@ -160,10 +169,26 @@ def queue_storage_get(
             so the flush must not claim it again.
         block_hash: Ask the provider of this block for *expr_id* (a scoped
             entry) instead of routing by *expr_id*.
+        shape: The shape of a DYNAMIC (0) request. Empty for the other
+            resolutions.
 
     Returns:
         bool: True if the GET was buffered or already exists, False if nowhere to send.
+
+    Raises:
+        ValueError: If the shape is malformed or longer than
+            ``storage_shape_max_bytes``, or a shape is given with a resolution
+            other than DYNAMIC.
     """
+    if resolution == RESOLUTION_DYNAMIC:
+        parse_shape(shape)
+        if len(shape) > node.config.storage_shape_max_bytes:
+            raise ValueError(
+                f"shape is {len(shape)} bytes, the limit is "
+                f"{node.config.storage_shape_max_bytes}"
+            )
+    elif shape:
+        raise ValueError("a shape needs resolution 0 (DYNAMIC)")
     with node.storage_request_buffer_lock:
         if expr_id in node.storage_request_buffered:
             return True
@@ -182,23 +207,25 @@ def queue_storage_get(
         if destination is None:
             destination = _Destination(address, shared_key_bytes, difficulty)
             node.storage_request_buffer[key] = destination
-        destination.entries[expr_id] = (resolution, preclaimed, block_hash)
+        destination.entries[expr_id] = (resolution, preclaimed, block_hash, shape)
+        destination.size += get_entry_size((expr_id, resolution, block_hash, shape))
         node.storage_request_buffered.add(expr_id)
-        full = len(destination.entries) >= _max_entries(node)
+        # Full when one more scoped entry would not fit.
+        full = destination.size + SCOPED_GET_ENTRY_BYTES > _body_budget(node)
     if full:
         node.storage_request_flush_event.set()
     return True
 
 
 def _send_chunk(
-    node: "Node", destination: _Destination, chunk: list[tuple[bytes, int, bytes | None]]
+    node: "Node", destination: _Destination, chunk: list[tuple]
 ) -> bool:
     """Send one STORAGE_GET datagram to a destination.
 
     Args:
         node: A Node instance with outgoing queue.
         destination: The destination to send to.
-        chunk: List of (expr_id, resolution, block_hash) tuples.
+        chunk: List of (expr_id, resolution, block_hash, shape) tuples.
 
     Returns:
         True if queued successfully, False otherwise.
@@ -225,6 +252,29 @@ def _send_chunk(
     )
 
 
+def _chunks(entries: list[tuple], budget: int) -> list[list[tuple]]:
+    """Split entries into chunks that each fit *budget* bytes, in order.
+
+    Args:
+        entries: ``(expr_id, resolution, block_hash, shape)`` tuples.
+        budget: The entry bytes one datagram holds.
+
+    Returns:
+        The chunks. A chunk takes entries until the next one would not fit.
+        An entry longer than the budget is a chunk of its own.
+    """
+    chunks: list[list[tuple]] = []
+    used = 0
+    for entry in entries:
+        size = get_entry_size(entry)
+        if not chunks or used + size > budget:
+            chunks.append([])
+            used = 0
+        chunks[-1].append(entry)
+        used += size
+    return chunks
+
+
 def flush_storage_requests(node: "Node") -> int:
     """Send everything buffered. Returns the number of datagrams queued.
 
@@ -244,20 +294,19 @@ def flush_storage_requests(node: "Node") -> int:
     if not pending:
         return 0
 
-    per_datagram = _max_entries(node)
+    budget = _body_budget(node)
     sent = 0
     for destination in sorted(pending.values(), key=lambda d: d.difficulty):
-        live: list[tuple[bytes, int, bytes | None]] = []
-        for expr_id, (resolution, preclaimed, block_hash) in destination.entries.items():
+        live: list[tuple[bytes, int, bytes | None, bytes]] = []
+        for expr_id, (resolution, preclaimed, block_hash, shape) in destination.entries.items():
             if preclaimed:
                 if not has_expr_req(node, expr_id):
                     continue
-            elif not claim_expr_req(node, expr_id, resolution, block_hash):
+            elif not claim_expr_req(node, expr_id, resolution, block_hash, shape):
                 continue
-            live.append((expr_id, resolution, block_hash))
+            live.append((expr_id, resolution, block_hash, shape))
 
-        for start in range(0, len(live), per_datagram):
-            chunk = live[start : start + per_datagram]
+        for chunk in _chunks(live, budget):
             try:
                 queued = _send_chunk(node, destination, chunk)
             except Exception as exc:
@@ -274,7 +323,7 @@ def flush_storage_requests(node: "Node") -> int:
                     "Queued STORAGE_GET of %d exprs to %s", len(chunk), destination.address
                 )
             else:
-                for expr_id, _, _ in chunk:
+                for expr_id, *_ in chunk:
                     pop_expr_req(node, expr_id)
     return sent
 

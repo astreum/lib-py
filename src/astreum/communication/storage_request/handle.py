@@ -17,6 +17,7 @@ from astreum.communication.storage_response.storage_found import (
 )
 from astreum.communication.outgoing_queue import enqueue_outgoing
 from astreum.expression import (
+    RESOLUTION_DYNAMIC,
     RESOLUTION_SINGLE,
     RESOLUTION_LIST,
     RESOLUTION_FULL,
@@ -24,6 +25,7 @@ from astreum.expression import (
     collect_full,
 )
 from astreum.expression.encoding import encode_expr_to_bytes
+from astreum.expression.shape import parse_shape, walk_shape
 from astreum.storage.exprs import get_expr_from_local_storage
 from astreum.storage.records import get_record_from_cold_storage
 from astreum.communication.util import xor_distance
@@ -177,6 +179,7 @@ def _serve_get(
     expr_id: bytes,
     desired: int,
     block_hash: bytes | None = None,
+    shape: bytes = b"",
 ) -> tuple[bool, str | None]:
     """Serve one STORAGE_GET entry.
 
@@ -184,19 +187,40 @@ def _serve_get(
     of *expr_id*: the block only decides who is asked. A miss is redirected by
     the block's provider or nearest peer instead of by *expr_id*'s.
 
+    A DYNAMIC entry (resolution 0) is served by walking *shape* over local
+    storage. The reply holds the exprs the walk finds. A child this node does
+    not hold is left out, and the requester asks for it again.
+
     Args:
         node (Node): The node instance serving the request.
         peer (Peer): The peer making the request.
         expr_id (bytes): The expression ID to retrieve.
         desired (int): The desired resolution level.
         block_hash (bytes | None): Optional block hash for scoped requests.
+        shape (bytes): The shape of a DYNAMIC request, else empty.
 
     Returns:
         tuple[bool, str | None]: A tuple of (success, error_reason).
     """
+    rule = None
+    if desired == RESOLUTION_DYNAMIC:
+        if len(shape) > node.config.storage_shape_max_bytes:
+            return False, "shape too long"
+        try:
+            rule = parse_shape(shape)
+        except ValueError as exc:
+            return False, f"invalid shape: {exc}"
+
     local_atom = get_expr_from_local_storage(node, expr_id)
     if local_atom is not None:
-        exprs = _collect_for_resolution(local_atom, desired)
+        if rule is None:
+            exprs = _collect_for_resolution(local_atom, desired)
+        else:
+            exprs, _ = walk_shape(
+                rule, expr_id, lambda h: get_expr_from_local_storage(node, h)
+            )
+            if not exprs:
+                return False, "shape selects nothing"
         shared_storage_size = sum(len(encode_expr_to_bytes(e)) for e in exprs)
         if _requires_storage_channel(node, peer, shared_storage_size):
             node.logger.info(
@@ -370,12 +394,14 @@ def handle_storage_request(node: "Node", peer: "Peer", message: Message) -> tupl
             seen: set[tuple[bytes, bytes | None]] = set()
             served = 0
             failures: list[str] = []
-            for expr_id, desired, block_hash in entries:
+            for expr_id, desired, block_hash, shape in entries:
                 if (expr_id, block_hash) in seen:
                     continue
                 seen.add((expr_id, block_hash))
                 try:
-                    ok, reason = _serve_get(node, peer, expr_id, desired, block_hash)
+                    ok, reason = _serve_get(
+                        node, peer, expr_id, desired, block_hash, shape
+                    )
                 except Exception as exc:
                     node.logger.debug(
                         "STORAGE_GET entry %s from %s failed: %s",

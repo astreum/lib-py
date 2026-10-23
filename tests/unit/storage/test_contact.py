@@ -52,6 +52,8 @@ from astreum.storage.radix import (  # noqa: E402
 )
 from astreum.utils.config import NodeConfig
 
+from astreum.expression.shape import parse_shape, walk_shape  # noqa: E402
+
 CONTACT = RelayEndpoint(b"\x07" * 32, ("10.0.0.7", 7000))
 QUEUE = "astreum.storage.workers.requests.queue_storage_get"
 
@@ -97,15 +99,25 @@ class _Served:
         self.calls: list[tuple[bytes, object]] = []
 
     def __enter__(self):
-        def fake_queue(node, expr_id, resolution, *, contact=None, preclaimed=False):
+        def fake_queue(
+            node, expr_id, resolution, *, contact=None, preclaimed=False, shape=b""
+        ):
             self.calls.append((expr_id, contact))
             expr = self.source.hot_storage.get(expr_id)
             if expr is None:
                 return False
+            # A shaped request gets every expr the shape reaches.
+            if shape:
+                served, _ = walk_shape(
+                    parse_shape(shape), expr_id, self.source.hot_storage.get
+                )
+            else:
+                served = [expr]
             # Served flat (hash references only), as it arrives over the wire.
-            self.requester.hot_storage[expr_id] = decode_expr_from_bytes(
-                encode_expr_to_bytes(expr)
-            )
+            for item in served:
+                self.requester.hot_storage[item.hash()] = decode_expr_from_bytes(
+                    encode_expr_to_bytes(item)
+                )
             return True
 
         self._patch = patch(QUEUE, side_effect=fake_queue)

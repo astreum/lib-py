@@ -2,7 +2,11 @@ from typing import TYPE_CHECKING
 
 from astreum.communication.models.relay_endpoint import RelayEndpoint
 from astreum.expression import RESOLUTION_SINGLE
-from astreum.storage.requests import get_expr_req_block, get_expr_req_payload
+from astreum.storage.requests import (
+    get_expr_req_block,
+    get_expr_req_payload,
+    get_expr_req_shape,
+)
 from astreum.storage.workers.requests import queue_storage_get
 
 if TYPE_CHECKING:
@@ -32,6 +36,8 @@ def _retry_pending_storage_get_via_peer_contact(
     if block_hash is not None:
         scope["block_hash"] = block_hash
 
+    # A DYNAMIC request keeps its shape.
+    shape = get_expr_req_shape(node, expr_id)
     try:
         return queue_storage_get(
             node,
@@ -39,6 +45,7 @@ def _retry_pending_storage_get_via_peer_contact(
             payload_type,
             contact=peer_contact,
             preclaimed=True,
+            shape=shape,
             **scope,
         )
     except Exception as exc:

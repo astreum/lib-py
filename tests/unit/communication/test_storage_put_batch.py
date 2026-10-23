@@ -180,7 +180,7 @@ class TestCodec(unittest.TestCase):
             ).to_bytes()
 
     def test_get_roundtrip(self):
-        entries = [(b"\x07" * 32, 2, None), (b"\x08" * 32, 0, None)]
+        entries = [(b"\x07" * 32, 2, None, b""), (b"\x08" * 32, 1, None, b"")]
         req = StorageRequest(StorageRequestCode.STORAGE_GET, entries=entries)
         decoded = StorageRequest.from_bytes(req.to_bytes())
         self.assertEqual(decoded.code, StorageRequestCode.STORAGE_GET)

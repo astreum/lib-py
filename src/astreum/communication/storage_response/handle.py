@@ -92,7 +92,7 @@ def handle_storage_response(node: "Node", peer: "Peer", message: Message) -> tup
                 )
                 return False, "STORAGE_FOUND root ID mismatch"
 
-            kept = cull_to_resolution(root, exprs, request.payload_type)
+            kept = cull_to_resolution(root, exprs, request.payload_type, request.shape)
             if len(kept) < len(exprs):
                 node.logger.debug(
                     "STORAGE_FOUND for %s: dropped %d of %d exprs outside resolution %s",

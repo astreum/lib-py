@@ -34,6 +34,9 @@ DEFAULT_MESSAGE_TIMESTAMP_WINDOW_SECONDS = 60
 # this size is never IP-fragmented on any IPv4/IPv6 path.
 DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES = 1232
 DEFAULT_STORAGE_GET_BATCH_MAX_BYTES = 1232
+# Longest shape a STORAGE_GET entry may carry. The wire format has a varint
+# length, so a later version can raise this.
+DEFAULT_STORAGE_SHAPE_MAX_BYTES = 128
 # How often buffered STORAGE_GETs are batched and sent.
 DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS = 0.25
 # Most pages one STORAGE_FOUND reply may span (about 4 MiB at ~65 KB a page).
@@ -82,6 +85,7 @@ class NodeConfig:
         long_term_storage_interval: float = DEFAULT_LONG_TERM_STORAGE_INTERVAL_SECONDS,
         storage_put_batch_max_bytes: int = DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES,
         storage_get_batch_max_bytes: int = DEFAULT_STORAGE_GET_BATCH_MAX_BYTES,
+        storage_shape_max_bytes: int = DEFAULT_STORAGE_SHAPE_MAX_BYTES,
         storage_request_flush_interval: float = DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS,
         storage_found_max_pages: int = DEFAULT_STORAGE_FOUND_MAX_PAGES,
         fair_use_limit: int = DEFAULT_FAIR_USE_LIMIT_BYTES,
@@ -145,6 +149,7 @@ class NodeConfig:
         self.long_term_storage_interval = long_term_storage_interval
         self.storage_put_batch_max_bytes = storage_put_batch_max_bytes
         self.storage_get_batch_max_bytes = storage_get_batch_max_bytes
+        self.storage_shape_max_bytes = storage_shape_max_bytes
         self.storage_request_flush_interval = storage_request_flush_interval
         self.storage_found_max_pages = storage_found_max_pages
         self.fair_use_limit = fair_use_limit
@@ -420,8 +425,10 @@ def _setup_storage_requests(config: Dict) -> None:
 
     from astreum.communication.message_pow import MAX_UDP_DATAGRAM_BYTES
     from astreum.communication.storage_request.model import (
+        SCOPED_GET_ENTRY_BYTES,
+        get_body_budget,
         max_batch_entries,
-        max_get_entries,
+        max_get_entry_bytes,
     )
 
     batch_budget_raw = config.get(
@@ -454,11 +461,22 @@ def _setup_storage_requests(config: Dict) -> None:
         raise ValueError(
             f"storage_get_batch_max_bytes must be at most {MAX_UDP_DATAGRAM_BYTES}"
         )
-    if max_get_entries(get_budget) < 2:
+    shape_max_raw = config.get(
+        "storage_shape_max_bytes", DEFAULT_STORAGE_SHAPE_MAX_BYTES
+    )
+    if isinstance(shape_max_raw, bool):
         raise ValueError(
-            "storage_get_batch_max_bytes too small to hold at least 2 entries"
+            f"storage_shape_max_bytes must be an integer: {shape_max_raw!r}"
+        )
+    shape_max = _parse_int("storage_shape_max_bytes", shape_max_raw, 1)
+    # The budget must hold the longest entry and one more scoped entry.
+    if get_body_budget(get_budget) < max_get_entry_bytes(shape_max) + SCOPED_GET_ENTRY_BYTES:
+        raise ValueError(
+            "storage_get_batch_max_bytes too small to hold the longest shaped "
+            "entry and one scoped entry"
         )
     config["storage_get_batch_max_bytes"] = get_budget
+    config["storage_shape_max_bytes"] = shape_max
 
     flush_interval_raw = config.get(
         "storage_request_flush_interval",

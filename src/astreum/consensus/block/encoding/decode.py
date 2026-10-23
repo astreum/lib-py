@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from astreum.expression import Expr, NIL, get_expr_head_hash, resolve_list_exprs, get_expr_tag, get_expr_builtin_tag, get_expr_value
-from astreum.storage.exprs import get_expr_list
+from astreum.storage.exprs import get_expr_by_shape, get_expr_list
+from astreum.consensus.block.encoding.shape import BLOCK_SHAPE
 from astreum.consensus.models.block import Block
 from astreum.consensus.block.create import create_block
 from astreum.crypto.bloom_tree import BloomTree
@@ -33,6 +34,16 @@ def get_block_from_storage(
     Raises:
         ValueError: If the block header cannot be fetched or parsed.
     """
+    # One request for the header and its ints, in place of about 40. What the
+    # provider does not send is fetched by the reads below, as before.
+    if len(BLOCK_SHAPE) <= astreum_node.config.storage_shape_max_bytes:
+        if (
+            get_expr_by_shape(
+                astreum_node, block_hash, BLOCK_SHAPE, contact=contact, block_hash=block_hash
+            )
+            is None
+        ):
+            raise ValueError("unable to load block header from storage")
     header = get_expr_list(astreum_node, block_hash, contact=contact, block_hash=block_hash)
     if header is None:
         raise ValueError("unable to load block header from storage")

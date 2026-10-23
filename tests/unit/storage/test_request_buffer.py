@@ -14,7 +14,11 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.relay_endpoint import RelayEndpoint
-from astreum.communication.storage_request.model import StorageRequest, max_get_entries
+from astreum.communication.storage_request.model import (
+    GET_ENTRY_BYTES,
+    StorageRequest,
+    get_body_budget,
+)
 from astreum.expression import RESOLUTION_LIST, RESOLUTION_SINGLE
 from astreum.storage.requests import claim_expr_req, has_expr_req
 from astreum.storage.workers.requests import (
@@ -77,9 +81,24 @@ def _drain(node, shared=SHARED):
     return out
 
 
+# Plain entries are 33 bytes, so more of them fit in a datagram than scoped ones.
+PER_PLAIN = get_body_budget(1232) // GET_ENTRY_BYTES
+
+
 def _plain(entries):
-    """``(expr_id, resolution)`` for unscoped entries; scoped ones keep their block."""
-    return [(e[0], e[1]) if e[2] is None else e for e in entries]
+    """``(expr_id, resolution)`` for unscoped entries; scoped ones keep their block.
+
+    A shaped entry keeps its shape.
+    """
+    out = []
+    for e in entries:
+        if e[3]:
+            out.append(e)
+        elif e[2] is None:
+            out.append(e[:2])
+        else:
+            out.append(e[:3])
+    return out
 
 
 class TestQueue(unittest.TestCase):
@@ -105,10 +124,10 @@ class TestQueue(unittest.TestCase):
         flush_storage_requests(node)
         self.assertEqual(_drain(node)[0][1], [(a, RESOLUTION_SINGLE), (b, RESOLUTION_LIST)])
 
-    def test_n_gets_produce_ceil_n_over_17_datagrams(self):
+    def test_n_gets_produce_ceil_n_over_34_datagrams(self):
         node = _node()
-        per = max_get_entries(1232)
-        self.assertEqual(per, 17)  # sized for scoped entries, the worst case
+        per = PER_PLAIN
+        self.assertEqual(per, 34)  # 33-byte plain entries in 1151 bytes
         n = 2 * per + 5
         for h in _ids(n):
             queue_storage_get(node, h, RESOLUTION_SINGLE)
@@ -272,7 +291,7 @@ class TestScoped(unittest.TestCase):
         message.decrypt(shared)
         self.assertEqual(
             StorageRequest.from_bytes(message.content).entries,
-            [(h, RESOLUTION_SINGLE, self.BLOCK)],
+            [(h, RESOLUTION_SINGLE, self.BLOCK, b"")],
         )
 
     def test_the_block_holder_is_asked_first(self):
@@ -376,7 +395,7 @@ class TestFlush(unittest.TestCase):
 
     def test_one_failing_chunk_does_not_stop_the_next(self):
         node = _node()
-        per = max_get_entries(1232)
+        per = PER_PLAIN
         ids = _ids(per + 1)
         for h in ids:
             queue_storage_get(node, h, RESOLUTION_SINGLE)
@@ -406,13 +425,14 @@ class TestFlush(unittest.TestCase):
         self.assertEqual(flush_storage_requests(node), 0)
 
     def test_filling_a_datagram_sets_the_flush_event(self):
+        # The event is set when one more scoped entry (65 bytes) would not fit.
         node = _node()
-        per = max_get_entries(1232)
-        ids = _ids(per)
+        block = b"\xb1" * 32
+        ids = _ids(17)
         for h in ids[:-1]:
-            queue_storage_get(node, h, RESOLUTION_SINGLE)
+            queue_storage_get(node, h, RESOLUTION_SINGLE, block_hash=block)
         self.assertFalse(node.storage_request_flush_event.is_set())
-        queue_storage_get(node, ids[-1], RESOLUTION_SINGLE)
+        queue_storage_get(node, ids[-1], RESOLUTION_SINGLE, block_hash=block)
         self.assertTrue(node.storage_request_flush_event.is_set())
 
 
@@ -442,7 +462,7 @@ class TestThread(unittest.TestCase):
     def test_full_datagram_flushes_before_the_interval(self):
         node = _node(flush_interval=30.0)
         self._start(node)
-        for h in _ids(max_get_entries(1232)):
+        for h in _ids(PER_PLAIN):
             queue_storage_get(node, h, RESOLUTION_SINGLE)
         self.assertTrue(self._wait_sent(node))
 

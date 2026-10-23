@@ -4,6 +4,8 @@ from astreum.communication.message_pow import (
 )
 from astreum.communication.models.peer_info import PEER_INFO_BYTES
 from astreum.communication.storage_request.code import StorageRequestCode
+from astreum.expression.expr import RESOLUTION_DYNAMIC
+from astreum.expression.shape import parse_shape
 
 # STORAGE_PUT layout (after the 1-byte request code):
 #   provider_count u8 (1 or 2) + provider_count * provider_payload (70B)
@@ -16,26 +18,104 @@ BATCH_ENTRY_BYTES = 32 + 1
 # STORAGE_GET layout (after the 1-byte request code):
 #   count u16 + count * entry
 # A plain entry is expr_id 32B + resolution 1B. A scoped entry sets the high
-# bit of the resolution byte (resolutions are 1-4) and is followed by the
-# block_hash 32B whose provider holds the expr: it is routed by that hash.
+# bit of the resolution byte and is followed by the block_hash 32B whose
+# provider holds the expr: it is routed by that hash. Resolution 0 (DYNAMIC)
+# is followed by a shape: a varint length and that many shape bytes. The shape
+# comes after the block_hash of a scoped entry.
 GET_HEADER_BYTES = 2
 GET_ENTRY_BYTES = 32 + 1
 SCOPED_GET_ENTRY_BYTES = GET_ENTRY_BYTES + 32
 SCOPED_FLAG = 0x80
 
 
-def max_get_entries(budget_bytes: int) -> int:
-    """Return how many entries fit in one STORAGE_GET datagram.
+def _varint_bytes(value: int) -> bytes:
+    """Encode a non-negative integer as a little-endian base 128 varint.
 
-    Counted at the scoped size, the worst case, so any batch fits.
+    Args:
+        value (int): The integer to encode.
+
+    Returns:
+        bytes: The varint. One byte covers 0 to 127.
+    """
+    out = bytearray()
+    while True:
+        low = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(low | 0x80)
+        else:
+            out.append(low)
+            return bytes(out)
+
+
+def _read_varint(data: bytes, pos: int) -> tuple[int, int]:
+    """Read a varint from ``data`` at ``pos``.
+
+    Args:
+        data (bytes): The bytes to read from.
+        pos (int): The offset of the first varint byte.
+
+    Returns:
+        tuple[int, int]: The value and the offset after the varint.
+
+    Raises:
+        ValueError: If the varint is cut short or longer than 3 bytes.
+    """
+    value = 0
+    for index in range(3):
+        if pos + index >= len(data):
+            raise ValueError("STORAGE_GET truncated shape length")
+        byte = data[pos + index]
+        value |= (byte & 0x7F) << (7 * index)
+        if not byte & 0x80:
+            return value, pos + index + 1
+    raise ValueError("STORAGE_GET shape length is too long")
+
+
+def get_entry_size(entry: tuple) -> int:
+    """Return the encoded size in bytes of one STORAGE_GET entry.
+
+    Args:
+        entry (tuple): ``(expr_id, resolution, block_hash, shape)``. A
+            shorter tuple is taken as unscoped and shapeless.
+
+    Returns:
+        int: 33 for a plain entry, plus 32 if scoped, plus the length varint
+        and the shape bytes if the entry carries a shape.
+    """
+    block_hash = entry[2] if len(entry) > 2 else None
+    shape = entry[3] if len(entry) > 3 else b""
+    size = GET_ENTRY_BYTES
+    if block_hash is not None:
+        size += 32
+    if entry[1] == RESOLUTION_DYNAMIC:
+        size += len(_varint_bytes(len(shape))) + len(shape)
+    return size
+
+
+def max_get_entry_bytes(shape_max_bytes: int) -> int:
+    """Return the size of the longest STORAGE_GET entry.
+
+    Args:
+        shape_max_bytes (int): The longest shape that is allowed.
+
+    Returns:
+        int: The size of a scoped entry with a shape of that length.
+    """
+    return SCOPED_GET_ENTRY_BYTES + len(_varint_bytes(shape_max_bytes)) + shape_max_bytes
+
+
+def get_body_budget(budget_bytes: int) -> int:
+    """Return how many entry bytes fit in one STORAGE_GET datagram.
 
     Args:
         budget_bytes (int): The maximum byte budget for the datagram.
 
     Returns:
-        int: Description of the return value.
+        int: The budget less the message framing, the request code and the
+        entry count.
     """
-    return (budget_bytes - MESSAGE_FRAMING_BYTES - 1 - GET_HEADER_BYTES) // SCOPED_GET_ENTRY_BYTES
+    return budget_bytes - MESSAGE_FRAMING_BYTES - 1 - GET_HEADER_BYTES
 
 
 def batch_header_bytes(providers: int = 1) -> int:
@@ -83,8 +163,8 @@ class StorageRequest:
         """Initialize a StorageRequest.
 
         *entries* are ``(expr_id, payload_type)`` for STORAGE_PUT. For
-        STORAGE_GET they are ``(expr_id, resolution, block_hash | None)``. A
-        2-tuple is taken as unscoped.
+        STORAGE_GET they are ``(expr_id, resolution, block_hash | None,
+        shape)``. A shorter tuple is taken as unscoped and shapeless.
 
         Args:
             code (StorageRequestCode): The request type code.
@@ -102,7 +182,13 @@ class StorageRequest:
         self.payload_type = payload_type
         if code == StorageRequestCode.STORAGE_GET and entries is not None:
             entries = [
-                (e[0], e[1], e[2] if len(e) > 2 else None) for e in entries
+                (
+                    e[0],
+                    e[1],
+                    e[2] if len(e) > 2 else None,
+                    e[3] if len(e) > 3 else b"",
+                )
+                for e in entries
             ]
         self.entries = entries
 
@@ -140,15 +226,24 @@ class StorageRequest:
             bytes([self.code.value]),
             len(self.entries).to_bytes(2, "big"),
         ]
-        for expr_id, resolution, block_hash in self.entries:
+        for expr_id, resolution, block_hash, shape in self.entries:
             if len(expr_id) != 32:
                 raise ValueError("STORAGE_GET expr_id must be 32 bytes")
+            if resolution == RESOLUTION_DYNAMIC:
+                parse_shape(shape)
+            elif shape:
+                raise ValueError("STORAGE_GET shape needs resolution 0")
+            tail = b""
+            if resolution == RESOLUTION_DYNAMIC:
+                tail = _varint_bytes(len(shape)) + shape
             if block_hash is None:
-                parts.append(expr_id + bytes([resolution]))
+                parts.append(expr_id + bytes([resolution]) + tail)
                 continue
             if len(block_hash) != 32:
                 raise ValueError("STORAGE_GET block_hash must be 32 bytes")
-            parts.append(expr_id + bytes([resolution | SCOPED_FLAG]) + block_hash)
+            parts.append(
+                expr_id + bytes([resolution | SCOPED_FLAG]) + block_hash + tail
+            )
         body = b"".join(parts)
         if len(body) > MAX_INLINE_MESSAGE_BYTES:
             raise ValueError(
@@ -244,7 +339,7 @@ class StorageRequest:
         if count < 1:
             raise ValueError("STORAGE_GET count must be at least 1")
         body = data[1 + GET_HEADER_BYTES :]
-        entries: list[tuple[bytes, int, bytes | None]] = []
+        entries: list[tuple[bytes, int, bytes | None, bytes]] = []
         pos = 0
         for _ in range(count):
             if pos + GET_ENTRY_BYTES > len(body):
@@ -261,7 +356,15 @@ class StorageRequest:
                 resolution &= ~SCOPED_FLAG
                 block_hash = bytes(body[pos : pos + 32])
                 pos += 32
-            entries.append((expr_id, resolution, block_hash))
+            shape = b""
+            if resolution == RESOLUTION_DYNAMIC:
+                length, pos = _read_varint(body, pos)
+                if pos + length > len(body):
+                    raise ValueError("STORAGE_GET truncated shape")
+                shape = bytes(body[pos : pos + length])
+                pos += length
+                parse_shape(shape)
+            entries.append((expr_id, resolution, block_hash, shape))
         if pos != len(body):
             raise ValueError(
                 f"STORAGE_GET length mismatch (count={count}, body={len(body)} bytes)"

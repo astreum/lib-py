@@ -1,11 +1,13 @@
 from typing import Dict, List, Optional
 
 from astreum.expression import (
+    RESOLUTION_DYNAMIC,
     RESOLUTION_FULL,
     RESOLUTION_LIST,
     ZERO32,
     Expr,
 )
+from astreum.expression.shape import parse_shape, walk_shape
 
 
 def _child_hashes(expr: Expr) -> List[bytes]:
@@ -36,18 +38,21 @@ def cull_to_resolution(
     root: Expr,
     exprs: List[Expr],
     resolution: Optional[int],
+    shape: bytes = b"",
 ) -> List[Expr]:
     """Keep only the delivered exprs within the requested ``resolution``.
 
     SINGLE keeps the root. LIST the root and its tail chain. FULL everything
-    reachable from the root through head and tail links. Only exprs present in
-    ``exprs`` can be kept, each at most once, root first. Anything else in the
-    reply is dropped.
+    reachable from the root through head and tail links. DYNAMIC everything
+    the ``shape`` reaches from the root. Only exprs present in ``exprs`` can be
+    kept, each at most once, root first. Anything else in the reply is dropped.
 
     Args:
         root (Expr): The root expression.
         exprs (List[Expr]): The list of delivered expressions.
         resolution (Optional[int]): The requested resolution level.
+        shape (bytes): The shape of a DYNAMIC request. A shape that cannot be
+            parsed keeps only the root.
 
     Returns:
         List[Expr]: The filtered list of expressions within the requested resolution.
@@ -59,6 +64,14 @@ def cull_to_resolution(
     root_hash = root.hash()
     kept: List[Expr] = [root]
     seen = {root_hash}
+
+    if resolution == RESOLUTION_DYNAMIC:
+        try:
+            rule = parse_shape(shape)
+        except ValueError:
+            return kept
+        found, _ = walk_shape(rule, root_hash, by_hash.get)
+        return kept + [e for e in found if e.hash() != root_hash]
 
     if resolution is None or resolution < RESOLUTION_LIST:
         return kept

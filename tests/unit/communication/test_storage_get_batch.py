@@ -12,7 +12,12 @@ from astreum.communication.message_pow import (
 )
 from astreum.communication.storage_request import handle as req_handle
 from astreum.communication.storage_request.code import StorageRequestCode
-from astreum.communication.storage_request.model import StorageRequest, max_get_entries
+from astreum.communication.storage_request.model import (
+    StorageRequest,
+    get_body_budget,
+    get_entry_size,
+    max_get_entry_bytes,
+)
 from astreum.communication.storage_response.code import StorageResponseCode
 from astreum.communication.storage_response.model import StorageResponse
 from astreum.expression import (
@@ -39,7 +44,7 @@ class TestGetCodec(unittest.TestCase):
         )
 
     def test_round_trip(self):
-        entries = [(e, i % 4, None) for i, e in enumerate(_ids(5))]
+        entries = [(e, 1 + i % 3, None, b"") for i, e in enumerate(_ids(5))]
         decoded = StorageRequest.from_bytes(
             StorageRequest(StorageRequestCode.STORAGE_GET, entries=entries).to_bytes()
         )
@@ -48,7 +53,7 @@ class TestGetCodec(unittest.TestCase):
 
     def test_two_tuple_entries_are_unscoped(self):
         req = StorageRequest(StorageRequestCode.STORAGE_GET, entries=[(_ids(1)[0], 1)])
-        self.assertEqual(req.entries, [(_ids(1)[0], 1, None)])
+        self.assertEqual(req.entries, [(_ids(1)[0], 1, None, b"")])
 
     def test_single_entry_is_three_bytes_plus_entry(self):
         self.assertEqual(len(self._req(1).to_bytes()), 3 + 33)
@@ -89,10 +94,12 @@ class TestGetCodec(unittest.TestCase):
         with self.assertRaises(ValueError):
             StorageRequest.from_bytes(b"")
 
-    def test_default_budget_gives_17_entries(self):
-        # Counted at the scoped size (65 bytes), the worst case.
+    def test_default_budget_holds_17_scoped_or_34_plain_entries(self):
         self.assertEqual(DEFAULT_STORAGE_GET_BATCH_MAX_BYTES, 1232)
-        self.assertEqual(max_get_entries(1232), 17)
+        budget = get_body_budget(1232)
+        self.assertEqual(budget, 1151)
+        self.assertEqual(budget // 65, 17)
+        self.assertEqual(budget // 33, 34)
 
     def test_full_batch_fits_budget(self):
         body = self._scoped_req(17).to_bytes()
@@ -120,10 +127,10 @@ class TestGetCodec(unittest.TestCase):
         ids = _ids(4)
         block = b"\xb2" * 32
         entries = [
-            (ids[0], RESOLUTION_SINGLE, None),
-            (ids[1], RESOLUTION_FULL, block),
-            (ids[2], RESOLUTION_SINGLE, block),
-            (ids[3], RESOLUTION_LIST, None),
+            (ids[0], RESOLUTION_SINGLE, None, b""),
+            (ids[1], RESOLUTION_FULL, block, b""),
+            (ids[2], RESOLUTION_SINGLE, block, b""),
+            (ids[3], RESOLUTION_LIST, None, b""),
         ]
         decoded = StorageRequest.from_bytes(
             StorageRequest(StorageRequestCode.STORAGE_GET, entries=entries).to_bytes()
