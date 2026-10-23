@@ -257,6 +257,10 @@ class Network:
             "atom_fetch_interval": 1,
             "peer_timeout_interval": 1,
             "verify_blockchain_interval": 0.5,
+            # Without this, every node on the machine reads the same key file
+            # and has the same storage key. A node ignores a peer with its own
+            # key, so no node would have a peer in its peer route.
+            "storage_secret_key": Ed25519PrivateKey.generate(),
             "logging_enabled": False,
             "verbose": False,
         }
