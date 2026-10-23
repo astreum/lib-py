@@ -44,22 +44,28 @@ def load_x25519(hex_key: Optional[str]) -> X25519PrivateKey:
 def make_routes(
     storage_pk_bytes: bytes,
     val_sk: Optional[ed25519.Ed25519PrivateKey]
-) -> Tuple[Route, Optional[Route]]:
-    """Peer route (Ed25519 storage key) + optional validation route (ed pubkey).
+) -> Tuple[Route, Route]:
+    """Peer route (Ed25519 storage key) + validation route.
+
+    Every node has a validation route, so that a node without a validation
+    key can still keep and share the list of validators. The route is placed
+    at the validation public key when there is a key, and at the storage
+    public key when there is none. The place stays the same after a later
+    ``validate_blockchain`` call.
 
     Args:
         storage_pk_bytes (bytes): The storage public key bytes.
         val_sk (Optional[ed25519.Ed25519PrivateKey]): The validation secret key or None.
 
     Returns:
-        Tuple[Route, Optional[Route]]: The peer route and optional validation route.
+        Tuple[Route, Route]: The peer route and the validation route.
     """
     peer_rt = Route(storage_pk_bytes)
-    val_rt  = Route(val_sk.public_key().public_bytes(
+    val_key = val_sk.public_key().public_bytes(
         encoding=serialization.Encoding.Raw,
         format=serialization.PublicFormat.Raw,
-    )) if val_sk else None
-    return peer_rt, val_rt
+    ) if val_sk else storage_pk_bytes
+    return peer_rt, Route(val_key)
 
 def make_maps():
     """Empty lookup maps: peers and addresses.

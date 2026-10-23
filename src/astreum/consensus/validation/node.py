@@ -29,6 +29,20 @@ def validate_blockchain(self, validation_secret_key: Ed25519PrivateKey):
 
     Returns: None
     """
+    # The key goes in the config before the node connects, so that the first
+    # handshake ping of every peer says this node is a validator.
+    self.config.validation_secret_key = validation_secret_key
+    validation_public_key_obj = self.config.validation_secret_key.public_key()
+    validation_public_key_bytes = validation_public_key_obj.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    self.config.validation_public_key = validation_public_key_obj
+    self.config.validation_public_key_bytes = validation_public_key_bytes
+    self.logger.debug(
+        "Derived validator public key %s", validation_public_key_bytes.hex()
+    )
+
     connect_node(self)
     fork_setup(self)
 
@@ -98,18 +112,6 @@ def validate_blockchain(self, validation_secret_key: Ed25519PrivateKey):
     self.logger.info(
         "Initializing block and transaction processing for chain %s",
         self.config.chain,
-    )
-
-    self.config.validation_secret_key = validation_secret_key
-    validation_public_key_obj = self.config.validation_secret_key.public_key()
-    validation_public_key_bytes = validation_public_key_obj.public_bytes(
-        encoding=serialization.Encoding.Raw,
-        format=serialization.PublicFormat.Raw,
-    )
-    self.config.validation_public_key = validation_public_key_obj
-    self.config.validation_public_key_bytes = validation_public_key_bytes
-    self.logger.debug(
-        "Derived validator public key %s", validation_public_key_bytes.hex()
     )
 
     if self.latest_block_hash is None:
