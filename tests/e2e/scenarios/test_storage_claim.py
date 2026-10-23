@@ -5,14 +5,13 @@ the chain at height 2040 instead. Genesis holds one storage record whose lane
 was last paid at height 1000, so one full era has passed. The claim worker
 sees that on its first pass and sends the claim.
 
-Two stand-ins keep the test on the claim path (see test_send_transaction_api.py):
-``send_transaction`` is replaced, and the validator and the provider are one
-node. Genesis is built at height 2040, which ``verify_block_head`` rejects for
+One stand-in keeps the test on the claim path: the validator and the provider
+are one node. The claim goes through the real ``send_transaction``, which puts
+it in the node's own queue. Genesis is built at height 2040, which ``verify_block_head`` rejects for
 a genesis block, so no node here can verify the chain from its root.
 """
 
 import unittest
-from unittest import mock
 
 from astreum.consensus.models.receipt import STATUS_SUCCESS
 from astreum.consensus.transaction.code import TransactionCode
@@ -25,7 +24,7 @@ from astreum.consensus.transaction.storage.model import (
     storage_record_to_expr,
 )
 from astreum.crypto.merkle import create_merkle_tree
-from astreum.expression import ZERO32, bytes_, resolve_inner_exprs
+from astreum.expression import ZERO32, bytes_
 from astreum.storage.cold import put_expr_in_cold_storage
 from astreum.storage.exprs import put_expr_in_hot_storage
 from astreum.storage.radix import get_from_radix_tree, put_in_radix_tree
@@ -68,21 +67,6 @@ def _record(provider: bytes) -> StorageRecord:
     )
 
 
-def _send_to_own_queue(node, tx):
-    """Stand-in for ``send_transaction`` on a node that is the only validator.
-
-    ``send_transaction`` sends to validator peers and never to its own node
-    (see test_send_transaction_api.py for its other fault).
-    """
-    tx.hash = tx.expr().hash()
-    exprs, missed = resolve_inner_exprs(node, tx.expr())
-    assert not missed, "claim transaction data unavailable"
-    for expr in exprs:
-        put_expr_in_hot_storage(node, expr)
-    node._validation_transaction_queue.put(tx)
-    return tx.hash
-
-
 class TestStorageClaim(unittest.TestCase):
     def test_provider_claims_after_an_era(self) -> None:
         v_key, p_key = new_key(), new_key()
@@ -103,10 +87,7 @@ class TestStorageClaim(unittest.TestCase):
             customize=customize,
         )
 
-        with Network() as net, mock.patch(
-            "astreum.consensus.transaction.send.send_transaction",
-            _send_to_own_queue,
-        ):
+        with Network() as net:
             # One node is the validator and the storage provider. The storage
             # key pays for the claim and wins the lane.
             node = net.validator(

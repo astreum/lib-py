@@ -21,14 +21,9 @@ from tests.e2e.harness import (
 
 
 class TestSendTransactionApi(unittest.TestCase):
-    @unittest.expectedFailure
     def test_send_transaction_reaches_the_validator(self) -> None:
-        # BUG: ``send_transaction`` looks for validators in
-        # ``validation_route.peers``. Nothing fills that dict: the ping handler
-        # calls ``add_peer`` without a peer object, so validators sit in
-        # ``validation_route.buckets`` only. The call waits one
-        # ``peer_timeout_interval`` and raises "no validator available".
-        # The storage claim worker sends its claims through this call.
+        # The user node holds no validation key. It learns the validator
+        # from pings, and ``send_transaction`` sends the transaction to it.
         v_key, wallet = new_key(), new_key()
         genesis = genesis_with(
             stakes={public(v_key): STAKE}, funds={public(wallet): 1_000_000}

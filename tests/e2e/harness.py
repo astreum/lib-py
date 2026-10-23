@@ -322,9 +322,8 @@ class Network:
 def push_transaction(node: Node, tx) -> int:
     """Send ``tx`` from ``node`` to every validator it knows, over the network.
 
-    This is the second half of ``send_transaction`` (consensus/transaction/send.py).
-    ``send_transaction`` itself cannot be used: it looks for validators in
-    ``validation_route.peers``, which nothing fills.
+    This is the network half of ``send_transaction`` (consensus/transaction/send.py)
+    for tests that need to send the same bytes to chosen validators.
 
     Returns:
         The number of validators the message was queued for.
