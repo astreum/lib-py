@@ -57,6 +57,7 @@ def _node(window=WINDOW, bootstrap_peers=()):
         outgoing_queue=queue.Queue(),
         latest_block_lock=threading.Lock(),
         latest_block_hash=None,
+        latest_block=None,
         incoming_queue=queue.Queue(),
         incoming_queue_size=0,
         incoming_queue_size_limit=0,

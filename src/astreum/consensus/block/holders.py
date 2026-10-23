@@ -3,6 +3,8 @@
 A validator that announces its newest block (``BLOCK`` message) is the only
 node that has the block's new exprs until a later block commits them. Nodes
 record that peer here and pass it as ``contact`` when they read the block.
+A node with a validation key takes holders from ``BLOCK`` messages. A node
+without one takes holders from pings.
 """
 
 from __future__ import annotations
@@ -79,3 +81,43 @@ def record_block_holder(node: Any, block_hash: bytes, contact: "RelayEndpoint") 
         while len(node.block_holders) > MAX_BLOCK_HOLDERS:
             node.block_holders.popitem(last=False)
         return True
+
+
+def get_ping_holder(
+    node: Any, block_hash: Optional[bytes], block: Any = None
+) -> Optional["RelayEndpoint"]:
+    """Return the holder of a head block for a ping, or None.
+
+    The result is the first of these that exists:
+
+    1. The recorded holder of the block. A validator that adopted the block
+       has the contact of its creator here.
+    2. The contact of this node, if this node made the block.
+
+    Args:
+        node: The node that builds the ping.
+        block_hash: The head block hash that the ping carries.
+        block: The loaded head block, or None if it is not loaded.
+
+    Returns:
+        The endpoint, or None if this node knows no holder. The creator is not
+        recorded in ``block_holders``, because its own reads need no contact.
+    """
+    if not block_hash:
+        return None
+    holder = block_holder(node, block_hash)
+    if holder is not None:
+        return holder
+    own_key = getattr(node.config, "validation_public_key_bytes", None)
+    if block is None or not own_key:
+        return None
+    if getattr(block, "validator_public_key_bytes", None) != own_key:
+        return None
+    relay_key = getattr(node.config, "relay_public_key_bytes", None)
+    host = getattr(node, "relay_ip_address", None)
+    port = getattr(node.config, "port", None)
+    if not relay_key or not host or port is None:
+        return None
+    from astreum.communication.models.relay_endpoint import RelayEndpoint
+
+    return RelayEndpoint(relay_key, (host, int(port)))

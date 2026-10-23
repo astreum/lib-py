@@ -27,7 +27,7 @@ from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.validation.validator import current_validator
 from astreum.consensus.validation.ads import flush_ads, queue_ads
 from astreum.consensus.validation.peers import validator_peers
-from astreum.consensus.block.holders import block_holder
+from astreum.consensus.block.holders import block_holder, get_ping_holder
 from astreum.consensus.block.message import encode_block_message
 from astreum.expression import ZERO32
 from astreum.communication.models.message import Message, MessageTopic
@@ -562,6 +562,7 @@ def make_validation_worker(
                         is_validator=True,
                         difficulty=message_difficulty(node),
                         latest_block=new_block_hash,
+                        holder=get_ping_holder(node, new_block_hash, new_block),
                     ).to_bytes()
 
                     for peer_key, peer in peers:

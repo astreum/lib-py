@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from astreum.communication.models.ping import Ping
 from astreum.communication.models.peer import Peer
+from astreum.consensus.block.holders import record_block_holder
 
 if TYPE_CHECKING:
     from astreum import Node
@@ -38,6 +39,16 @@ def handle_ping(node: "Node", peer: Peer, payload: bytes) -> None:
                 "Updated latest block hash from default seed %s",
                 peer.address[0] if peer.address else "unknown",
             )
+
+    # A node with a validation key takes holders from BLOCK messages only.
+    # A node without one gets no BLOCK message, so it takes them from pings.
+    if (
+        ping.is_validator
+        and ping.latest_block
+        and ping.holder is not None
+        and node.config.validation_secret_key is None
+    ):
+        record_block_holder(node, ping.latest_block, ping.holder)
 
     validation_route = node.validation_route
     if validation_route is None:

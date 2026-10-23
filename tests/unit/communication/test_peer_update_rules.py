@@ -45,6 +45,7 @@ def _node(default_seed_ips=()):
         outgoing_queue=queue.Queue(),
         latest_block_lock=threading.Lock(),
         latest_block_hash=None,
+        latest_block=None,
         incoming_queue=queue.Queue(),
         incoming_queue_size=0,
         incoming_queue_size_limit=0,

@@ -14,6 +14,7 @@ from astreum.communication.models.handshake import (
     verify_handshake,
 )
 from astreum.communication.models.ping import Ping
+from astreum.consensus.block.holders import get_ping_holder
 from astreum.communication.difficulty import message_difficulty
 
 if TYPE_CHECKING:
@@ -36,6 +37,7 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
     def _queue_handshake_ping(peer: Peer, peer_address: tuple[str, int]) -> None:
         with node.latest_block_lock:
             latest_block = node.latest_block_hash
+            head = node.latest_block
         if not isinstance(latest_block, (bytes, bytearray)) or len(latest_block) != 32:
             latest_block = None
         try:
@@ -43,6 +45,7 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
                 is_validator=bool(node.config.validation_public_key_bytes),
                 difficulty=message_difficulty(node),
                 latest_block=latest_block,
+                holder=get_ping_holder(node, latest_block, head),
             ).to_bytes()
             ping_msg = Message(
                 topic=MessageTopic.PING,
