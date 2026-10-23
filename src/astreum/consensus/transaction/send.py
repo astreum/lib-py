@@ -4,8 +4,8 @@ import time
 from typing import TYPE_CHECKING
 
 from astreum.communication.models.message import Message, MessageTopic
-from astreum.communication.models.peer import get_peer
 from astreum.communication.outgoing_queue import enqueue_outgoing
+from astreum.consensus.validation.peers import validator_peers
 from astreum.expression import resolve_inner_exprs
 from astreum.storage.exprs import put_expr_in_hot_storage
 from astreum.storage.cold import put_expr_in_cold_storage
@@ -25,7 +25,15 @@ def send_transaction(
         tx.sign(sender_key)
         send_transaction(node, tx)
 
+    A node that makes blocks also puts the transaction in its own queue.
+    Every other validator it knows gets the transaction as a message. A node
+    that knows no validator asks its peers for them first.
+
     Returns the transaction's content-addressed hash (expr_id).
+
+    Raises:
+        RuntimeError: If the node is not connected, has no latest block, or
+            knows no validator and is not a validator itself.
     """
     if not node.is_connected:
         raise RuntimeError("node not connected")
@@ -69,12 +77,14 @@ def send_transaction(
         )
         raise RuntimeError("transaction payload too large for inline message")
 
-    validation_route = node.validation_route
-    if validation_route is None:
-        raise RuntimeError("no validator available")
+    is_validator = node.config.validation_secret_key is not None
+    validators = validator_peers(node)
 
-    has_validators = bool(getattr(validation_route, "peers", None))
-    if not has_validators:
+    if not validators:
+        # Ask every peer for its validators (ROUTE_REQUEST, route id 1). Any
+        # node answers from its own list, so a peer that is not a validator
+        # can help. The answer makes the node handshake the validators, and
+        # their pings fill the list.
         with node.peers_lock:
             peers = list(node.peers.items())
 
@@ -96,26 +106,20 @@ def send_transaction(
 
         wait_deadline = time.time() + float(node.config.peer_timeout_interval)
         while time.time() < wait_deadline:
-            if getattr(validation_route, "peers", None):
-                has_validators = True
+            validators = validator_peers(node)
+            if validators:
                 break
             time.sleep(0.1)
 
-    if not has_validators:
+    if not validators and not is_validator:
         raise RuntimeError("no validator available")
 
-    validators = {}
-    for peer in validation_route.peers.values():
-        if peer is not None and getattr(peer, "address", None):
-            validators[getattr(peer, "public_key_bytes", None)] = peer
-    for bucket in validation_route.buckets.values():
-        for peer_key in bucket:
-            peer = get_peer(node, peer_key)
-            if peer is not None and getattr(peer, "address", None):
-                validators[peer.public_key_bytes] = peer
-
-    if not validators:
-        raise RuntimeError("no validator available")
+    if is_validator:
+        # This node makes blocks too: its own worker takes the transaction
+        # from its own queue. Nothing else puts it there.
+        if transaction.hash is None:
+            transaction.hash = tx_hash
+        node._validation_transaction_queue.put(transaction)
 
     for peer in validators.values():
         tx_message = Message(
