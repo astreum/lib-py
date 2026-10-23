@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from astreum.expression import Expr, NIL, resolve_list_exprs, get_expr_tag, get_expr_builtin_tag, get_expr_value
+from astreum.expression import Expr, NIL, get_expr_head_hash, resolve_list_exprs, get_expr_tag, get_expr_builtin_tag, get_expr_value
 from astreum.storage.exprs import get_expr_list
 from astreum.consensus.models.block import Block
 from astreum.consensus.block.create import create_block
@@ -83,19 +83,19 @@ def get_block_from_storage(
         global_loaned_node,
         global_defaulted_node,
         global_loan_count_node,
-        accounts_node,
-        bloom_hash_node,
+        accounts_link,
+        bloom_link,
         chain_id_node,
         difficulty_node,
         height_node,
         nonce_node,
-        prev_node,
-        previous_era_hash_node,
-        receipts_node,
+        prev_link,
+        previous_era_link,
+        receipts_link,
         timestamp_node,
         total_storage_fee_node,
         total_transaction_fee_node,
-        transactions_node,
+        transactions_link,
         validator_node,
         statistics_node,
     ) = body_nodes
@@ -106,9 +106,9 @@ def get_block_from_storage(
         raise ValueError("expected Int for global_defaulted")
     if not get_expr_tag(global_loan_count_node, astreum_node, contact, block_hash) == "int":
         raise ValueError("expected Int for global_loan_count")
-    if not get_expr_tag(accounts_node, astreum_node, contact, block_hash) == "link":
+    if not get_expr_tag(accounts_link, astreum_node, contact, block_hash) == "link":
         raise ValueError("expected Link for accounts_hash")
-    if not get_expr_tag(bloom_hash_node, astreum_node, contact, block_hash) == "link":
+    if not get_expr_tag(bloom_link, astreum_node, contact, block_hash) == "link":
         raise ValueError("expected Link for bloom_hash")
     if not get_expr_tag(chain_id_node, astreum_node, contact, block_hash) == "int":
         raise ValueError("expected Int for chain_id")
@@ -118,11 +118,11 @@ def get_block_from_storage(
         raise ValueError("expected Int for height")
     if not get_expr_tag(nonce_node, astreum_node, contact, block_hash) == "int":
         raise ValueError("expected Int for nonce")
-    if not get_expr_tag(prev_node, astreum_node, contact, block_hash) == "link":
+    if not get_expr_tag(prev_link, astreum_node, contact, block_hash) == "link":
         raise ValueError("expected Link for previous_block_hash")
-    if not get_expr_tag(previous_era_hash_node, astreum_node, contact, block_hash) == "link":
+    if not get_expr_tag(previous_era_link, astreum_node, contact, block_hash) == "link":
         raise ValueError("expected Link for previous_era_hash")
-    if not get_expr_tag(receipts_node, astreum_node, contact, block_hash) == "link":
+    if not get_expr_tag(receipts_link, astreum_node, contact, block_hash) == "link":
         raise ValueError("expected Link for receipts_hash")
     if not get_expr_tag(timestamp_node, astreum_node, contact, block_hash) == "int":
         raise ValueError("expected Int for timestamp")
@@ -130,7 +130,7 @@ def get_block_from_storage(
         raise ValueError("expected Int for total_storage_fee")
     if not get_expr_tag(total_transaction_fee_node, astreum_node, contact, block_hash) == "int":
         raise ValueError("expected Int for total_transaction_fee")
-    if not get_expr_tag(transactions_node, astreum_node, contact, block_hash) == "link":
+    if not get_expr_tag(transactions_link, astreum_node, contact, block_hash) == "link":
         raise ValueError("expected Link for transactions_hash")
     if not get_expr_tag(validator_node, astreum_node, contact, block_hash) == "bytes":
         raise ValueError("expected Bytes for validator_public_key_bytes")
@@ -165,20 +165,20 @@ def get_block_from_storage(
 
     block = create_block(
         chain_id=get_expr_value(chain_id_node, astreum_node, contact, block_hash),
-        previous_block_hash=prev_node.head_hash,
+        previous_block_hash=get_expr_head_hash(prev_link),
         previous_block=None,
         height=get_expr_value(height_node, astreum_node, contact, block_hash),
         timestamp=get_expr_value(timestamp_node, astreum_node, contact, block_hash),
-        accounts_hash=accounts_node.head_hash,
+        accounts_hash=get_expr_head_hash(accounts_link),
         total_transaction_fee=get_expr_value(total_transaction_fee_node, astreum_node, contact, block_hash),
         total_storage_fee=get_expr_value(total_storage_fee_node, astreum_node, contact, block_hash),
-        transactions_hash=transactions_node.head_hash,
-        receipts_hash=receipts_node.head_hash,
+        transactions_hash=get_expr_head_hash(transactions_link),
+        receipts_hash=get_expr_head_hash(receipts_link),
         difficulty=get_expr_value(difficulty_node, astreum_node, contact, block_hash),
         validator_public_key_bytes=get_expr_value(validator_node, astreum_node, contact, block_hash),
         nonce=get_expr_value(nonce_node, astreum_node, contact, block_hash),
-        bloom_hash=bloom_hash_node.head_hash,
-        previous_era_hash=previous_era_hash_node.head_hash,
+        bloom_hash=get_expr_head_hash(bloom_link),
+        previous_era_hash=get_expr_head_hash(previous_era_link),
         signature=signature_bytes,
         expr_id=block_hash,
         body_hash=body.hash(),
