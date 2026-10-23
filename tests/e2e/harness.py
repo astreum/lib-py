@@ -232,13 +232,17 @@ class Network:
                 if thread is not None and thread.is_alive():
                     thread.join(timeout=30)
 
-    def node(self, *, seed: Node | None = None, trusted: bool = False, **config) -> Node:
+    def node(
+        self, *, seed: Node | None = None, trusted: bool = False, connect: bool = True, **config
+    ) -> Node:
         """Create a connected node.
 
         Args:
             seed: A node to use as the single bootstrap peer.
             trusted: When true, ``seed`` is the ``default_seed`` (head provider).
                 When false, ``seed`` goes in ``additional_seeds``.
+            connect: When false, the node is not connected. ``validate_blockchain``
+                connects it.
             **config: Extra config keys. They override the defaults.
         """
         directory = tempfile.TemporaryDirectory(prefix="astreum_e2e_")
@@ -265,7 +269,8 @@ class Network:
         node = Node(config=cfg)
         node._e2e_dir = directory
         self.nodes.append(node)
-        connect_node(node)
+        if connect:
+            connect_node(node)
         return node
 
     def validator(self, key: Ed25519PrivateKey, *, genesis=None, **kwargs) -> Node:
@@ -277,11 +282,7 @@ class Network:
                 used when ``None``.
             **kwargs: Passed to ``node``.
         """
-        # The validation route (who the validators are, who gets BLOCK
-        # announcements) is built by ``connect_node`` only when the key is
-        # already in the config. ``validate_blockchain`` sets it too late.
-        kwargs.setdefault("validation_secret_key", key)
-        node = self.node(**kwargs)
+        node = self.node(connect=False, **kwargs)
         self.start_validation(node, key, genesis=genesis)
         return node
 
