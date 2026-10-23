@@ -143,7 +143,7 @@ _BUILTIN_TYPE_HASH = {
 }
 
 
-def _get_head_hash(expr: Expr) -> bytes:
+def get_expr_head_hash(expr: Expr) -> bytes:
     """Get the head hash of an expression.
     
     Args:
@@ -165,7 +165,7 @@ def _get_head_hash(expr: Expr) -> bytes:
     return ZERO32
 
 
-def _get_tail_hash(expr: Expr) -> bytes:
+def get_expr_tail_hash(expr: Expr) -> bytes:
     """Get the tail hash of an expression.
     
     Args:
@@ -294,7 +294,7 @@ class Expr:
             return self._hash
 
         if self.base == "link":
-            self._hash = _link_hash(_get_head_hash(self), _get_tail_hash(self))
+            self._hash = _link_hash(get_expr_head_hash(self), get_expr_tail_hash(self))
             return self._hash
 
         if self.base == "symbol":

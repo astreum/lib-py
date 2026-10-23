@@ -28,7 +28,7 @@ from astreum.consensus.transaction.storage.initial import (
     generate_initial_storage_record,
 )
 from astreum.expression import Expr, NIL, ZERO32, bytes_, int_, link
-from astreum.expression.expr import TAG_BYTE_ENCODINGS, _get_head_hash, _get_tail_hash
+from astreum.expression.expr import TAG_BYTE_ENCODINGS, get_expr_head_hash, get_expr_tail_hash
 from astreum.storage.radix import get_radix_node_expr, put_in_radix_tree
 from astreum.storage.radix.node import radix_node_hash
 from astreum.expression.helpers import get_expr_builtin_tag
@@ -45,7 +45,7 @@ def flat(expr):
     if expr.value is not None:
         payload = TAG_BYTE_ENCODINGS[expr.tail.value](expr.value)
         return Expr("link", head=bytes_(payload), tail_hash=expr.tail.hash())
-    return Expr("link", head_hash=_get_head_hash(expr), tail_hash=_get_tail_hash(expr))
+    return Expr("link", head_hash=get_expr_head_hash(expr), tail_hash=get_expr_tail_hash(expr))
 
 
 def store_flat(node, expr):

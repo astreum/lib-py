@@ -63,7 +63,7 @@ from astreum.machine.parser import parse  # noqa: E402
 from astreum.machine.tokenizer import tokenize  # noqa: E402
 from astreum.node import Node  # noqa: E402
 from astreum.consensus.transaction.storage.initial import _typed_payload_size  # noqa: E402
-from astreum.expression.expr import _get_head_hash  # noqa: E402
+from astreum.expression.expr import get_expr_head_hash  # noqa: E402
 from astreum.storage.exprs import get_expr_from_local_storage, put_expr_in_hot_storage  # noqa: E402
 from astreum.storage.radix import (  # noqa: E402
     RadixTree,
@@ -291,7 +291,7 @@ class Provider:
             for slot in list(held):
                 cell = get_expr_from_local_storage(self.creator, slot)
                 if cell is not None and _typed_payload_size(cell, self.creator, None) is not None:
-                    held.add(_get_head_hash(cell))
+                    held.add(get_expr_head_hash(cell))
             self._records[block_id] = frozenset(held)
         return self._records[block_id]
 

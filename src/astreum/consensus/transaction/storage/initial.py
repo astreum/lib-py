@@ -9,8 +9,8 @@ from astreum.expression.expr import (
     BUILTIN_COMPOSITE_TYPE_NAMES,
     TAG_BYTE_ENCODINGS,
     _BUILTIN_TYPE_HASH,
-    _get_head_hash,
-    _get_tail_hash,
+    get_expr_head_hash,
+    get_expr_tail_hash,
 )
 from astreum.storage.exprs import get_expr, get_expr_list
 from astreum.storage.radix import RadixTree, get_from_radix_tree
@@ -134,7 +134,7 @@ def _single_cell(expr: Expr, node: Any, contact: Any, block_hash: bytes | None =
     """
     if get_expr_builtin_tag(expr) != "link" or _typed_payload_size(expr, node, contact, block_hash) is not None:
         return expr
-    cell = Expr("link", head_hash=_get_head_hash(expr), tail_hash=_get_tail_hash(expr))
+    cell = Expr("link", head_hash=get_expr_head_hash(expr), tail_hash=get_expr_tail_hash(expr))
     return cell if cell.hash() == expr.hash() else expr
 
 

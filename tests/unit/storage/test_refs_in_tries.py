@@ -34,7 +34,7 @@ from astreum.consensus.transaction.treasury.record import (
 from astreum.crypto.bloom_tree import BloomTree, bloom_search, read_bloom_node
 from astreum.crypto.bloom_tree.tree import bloom_search_storage
 from astreum.expression import Expr, NIL, ZERO32, bytes_, int_
-from astreum.expression.expr import TAG_BYTE_ENCODINGS, _get_head_hash, _get_tail_hash
+from astreum.expression.expr import TAG_BYTE_ENCODINGS, get_expr_head_hash, get_expr_tail_hash
 from astreum.expression.refs import ref_expr, stored_ref_target
 from astreum.storage.radix import (
     RadixTree,
@@ -54,7 +54,7 @@ def flat(expr):
     if expr.value is not None:
         payload = TAG_BYTE_ENCODINGS[expr.tail.value](expr.value)
         return Expr("link", head=bytes_(payload), tail_hash=expr.tail.hash())
-    return Expr("link", head_hash=_get_head_hash(expr), tail_hash=_get_tail_hash(expr))
+    return Expr("link", head_hash=get_expr_head_hash(expr), tail_hash=get_expr_tail_hash(expr))
 
 
 class Chain:

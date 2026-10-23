@@ -4,8 +4,8 @@ if TYPE_CHECKING:
     from astreum.expression.expr import Expr
 
 from astreum.expression.expr import (
-    _get_head_hash,
-    _get_tail_hash,
+    get_expr_head_hash,
+    get_expr_tail_hash,
 )
 
 
@@ -22,8 +22,8 @@ def encode_expr_to_bytes(expr: "Expr") -> bytes:
         TypeError: If expr is a closure (closures cannot be serialized).
     """
     if expr.base == "link":
-        hh = _get_head_hash(expr)
-        th = _get_tail_hash(expr)
+        hh = get_expr_head_hash(expr)
+        th = get_expr_tail_hash(expr)
         return b"\x00" + hh + th
 
     if expr.base == "symbol":

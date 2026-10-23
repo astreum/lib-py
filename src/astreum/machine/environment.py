@@ -59,7 +59,7 @@ def env_to_radix_tree(env: Env, node, parent_hash: bytes = None) -> Expr:
     The bindings go into a RadixTree (key = symbol UTF-8 bytes, value = bound
     Expr; insertion order irrelevant — the trie canonicalizes). level =
     Expr("link", head_hash=parent_hash, tail=bindings_root_expr): the head
-    contributes parent_hash DIRECTLY to the level's hash (via _get_head_hash),
+    contributes parent_hash DIRECTLY to the level's hash (via get_expr_head_hash),
     so the chain hash composes parent-with-bindings with no wrapping, and the
     parent sits OUTSIDE the bindings key space. Root env: head is NIL.
 

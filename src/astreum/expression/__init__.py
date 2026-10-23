@@ -16,7 +16,7 @@ from astreum.expression.expr import (
     E4M3_SYMBOL, E5M2_SYMBOL, FP16_SYMBOL,
     BF16_SYMBOL, FP32_SYMBOL, FP64_SYMBOL,
     TYPE_SYMBOLS,
-    _get_head_hash, _get_tail_hash,
+    get_expr_head_hash, get_expr_tail_hash,
 )
 from astreum.expression.helpers import (
     bytes_list_to_expr, link_list_to_expr, exprs_to_linked_expr,
@@ -72,8 +72,8 @@ __all__ = [
     "FP32_SYMBOL",
     "FP64_SYMBOL",
     "TYPE_SYMBOLS",
-    "_get_head_hash",
-    "_get_tail_hash",
+    "get_expr_head_hash",
+    "get_expr_tail_hash",
     "bytes_list_to_expr",
     "link_list_to_expr",
     "exprs_to_linked_expr",
