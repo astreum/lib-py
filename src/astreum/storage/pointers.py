@@ -23,7 +23,8 @@ def cell_reader(
     """Return a ``part(cell, side)`` function for reading cell heads/tails.
 
     The function returns the head or tail of *cell* as loaded, or fetched from
-    the provider of *block_hash*. None for nil.
+    the provider of *block_hash*. None for nil. With *local*, a cell that is
+    not in local storage raises ``ValueError``.
 
     Args:
         node: A Node instance for fetching expressions from storage.
@@ -45,7 +46,12 @@ def cell_reader(
             return child
         if h is None or h == ZERO32 or node is None:
             return None
-        return get_expr(node, h, contact=contact, **scope)
+        found = get_expr(node, h, contact=contact, **scope)
+        if found is None and local:
+            # A cell that is not held must not be read as a cell that is not
+            # there: a ref with a missing part would look like a plain pointer.
+            raise ValueError("cell is not in local storage")
+        return found
 
     return part
 

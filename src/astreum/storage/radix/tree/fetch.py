@@ -24,9 +24,9 @@ def fetch_node_from_radix_tree(
     The *block* is the block whose record holds the node. None routes by hash.
 
     A reader that looks up *key* passes it with *key_pos*, the number of key
-    bits that earlier nodes matched. If the node is not in local storage, one
-    RADIX request then fetches it with the nodes on the way to the key, and the
-    reads that follow find them in local storage. A node that does not arrive
+    bits that earlier nodes matched. If the whole node is not in local storage,
+    one RADIX request then fetches it with the nodes on the way to the key, and
+    the reads that follow find them in local storage. A node that does not arrive
     that way is fetched as without a key.
 
     With *local*, nothing uses the network. A node that local storage does not

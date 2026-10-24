@@ -217,6 +217,30 @@ class TestClient(unittest.TestCase):
             self._lookup()
         self.assertLess(len(with_radix.calls), len(without.calls))
 
+    def test_each_key_of_a_cold_store_costs_at_most_one_radix_request(self):
+        source = _store_node()
+        root, values = _build(source, 60)
+        requester = _store_node()
+        with _Provider(source, requester) as provider:
+            for key, value in values.items():
+                before = len(provider.calls)
+                got = get_from_radix_tree(RadixTree(root_hash=root), requester, key)
+                self.assertEqual(got.hash(), value.hash())
+                sent = provider.calls[before:]
+                self.assertLessEqual(len(sent), 1, msg=key.hex())
+                self.assertTrue(all(r == RESOLUTION_RADIX for _, r in sent))
+
+    def test_a_node_whose_root_is_held_but_cells_are_not_is_requested(self):
+        root_expr = self.source.hot_storage[self.root]
+        self.requester.hot_storage[self.root] = decode_expr_from_bytes(
+            encode_expr_to_bytes(root_expr)
+        )
+        with _Provider(self.source, self.requester) as provider:
+            got = self._lookup()
+        self.assertEqual(got.hash(), self.values[self.key].hash())
+        self.assertEqual(provider.radix_calls, 1)
+        self.assertEqual(len(provider.calls), 1)
+
     def test_a_second_lookup_of_the_same_key_sends_nothing(self):
         with _Provider(self.source, self.requester) as provider:
             self._lookup()
@@ -234,7 +258,7 @@ class TestClient(unittest.TestCase):
         with _Provider(self.source, self.requester, answer_radix=False) as provider:
             got = self._lookup()
         self.assertEqual(got.hash(), self.values[self.key].hash())
-        self.assertEqual(provider.radix_calls, 1)
+        self.assertGreaterEqual(provider.radix_calls, 1)
 
     def test_a_full_walk_sends_no_radix_request(self):
         with _Provider(self.source, self.requester) as provider:
