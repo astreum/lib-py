@@ -37,6 +37,9 @@ DEFAULT_STORAGE_GET_BATCH_MAX_BYTES = 1232
 # Longest shape a STORAGE_GET entry may carry. The wire format has a varint
 # length, so a later version can raise this.
 DEFAULT_STORAGE_SHAPE_MAX_BYTES = 128
+# Longest key a RADIX STORAGE_GET entry may carry. An account address has 32
+# bytes.
+DEFAULT_STORAGE_RADIX_KEY_MAX_BYTES = 32
 # How often buffered STORAGE_GETs are batched and sent.
 DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS = 0.25
 # Most pages one STORAGE_FOUND reply may span (about 4 MiB at ~65 KB a page).
@@ -86,6 +89,7 @@ class NodeConfig:
         storage_put_batch_max_bytes: int = DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES,
         storage_get_batch_max_bytes: int = DEFAULT_STORAGE_GET_BATCH_MAX_BYTES,
         storage_shape_max_bytes: int = DEFAULT_STORAGE_SHAPE_MAX_BYTES,
+        storage_radix_key_max_bytes: int = DEFAULT_STORAGE_RADIX_KEY_MAX_BYTES,
         storage_request_flush_interval: float = DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS,
         storage_found_max_pages: int = DEFAULT_STORAGE_FOUND_MAX_PAGES,
         fair_use_limit: int = DEFAULT_FAIR_USE_LIMIT_BYTES,
@@ -150,6 +154,7 @@ class NodeConfig:
         self.storage_put_batch_max_bytes = storage_put_batch_max_bytes
         self.storage_get_batch_max_bytes = storage_get_batch_max_bytes
         self.storage_shape_max_bytes = storage_shape_max_bytes
+        self.storage_radix_key_max_bytes = storage_radix_key_max_bytes
         self.storage_request_flush_interval = storage_request_flush_interval
         self.storage_found_max_pages = storage_found_max_pages
         self.fair_use_limit = fair_use_limit
@@ -469,14 +474,26 @@ def _setup_storage_requests(config: Dict) -> None:
             f"storage_shape_max_bytes must be an integer: {shape_max_raw!r}"
         )
     shape_max = _parse_int("storage_shape_max_bytes", shape_max_raw, 1)
+    radix_max_raw = config.get(
+        "storage_radix_key_max_bytes", DEFAULT_STORAGE_RADIX_KEY_MAX_BYTES
+    )
+    if isinstance(radix_max_raw, bool):
+        raise ValueError(
+            f"storage_radix_key_max_bytes must be an integer: {radix_max_raw!r}"
+        )
+    radix_max = _parse_int("storage_radix_key_max_bytes", radix_max_raw, 1)
     # The budget must hold the longest entry and one more scoped entry.
-    if get_body_budget(get_budget) < max_get_entry_bytes(shape_max) + SCOPED_GET_ENTRY_BYTES:
+    if (
+        get_body_budget(get_budget)
+        < max_get_entry_bytes(shape_max, radix_max) + SCOPED_GET_ENTRY_BYTES
+    ):
         raise ValueError(
             "storage_get_batch_max_bytes too small to hold the longest shaped "
             "entry and one scoped entry"
         )
     config["storage_get_batch_max_bytes"] = get_budget
     config["storage_shape_max_bytes"] = shape_max
+    config["storage_radix_key_max_bytes"] = radix_max
 
     flush_interval_raw = config.get(
         "storage_request_flush_interval",

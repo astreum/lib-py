@@ -15,16 +15,20 @@ from astreum.expression.floats.fp16 import _decode_fp16
 from astreum.expression.floats.bf16 import _decode_bf16
 
 
-def _scope(block_hash) -> dict:
+def _scope(block_hash, local: bool = False) -> dict:
     """Create scope dict for fetch operations.
     
     Args:
         block_hash: Optional block hash to scope fetches.
+        local: If True, the fetches do not use the network.
     
     Returns:
-        Empty dict if block_hash is None, else dict with block_hash.
+        A dict with block_hash if it is given, and local if it is True.
     """
-    return {} if block_hash is None else {"block_hash": block_hash}
+    scope = {} if block_hash is None else {"block_hash": block_hash}
+    if local:
+        scope["local"] = True
+    return scope
 
 
 def builtin_composite_payload(expr: Expr):
@@ -130,7 +134,7 @@ def get_expr_builtin_tag(expr: Expr) -> str:
     return "link"
 
 
-def get_expr_tag(expr: Expr, node=None, contact=None, block_hash=None):
+def get_expr_tag(expr: Expr, node=None, contact=None, block_hash=None, local: bool = False):
     """Get the logical type tag of an expression.
 
     Base types (symbol, bytes) return their base.
@@ -146,6 +150,7 @@ def get_expr_tag(expr: Expr, node=None, contact=None, block_hash=None):
         node: Optional node for resolving unresolved hashes.
         contact: Optional contact for fetch operations.
         block_hash: Optional block hash that holds the cell.
+        local: If True, the fetch does not use the network.
     
     Returns:
         The logical type tag of the expression.
@@ -168,7 +173,7 @@ def get_expr_tag(expr: Expr, node=None, contact=None, block_hash=None):
             if node is not None:
                 from astreum.storage.exprs import get_expr
                 resolved = get_expr(
-                    node, expr.tail_hash, contact=contact, **_scope(block_hash)
+                    node, expr.tail_hash, contact=contact, **_scope(block_hash, local)
                 )
                 if resolved is not None:
                     expr.tail = resolved
@@ -181,7 +186,7 @@ def get_expr_tag(expr: Expr, node=None, contact=None, block_hash=None):
     return expr.base
 
 
-def get_expr_value(expr, node=None, contact=None, block_hash=None):
+def get_expr_value(expr, node=None, contact=None, block_hash=None, local: bool = False):
     """Get the payload value of an expression.
 
     For builtin composite links (int, str, float), resolves head_hash if needed.
@@ -195,6 +200,7 @@ def get_expr_value(expr, node=None, contact=None, block_hash=None):
         node: Optional node for resolving unresolved hashes.
         contact: Optional contact for fetch operations.
         block_hash: Optional block hash that holds the cell.
+        local: If True, the fetches do not use the network.
     
     Returns:
         The payload value of the expression.
@@ -214,7 +220,7 @@ def get_expr_value(expr, node=None, contact=None, block_hash=None):
                 from astreum.expression.expr import TAG_BYTE_DECODINGS
                 try:
                     tag = get_expr_tag(
-                        expr, node, contact=contact, block_hash=block_hash
+                        expr, node, contact=contact, block_hash=block_hash, local=local
                     )
                 except ValueError:
                     tag = None
@@ -226,12 +232,12 @@ def get_expr_value(expr, node=None, contact=None, block_hash=None):
                 raise ValueError("value requires node to resolve head_hash")
             from astreum.storage.exprs import get_expr
             from astreum.expression.expr import TAG_BYTE_DECODINGS
-            head = get_expr(node, expr.head_hash, contact=contact, **_scope(block_hash))
+            head = get_expr(node, expr.head_hash, contact=contact, **_scope(block_hash, local))
             if head is None:
                 raise ValueError("cannot resolve head for expr value")
             expr.head = head
             expr.head_hash = None
-            tag = get_expr_tag(expr, node, contact=contact, block_hash=block_hash)
+            tag = get_expr_tag(expr, node, contact=contact, block_hash=block_hash, local=local)
             if head.base == "bytes" and tag in TAG_BYTE_DECODINGS:
                 return TAG_BYTE_DECODINGS[tag](head.value)
             return head.value
@@ -431,7 +437,7 @@ def exprs_to_linked_expr(items: list[Expr]) -> Expr:
 
 
 def resolve_list_exprs(
-    node, expr: Expr, contact=None, block_hash=None
+    node, expr: Expr, contact=None, block_hash=None, local: bool = False
 ) -> tuple[list[Expr], list[bytes]]:
     """Resolve the items of a list. *block_hash* scopes the fetches to a block.
     
@@ -440,13 +446,14 @@ def resolve_list_exprs(
         expr: The list expression to resolve.
         contact: Optional contact for fetch operations.
         block_hash: Optional block hash to scope fetches.
+        local: If True, no fetch uses the network.
     
     Returns:
         Tuple of (resolved expressions, missed hashes).
     """
     from astreum.storage.exprs import get_expr
 
-    scope = {} if block_hash is None else {"block_hash": block_hash}
+    scope = _scope(block_hash, local)
 
     result: list[Expr] = []
     missed: list[bytes] = []

@@ -20,6 +20,8 @@ RESOLUTION_DYNAMIC = 0
 RESOLUTION_SINGLE = 1
 RESOLUTION_LIST = 2
 RESOLUTION_FULL = 3
+# 4 = the request carries a radix tree key (see astreum.storage.radix.tree.walk).
+RESOLUTION_RADIX = 4
 
 HASH_BYTE_LINK = b"\x00"
 HASH_BYTE_SYMBOL = b"\x01"

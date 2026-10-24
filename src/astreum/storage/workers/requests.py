@@ -19,8 +19,9 @@ from typing import TYPE_CHECKING, Optional
 from astreum.communication.storage_request.model import (
     SCOPED_GET_ENTRY_BYTES,
     get_entry_size,
+    parse_radix_param,
 )
-from astreum.expression.expr import RESOLUTION_DYNAMIC
+from astreum.expression.expr import RESOLUTION_DYNAMIC, RESOLUTION_RADIX
 from astreum.expression.shape import parse_shape
 from astreum.storage.requests import claim_expr_req, has_expr_req, pop_expr_req
 
@@ -169,16 +170,17 @@ def queue_storage_get(
             so the flush must not claim it again.
         block_hash: Ask the provider of this block for *expr_id* (a scoped
             entry) instead of routing by *expr_id*.
-        shape: The shape of a DYNAMIC (0) request. Empty for the other
-            resolutions.
+        shape: The shape of a DYNAMIC (0) request, or the encoded radix param
+            of a RADIX (4) request. Empty for the other resolutions.
 
     Returns:
         bool: True if the GET was buffered or already exists, False if nowhere to send.
 
     Raises:
         ValueError: If the shape is malformed or longer than
-            ``storage_shape_max_bytes``, or a shape is given with a resolution
-            other than DYNAMIC.
+            ``storage_shape_max_bytes``, the radix param is malformed or its
+            key is longer than ``storage_radix_key_max_bytes``, or a shape is
+            given with a resolution other than DYNAMIC or RADIX.
     """
     if resolution == RESOLUTION_DYNAMIC:
         parse_shape(shape)
@@ -187,8 +189,15 @@ def queue_storage_get(
                 f"shape is {len(shape)} bytes, the limit is "
                 f"{node.config.storage_shape_max_bytes}"
             )
+    elif resolution == RESOLUTION_RADIX:
+        _, key = parse_radix_param(shape)
+        if len(key) > node.config.storage_radix_key_max_bytes:
+            raise ValueError(
+                f"radix key is {len(key)} bytes, the limit is "
+                f"{node.config.storage_radix_key_max_bytes}"
+            )
     elif shape:
-        raise ValueError("a shape needs resolution 0 (DYNAMIC)")
+        raise ValueError("a shape needs resolution 0 (DYNAMIC) or 4 (RADIX)")
     with node.storage_request_buffer_lock:
         if expr_id in node.storage_request_buffered:
             return True

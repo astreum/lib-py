@@ -17,7 +17,9 @@ from astreum.storage.exprs import get_expr
 from astreum.expression.helpers import get_expr_builtin_tag
 
 
-def cell_reader(node: Any, block_hash: Optional[bytes], contact: Any = None):
+def cell_reader(
+    node: Any, block_hash: Optional[bytes], contact: Any = None, local: bool = False
+):
     """Return a ``part(cell, side)`` function for reading cell heads/tails.
 
     The function returns the head or tail of *cell* as loaded, or fetched from
@@ -27,11 +29,14 @@ def cell_reader(node: Any, block_hash: Optional[bytes], contact: Any = None):
         node: A Node instance for fetching expressions from storage.
         block_hash: The block whose provider holds the cell (None for local-only).
         contact: Optional ``RelayEndpoint`` for network fetches.
+        local: If True, the reads do not use the network.
 
     Returns:
         A function ``part(cell, side)`` that returns the head or tail of a cell.
     """
     scope = {} if block_hash is None else {"block_hash": block_hash}
+    if local:
+        scope["local"] = True
 
     def part(cell: Expr, side: str) -> Optional[Expr]:
         child = cell.head if side == "head" else cell.tail
@@ -49,7 +54,11 @@ _reader = cell_reader
 
 
 def read_pointer(
-    node: Any, cell: Expr, block_hash: Optional[bytes], contact: Any = None
+    node: Any,
+    cell: Expr,
+    block_hash: Optional[bytes],
+    contact: Any = None,
+    local: bool = False,
 ) -> tuple[bytes, Optional[bytes]]:
     """Return ``(expr_id, block_id)`` for a pointed-to cell.
 
@@ -61,12 +70,13 @@ def read_pointer(
         cell: The cell expression to read the pointer from.
         block_hash: The block that holds the cell (None for new cells).
         contact: Optional ``RelayEndpoint`` for network fetches.
+        local: If True, the reads do not use the network.
 
     Returns:
         A tuple of ``(expr_id, block_id)`` where ``expr_id`` is the 32-byte
         content hash and ``block_id`` is the block hash (or None).
     """
-    target = stored_ref_target(cell, _reader(node, block_hash, contact))
+    target = stored_ref_target(cell, _reader(node, block_hash, contact, local))
     if target is not None:
         return target[1], target[0]
     return cell.hash(), block_hash

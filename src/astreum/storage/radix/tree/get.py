@@ -13,7 +13,13 @@ if TYPE_CHECKING:
     from astreum._node import Node
 
 
-def _find_node(tree: RadixTree, astreum_node: "Node", key: bytes) -> Optional[RadixNode]:
+def _find_node(
+    tree: RadixTree,
+    astreum_node: "Node",
+    key: bytes,
+    local: bool = False,
+    key_pos: int = 0,
+) -> Optional[RadixNode]:
     """Return the node holding *key*, or None.
 
     Each node is fetched from the block that holds it: the tree's root
@@ -24,6 +30,10 @@ def _find_node(tree: RadixTree, astreum_node: "Node", key: bytes) -> Optional[Ra
         tree: The radix tree to search.
         astreum_node: A Node instance for fetching nodes.
         key: The key to find.
+        local: If True, no read uses the network. A node that local storage
+            does not hold ends the walk with None.
+        key_pos: The number of key bits that earlier nodes matched, when the
+            tree root is an inner node.
 
     Returns:
         The RadixNode at the key, or None if not found.
@@ -32,12 +42,10 @@ def _find_node(tree: RadixTree, astreum_node: "Node", key: bytes) -> Optional[Ra
         return None
 
     current = fetch_node_from_radix_tree(
-        tree, astreum_node, tree.root_hash, tree.root_block
+        tree, astreum_node, tree.root_hash, tree.root_block, key, key_pos, local
     )
     if current is None:
         return None
-
-    key_pos = 0
 
     while current is not None:
         if not _match_prefix(current.key, current.key_len, key, key_pos):
@@ -59,16 +67,19 @@ def _find_node(tree: RadixTree, astreum_node: "Node", key: bytes) -> Optional[Ra
         if child_hash is None:
             return None
 
-        current = fetch_node_from_radix_tree(tree, astreum_node, child_hash, child_block)
+        key_pos += 1
+        current = fetch_node_from_radix_tree(
+            tree, astreum_node, child_hash, child_block, key, key_pos, local
+        )
         if current is None:
             return None
-
-        key_pos += 1
 
     return None
 
 
-def exists_in_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes) -> bool:
+def exists_in_radix_tree(
+    tree: RadixTree, astreum_node: "Node", key: bytes, local: bool = False
+) -> bool:
     """Return True if *key* resolves to a leaf value in the radix tree.
 
     Walks the same trie path as ``get_from_radix_tree`` but stops at the leaf
@@ -79,16 +90,17 @@ def exists_in_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes) -> b
         tree: The radix tree to search.
         astreum_node: A Node instance for fetching nodes.
         key: The key to check.
+        local: If True, no read uses the network.
 
     Returns:
         True if the key exists with a value, False otherwise.
     """
-    found = _find_node(tree, astreum_node, key)
+    found = _find_node(tree, astreum_node, key, local)
     return found is not None and found.value is not None
 
 
 def get_from_radix_tree_with_block(
-    tree: RadixTree, astreum_node: "Node", key: bytes
+    tree: RadixTree, astreum_node: "Node", key: bytes, local: bool = False
 ) -> tuple[Optional[Expr], Optional[bytes]]:
     """Return ``(value, block)`` for *key*.
 
@@ -100,21 +112,26 @@ def get_from_radix_tree_with_block(
         tree: The radix tree to search.
         astreum_node: A Node instance for fetching nodes.
         key: The key to retrieve.
+        local: If True, no read uses the network.
 
     Returns:
         A tuple of (Expr, block_hash), or (None, None) if not found.
     """
-    found = _find_node(tree, astreum_node, key)
+    found = _find_node(tree, astreum_node, key, local)
     if found is None or found.value is None:
         return None, None
     val = found.value
     if isinstance(val, bytes):
         scope = {} if found.value_block is None else {"block_hash": found.value_block}
+        if local:
+            scope["local"] = True
         return get_expr(astreum_node, val, contact=tree.contact, **scope), found.value_block
     return val, found.value_block
 
 
-def get_from_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes) -> Optional[Expr]:
+def get_from_radix_tree(
+    tree: RadixTree, astreum_node: "Node", key: bytes, local: bool = False
+) -> Optional[Expr]:
     """Walk the radix tree to retrieve the value stored at the given key.
 
     Follows the node chain from the root, matching the key bit-by-bit
@@ -125,8 +142,9 @@ def get_from_radix_tree(tree: RadixTree, astreum_node: "Node", key: bytes) -> Op
         tree: The radix tree to search.
         astreum_node: A Node instance for fetching radix nodes from storage.
         key: The key to look up.
+        local: If True, no read uses the network.
 
     Returns:
         The Expr if found, or None.
     """
-    return get_from_radix_tree_with_block(tree, astreum_node, key)[0]
+    return get_from_radix_tree_with_block(tree, astreum_node, key, local)[0]

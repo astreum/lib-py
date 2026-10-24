@@ -9,7 +9,7 @@ from astreum.expression.helpers import get_expr_builtin_tag
 
 
 def get_expr_list(
-    node, root: Union[bytes, Expr], contact=None, block_hash=None
+    node, root: Union[bytes, Expr], contact=None, block_hash=None, local: bool = False
 ) -> Optional[Expr]:
     """Resolve an Expr and its tail chain using full resolution.
 
@@ -26,12 +26,15 @@ def get_expr_list(
             network fetch along the chain.
         block_hash: Optional block passed to every network fetch along the
             chain (the tail of a cell is in the block of the cell).
+        local: If True, no fetch uses the network.
 
     Returns:
         The root Expr with the tail chain expanded inline, or None
         if any part of the chain cannot be found.
     """
     scope = {} if block_hash is None else {"block_hash": block_hash}
+    if local:
+        scope["local"] = True
     if isinstance(root, Expr):
         expr = root
     else:

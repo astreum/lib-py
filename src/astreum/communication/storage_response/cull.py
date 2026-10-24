@@ -4,6 +4,7 @@ from astreum.expression import (
     RESOLUTION_DYNAMIC,
     RESOLUTION_FULL,
     RESOLUTION_LIST,
+    RESOLUTION_RADIX,
     ZERO32,
     Expr,
 )
@@ -44,7 +45,8 @@ def cull_to_resolution(
 
     SINGLE keeps the root. LIST the root and its tail chain. FULL everything
     reachable from the root through head and tail links. DYNAMIC everything
-    the ``shape`` reaches from the root. Only exprs present in ``exprs`` can be
+    the ``shape`` reaches from the root. RADIX everything delivered, because the
+    walk to the key needs the nodes themselves. Only exprs present in ``exprs`` can be
     kept, each at most once, root first. Anything else in the reply is dropped.
 
     Args:
@@ -72,6 +74,9 @@ def cull_to_resolution(
             return kept
         found, _ = walk_shape(rule, root_hash, by_hash.get)
         return kept + [e for e in found if e.hash() != root_hash]
+
+    if resolution == RESOLUTION_RADIX:
+        return kept + [e for h, e in by_hash.items() if h != root_hash]
 
     if resolution is None or resolution < RESOLUTION_LIST:
         return kept

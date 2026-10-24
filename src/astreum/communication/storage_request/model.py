@@ -4,7 +4,7 @@ from astreum.communication.message_pow import (
 )
 from astreum.communication.models.peer_info import PEER_INFO_BYTES
 from astreum.communication.storage_request.code import StorageRequestCode
-from astreum.expression.expr import RESOLUTION_DYNAMIC
+from astreum.expression.expr import RESOLUTION_DYNAMIC, RESOLUTION_RADIX
 from astreum.expression.shape import parse_shape
 
 # STORAGE_PUT layout (after the 1-byte request code):
@@ -21,7 +21,9 @@ BATCH_ENTRY_BYTES = 32 + 1
 # bit of the resolution byte and is followed by the block_hash 32B whose
 # provider holds the expr: it is routed by that hash. Resolution 0 (DYNAMIC)
 # is followed by a shape: a varint length and that many shape bytes. The shape
-# comes after the block_hash of a scoped entry.
+# comes after the block_hash of a scoped entry. Resolution 4 (RADIX) is
+# followed by a radix param: the key bit offset as a varint, the key length as a
+# varint, and the key bytes. It comes after the block_hash of a scoped entry.
 GET_HEADER_BYTES = 2
 GET_ENTRY_BYTES = 32 + 1
 SCOPED_GET_ENTRY_BYTES = GET_ENTRY_BYTES + 32
@@ -72,16 +74,79 @@ def _read_varint(data: bytes, pos: int) -> tuple[int, int]:
     raise ValueError("STORAGE_GET shape length is too long")
 
 
+def encode_radix_param(key_bit_offset: int, key: bytes) -> bytes:
+    """Encode the param of a RADIX entry.
+
+    Args:
+        key_bit_offset (int): The number of key bits that earlier nodes matched.
+        key (bytes): The key to walk to.
+
+    Returns:
+        bytes: The offset varint, the key length varint and the key.
+
+    Raises:
+        ValueError: If the offset is negative or past the end of the key.
+    """
+    if not 0 <= key_bit_offset <= len(key) * 8:
+        raise ValueError("radix key bit offset is outside the key")
+    return _varint_bytes(key_bit_offset) + _varint_bytes(len(key)) + key
+
+
+def read_radix_param(data: bytes, pos: int) -> tuple[int, bytes, int]:
+    """Read the param of a RADIX entry from ``data`` at ``pos``.
+
+    Args:
+        data (bytes): The bytes to read from.
+        pos (int): The offset of the first param byte.
+
+    Returns:
+        tuple[int, bytes, int]: The key bit offset, the key and the offset
+        after the param.
+
+    Raises:
+        ValueError: If the param is cut short, or the offset is past the end
+            of the key.
+    """
+    key_bit_offset, pos = _read_varint(data, pos)
+    length, pos = _read_varint(data, pos)
+    if pos + length > len(data):
+        raise ValueError("STORAGE_GET truncated radix key")
+    key = bytes(data[pos : pos + length])
+    if key_bit_offset > length * 8:
+        raise ValueError("radix key bit offset is outside the key")
+    return key_bit_offset, key, pos + length
+
+
+def parse_radix_param(param: bytes) -> tuple[int, bytes]:
+    """Decode the param of a RADIX entry.
+
+    Args:
+        param (bytes): The encoded param.
+
+    Returns:
+        tuple[int, bytes]: The key bit offset and the key.
+
+    Raises:
+        ValueError: If the param is malformed or has bytes left over.
+    """
+    key_bit_offset, key, pos = read_radix_param(param, 0)
+    if pos != len(param):
+        raise ValueError("radix param has bytes left over")
+    return key_bit_offset, key
+
+
 def get_entry_size(entry: tuple) -> int:
     """Return the encoded size in bytes of one STORAGE_GET entry.
 
     Args:
         entry (tuple): ``(expr_id, resolution, block_hash, shape)``. A
-            shorter tuple is taken as unscoped and shapeless.
+            shorter tuple is taken as unscoped and shapeless. For a RADIX
+            entry the last field holds the encoded radix param.
 
     Returns:
         int: 33 for a plain entry, plus 32 if scoped, plus the length varint
-        and the shape bytes if the entry carries a shape.
+        and the shape bytes if the entry carries a shape, or the param bytes
+        if it is a RADIX entry.
     """
     block_hash = entry[2] if len(entry) > 2 else None
     shape = entry[3] if len(entry) > 3 else b""
@@ -90,19 +155,30 @@ def get_entry_size(entry: tuple) -> int:
         size += 32
     if entry[1] == RESOLUTION_DYNAMIC:
         size += len(_varint_bytes(len(shape))) + len(shape)
+    elif entry[1] == RESOLUTION_RADIX:
+        size += len(shape)
     return size
 
 
-def max_get_entry_bytes(shape_max_bytes: int) -> int:
+def max_get_entry_bytes(shape_max_bytes: int, radix_key_max_bytes: int = 0) -> int:
     """Return the size of the longest STORAGE_GET entry.
 
     Args:
         shape_max_bytes (int): The longest shape that is allowed.
+        radix_key_max_bytes (int): The longest radix key that is allowed.
 
     Returns:
-        int: The size of a scoped entry with a shape of that length.
+        int: The size of a scoped entry with a shape of that length, or of a
+        scoped RADIX entry with a key of that length, whichever is longer.
     """
-    return SCOPED_GET_ENTRY_BYTES + len(_varint_bytes(shape_max_bytes)) + shape_max_bytes
+    shaped = SCOPED_GET_ENTRY_BYTES + len(_varint_bytes(shape_max_bytes)) + shape_max_bytes
+    radix = (
+        SCOPED_GET_ENTRY_BYTES
+        + len(_varint_bytes(radix_key_max_bytes * 8))
+        + len(_varint_bytes(radix_key_max_bytes))
+        + radix_key_max_bytes
+    )
+    return max(shaped, radix)
 
 
 def get_body_budget(budget_bytes: int) -> int:
@@ -231,11 +307,15 @@ class StorageRequest:
                 raise ValueError("STORAGE_GET expr_id must be 32 bytes")
             if resolution == RESOLUTION_DYNAMIC:
                 parse_shape(shape)
+            elif resolution == RESOLUTION_RADIX:
+                parse_radix_param(shape)
             elif shape:
                 raise ValueError("STORAGE_GET shape needs resolution 0")
             tail = b""
             if resolution == RESOLUTION_DYNAMIC:
                 tail = _varint_bytes(len(shape)) + shape
+            elif resolution == RESOLUTION_RADIX:
+                tail = shape
             if block_hash is None:
                 parts.append(expr_id + bytes([resolution]) + tail)
                 continue
@@ -364,6 +444,10 @@ class StorageRequest:
                 shape = bytes(body[pos : pos + length])
                 pos += length
                 parse_shape(shape)
+            elif resolution == RESOLUTION_RADIX:
+                start = pos
+                _, _, pos = read_radix_param(body, pos)
+                shape = bytes(body[start:pos])
             entries.append((expr_id, resolution, block_hash, shape))
         if pos != len(body):
             raise ValueError(

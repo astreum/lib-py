@@ -52,7 +52,10 @@ from astreum.storage.radix import (  # noqa: E402
 )
 from astreum.utils.config import NodeConfig
 
+from astreum.communication.storage_request.model import parse_radix_param  # noqa: E402
+from astreum.expression import RESOLUTION_RADIX  # noqa: E402
 from astreum.expression.shape import parse_shape, walk_shape  # noqa: E402
+from astreum.storage.radix.tree.walk import walk_radix  # noqa: E402
 
 CONTACT = RelayEndpoint(b"\x07" * 32, ("10.0.0.7", 7000))
 QUEUE = "astreum.storage.workers.requests.queue_storage_get"
@@ -106,8 +109,12 @@ class _Served:
             expr = self.source.hot_storage.get(expr_id)
             if expr is None:
                 return False
+            if resolution == RESOLUTION_RADIX:
+                # A radix request gets the exprs for the nodes on the way.
+                offset, key = parse_radix_param(shape)
+                served = walk_radix(self.source, expr_id, key, offset)
             # A shaped request gets every expr the shape reaches.
-            if shape:
+            elif shape:
                 served, _ = walk_shape(
                     parse_shape(shape), expr_id, self.source.hot_storage.get
                 )

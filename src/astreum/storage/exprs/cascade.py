@@ -18,7 +18,9 @@ def _builtin_type_symbol(expr_id: bytes) -> Optional[Expr]:
     return symbol if symbol.hash() == expr_id else None
 
 
-def get_expr(node, expr_id: bytes, contact=None, block_hash=None) -> Optional[Expr]:
+def get_expr(
+    node, expr_id: bytes, contact=None, block_hash=None, local: bool = False
+) -> Optional[Expr]:
     """Retrieve an Expr using cascading resolution (hot → cold → network).
 
     Tries the in-memory hot cache first, then cold storage on disk,
@@ -35,6 +37,8 @@ def get_expr(node, expr_id: bytes, contact=None, block_hash=None) -> Optional[Ex
         block_hash: Optional block whose provider holds *expr_id*. Only the
             network step uses it: the GET is routed by the block and asks for
             *expr_id* there.
+        local: If True, skip the network step. A miss in hot and cold storage
+            returns None.
 
     Returns:
         The Expr if found, or None.
@@ -55,6 +59,9 @@ def get_expr(node, expr_id: bytes, contact=None, block_hash=None) -> Optional[Ex
     known = _builtin_type_symbol(expr_id)
     if known is not None:
         return known
+
+    if local:
+        return None
 
     scope = {} if block_hash is None else {"block_hash": block_hash}
     expr = get_expr_from_network(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from astreum.expression.expr import (
     Expr, ZERO32,
-    RESOLUTION_DYNAMIC, RESOLUTION_SINGLE, RESOLUTION_LIST, RESOLUTION_FULL,
+    RESOLUTION_DYNAMIC, RESOLUTION_SINGLE, RESOLUTION_LIST, RESOLUTION_FULL, RESOLUTION_RADIX,
     int_, str_, symbol, bytes_, link, NIL,
     e4m3_, e5m2_, fp16_, bf16_, fp32_, fp64_,
     FLOAT_TAGS,
@@ -32,6 +32,7 @@ __all__ = [
     "Expr",
     "ZERO32",
     "RESOLUTION_DYNAMIC",
+    "RESOLUTION_RADIX",
     "RESOLUTION_SINGLE",
     "RESOLUTION_LIST",
     "RESOLUTION_FULL",
