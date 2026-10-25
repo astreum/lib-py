@@ -14,7 +14,10 @@ from astreum.consensus.models.block import Block
 from astreum.consensus.block.create import create_block
 from astreum.consensus.block.difficulty import calculate_block_difficulty
 from astreum.consensus.block.nonce import generate_block_nonce
-from astreum.consensus.block.encoding.decode import get_block_from_storage
+from astreum.consensus.block.encoding.decode import (
+    get_block_from_storage,
+    get_previous_block_hash_local,
+)
 from astreum.consensus.transaction import Transaction, apply_transaction_obj
 from astreum.consensus.transaction.storage.model import storage_record_to_expr
 from astreum.consensus.transaction.storage.initial import (
@@ -94,6 +97,55 @@ def included_transaction_exprs(node: Any, transactions: list) -> list:
             seen.add(h)
             collected.append(expr)
     return collected
+
+
+def _block_time(node: Any, previous_block: Block) -> int:
+    """Return the timestamp for the block built on ``previous_block``.
+
+    The schedule draws the validator from this time, and the block carries
+    it, so the verifier draws the same validator.
+
+    Args:
+        node: The node that builds the block.
+        previous_block: The parent block.
+
+    Returns:
+        The block timestamp in whole seconds.
+    """
+    spacing = node.block_spacing
+    min_allowed = previous_block.timestamp + spacing
+    nonce_time_seconds = node.nonce_time_ms / 1000.0
+    expected_blocktime = time.time() + nonce_time_seconds + spacing
+    return max(math.ceil(expected_blocktime), min_allowed)
+
+
+def _walk_back(node: Any, failed_hash: bytes, last_good_head: bytes | None) -> bytes | None:
+    """Move the head off a block whose state cannot be loaded.
+
+    The new head is the parent of the failed block when the header is in
+    local storage. Otherwise it is ``last_good_head``. Nothing changes when
+    the failed block is genesis, when no earlier block is known, or when
+    the head is no longer the failed block.
+
+    Args:
+        node: The node.
+        failed_hash: The head hash that failed to load.
+        last_good_head: The last head that loaded, or None.
+
+    Returns:
+        The new head hash, or None when the head did not change.
+    """
+    new_head = get_previous_block_hash_local(node, failed_hash)
+    if new_head is None:
+        new_head = last_good_head
+    if new_head is None or new_head == ZERO32 or new_head == failed_hash:
+        return None
+    with node.latest_block_lock:
+        if node.latest_block_hash != failed_hash:
+            return None
+        node.latest_block_hash = new_head
+        node.latest_block = None
+    return new_head
 
 
 def _announce_block(node: Any, block: Block) -> None:
@@ -187,6 +239,20 @@ def make_validation_worker(
             validator_account.balance += reward_amount
             accounts.set_account(validator_key, validator_account)
 
+        def step_back(failed_hash: bytes, last_good: bytes | None) -> None:
+            """Walk back from a head whose state cannot be loaded, and log it."""
+            stepped_to = _walk_back(node, failed_hash, last_good)
+            if stepped_to is not None:
+                node.logger.warning(
+                    "Head %s cannot be loaded; walked back to %s",
+                    failed_hash.hex(),
+                    stepped_to.hex(),
+                )
+
+        # The last head whose state loaded. The walk-back falls to it when the
+        # header of a failed head is not in local storage.
+        last_good_head = node.latest_block_hash
+
         while not stop.is_set():
             try:
                 flush_ads(node)
@@ -211,29 +277,31 @@ def make_validation_worker(
                 latest_block_hash,
             )
 
+            if last_good_head is None:
+                last_good_head = latest_block_hash
+
             try:
                 # The newest block is uncommitted; its state is on the validator
                 # that announced it (None when we built it or it is committed).
                 head_holder = block_holder(node, latest_block_hash)
+                previous_block = get_block_from_storage(
+                    astreum_node=node, block_hash=latest_block_hash, contact=head_holder
+                )
+                block_time = _block_time(node, previous_block)
                 scheduled_validator, accounts_snapshot = current_validator(
-                    node, latest_block_hash, contact=head_holder
+                    node,
+                    latest_block_hash,
+                    target_time=block_time,
+                    contact=head_holder,
                 )
             except Exception as exc:
                 node.logger.exception("Unable to determine current validator: %s", exc)
+                step_back(latest_block_hash, last_good_head)
                 time.sleep(0.5)
                 continue
 
             if scheduled_validator != validation_public_key:
                 node.logger.debug("Current validator mismatch; expected %s", scheduled_validator.hex() if isinstance(scheduled_validator, bytes) else scheduled_validator)
-                time.sleep(0.5)
-                continue
-
-            try:
-                previous_block = get_block_from_storage(
-                    astreum_node=node, block_hash=latest_block_hash, contact=head_holder
-                )
-            except Exception:
-                node.logger.exception("Unable to load previous block for validation")
                 time.sleep(0.5)
                 continue
 
@@ -303,8 +371,9 @@ def make_validation_worker(
                     )
                 except UnresolvedRecordExpr as exc:
                     node.logger.warning(
-                        "Cannot build block #%s: %s; retrying", new_block.height, exc
+                        "Cannot build block #%s: %s", new_block.height, exc
                     )
+                    step_back(latest_block_hash, last_good_head)
                     time.sleep(0.5)
                     continue
                 new_block.pending_exprs.extend(previous_block_exprs.values())
@@ -321,6 +390,9 @@ def make_validation_worker(
                         node.logger.exception(
                             "Records table write failed for record %s", record_id.hex()
                         )
+
+            # The state of the head loaded, so a later failure can walk back to it.
+            last_good_head = latest_block_hash
 
             offset = new_block.height % ERA_SIZE
             if offset == 0 and new_block.height > 0:
@@ -464,12 +536,8 @@ def make_validation_worker(
                 node.logger.exception("Failed to update accounts trie for block")
 
 
-            now = time.time()
-            spacing = node.block_spacing
-            min_allowed = new_block.previous_block.timestamp + spacing
-            nonce_time_seconds = node.nonce_time_ms / 1000.0
-            expected_blocktime = now + nonce_time_seconds + spacing
-            new_block.timestamp = max(math.ceil(expected_blocktime), min_allowed)
+            # The timestamp is the time the scheduled validator was drawn for.
+            new_block.timestamp = block_time
 
             new_block.difficulty = calculate_block_difficulty(
                 previous_timestamp=previous_block.timestamp,
@@ -612,6 +680,7 @@ def make_validation_worker(
             with node.latest_block_lock:
                 node.latest_block_hash = new_block_hash
                 node.latest_block = new_block
+            last_good_head = new_block_hash
 
         node.logger.info("Validation worker stopped")
 

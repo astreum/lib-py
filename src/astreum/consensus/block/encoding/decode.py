@@ -207,3 +207,39 @@ def get_block_from_storage(
         )
 
     return block
+
+
+def get_previous_block_hash_local(astreum_node: Any, block_hash: bytes) -> bytes | None:
+    """Return the parent hash of a block read from local storage only.
+
+    No fetch uses the network. The state of the block is not needed.
+
+    Args:
+        astreum_node: A Node instance.
+        block_hash: The content hash of the block.
+
+    Returns:
+        The ``previous_block_hash`` of the block, or None when any part of
+        the header is not in hot or cold storage.
+    """
+    try:
+        header = get_expr_list(astreum_node, block_hash, local=True)
+        if header is None or header.head is None and header.head_hash is None:
+            return None
+        inner = header.head
+        if inner is None:
+            from astreum.storage.exprs import get_expr
+
+            inner = get_expr(astreum_node, header.head_hash, local=True)
+        if inner is None:
+            return None
+        inner_nodes, missed = resolve_list_exprs(astreum_node, inner, local=True)
+        if missed or len(inner_nodes) != 2:
+            return None
+        body_nodes, missed = resolve_list_exprs(astreum_node, inner_nodes[0], local=True)
+        if missed or len(body_nodes) != 18:
+            return None
+        # Position 9 of the body is the previous block link.
+        return get_expr_head_hash(body_nodes[9])
+    except Exception:
+        return None

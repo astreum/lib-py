@@ -40,7 +40,7 @@ class TestVerifyBatch(unittest.TestCase):
             validator_public_key_bytes=os.urandom(32),
             chain_id=0,
             height=4,
-            timestamp=0,
+            timestamp=1234,
             difficulty=1,
             contact=CONTACT,
         )
@@ -57,7 +57,7 @@ class TestVerifyBatch(unittest.TestCase):
                 raise fetch_side_effect
 
         def validator(*args, **kwargs):
-            calls.validator()
+            calls.validator(*args, **kwargs)
             return block.validator_public_key_bytes, accounts
 
         def record(*args, **kwargs):
@@ -86,6 +86,13 @@ class TestVerifyBatch(unittest.TestCase):
         self.assertEqual(first.kwargs["block_hash"], prev_block.expr_id)
         self.assertIs(first.kwargs["contact"], CONTACT)
         self.assertIs(first.kwargs["follow_refs"], False)
+
+    def test_scheduled_validator_is_drawn_for_the_time_of_the_block(self):
+        _, calls, prev_block, _ = self._run(b"\x05" * 32)
+        call = calls.validator.call_args
+        self.assertEqual(call.args[1], prev_block.expr_id)
+        self.assertEqual(call.kwargs["target_time"], 1234)
+        self.assertIs(call.kwargs["contact"], CONTACT)
 
     def test_storage_fetch_uses_the_storage_data_root_and_block(self):
         result, calls, _, data = self._run(b"\x05" * 32)

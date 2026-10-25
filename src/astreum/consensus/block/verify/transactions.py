@@ -258,9 +258,11 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
 
     # Start from the same accounts the creator builds on: the previous state
     # after the scheduled validator's stake has been halved. The creator calls
-    # current_validator without a target_time (one slot), so this does too.
+    # current_validator with the time of the block, so this does too.
     try:
-        scheduled_validator, accounts_snapshot = current_validator(node, prev_hash, contact=block.contact)
+        scheduled_validator, accounts_snapshot = current_validator(
+            node, prev_hash, target_time=block.timestamp, contact=block.contact
+        )
     except Exception as exc:
         node.logger.debug(
             "Block verify failed deriving scheduled validator block=%s error=%s",
