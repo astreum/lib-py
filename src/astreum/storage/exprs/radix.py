@@ -184,6 +184,7 @@ def get_radix_all_from_network(
     value_shape: bytes = b"",
     contact=None,
     block_hash=None,
+    follow_refs: bool = True,
 ) -> bool:
     """Fetch all nodes of a radix tree, and their values, in rounds of requests.
 
@@ -199,6 +200,10 @@ def get_radix_all_from_network(
 
     The loop ends when no node is missing, or when a round brings no new node.
 
+    With ``follow_refs`` False the loop stays in the block of ``block_hash``.
+    It does not enter a child that is a stored ref. The work then depends on
+    the size of one block, not on the size of the tree.
+
     A value that a provider does not hold stays missing. The reader of the
     value fetches it with its usual calls.
 
@@ -209,6 +214,7 @@ def get_radix_all_from_network(
             Empty for none.
         contact: Optional ``RelayEndpoint`` to ask directly.
         block_hash: Optional block whose provider holds the node.
+        follow_refs: If False, children that are stored refs are not read.
 
     Returns:
         bool: True if all nodes below ``node_hash`` read from local storage at
@@ -232,7 +238,9 @@ def get_radix_all_from_network(
     last = None
     confirmed = False
     while True:
-        _, missing = collect_radix_all(node, node_hash, block_hash)
+        _, missing = collect_radix_all(
+            node, node_hash, block_hash, follow_refs=follow_refs
+        )
         if not missing:
             return True
         if not getattr(node, "is_connected", False):

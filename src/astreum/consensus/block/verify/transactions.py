@@ -3,11 +3,16 @@ from __future__ import annotations
 from typing import Any, List, Optional
 
 from astreum.expression import Expr, RESOLUTION_FULL, link_list_to_expr
-from astreum.consensus.transaction.storage.model import storage_record_to_expr
-from astreum.storage.exprs import get_expr_list, prefetch_exprs_from_network
+from astreum.consensus.transaction.storage.model import STORAGE_RECORD_SHAPE, storage_record_to_expr
+from astreum.storage.exprs import (
+    get_expr_list,
+    get_radix_all_from_network,
+    prefetch_exprs_from_network,
+)
 from astreum.consensus.block.rate_window import update_statistics
 from astreum.storage.radix import RadixTree, get_from_radix_tree, put_in_radix_tree
 from astreum.consensus.models.accounts import Accounts
+from astreum.consensus.account.model import ACCOUNT_SHAPE
 
 ZERO32 = b"\x00" * 32
 from astreum.consensus.models.receipt import Receipt
@@ -39,6 +44,41 @@ def _hex(value: Optional[bytes]) -> str:
     if isinstance(value, (bytes, bytearray)):
         return value.hex()
     return str(value)
+
+
+def _fetch_new_nodes(
+    node: Any,
+    root_hash: Optional[bytes],
+    value_shape: bytes,
+    root_block: Optional[bytes],
+    contact: Any,
+) -> None:
+    """Fetch the nodes of a radix tree that are new in a block, with their values.
+
+    The read stays in the block of *root_block*. It does not walk the older
+    history of the tree. A node or a value that does not arrive is read later
+    by the code that needs it, as before.
+
+    Args:
+        node: The node.
+        root_hash: The root of the tree. Nothing is fetched for an empty tree.
+        value_shape: The shape of the values of the tree.
+        root_block: The block whose record holds the root.
+        contact: The peer that holds the block.
+    """
+    if not root_hash or root_hash == ZERO32:
+        return
+    try:
+        get_radix_all_from_network(
+            node,
+            root_hash,
+            value_shape,
+            contact=contact,
+            block_hash=root_block,
+            follow_refs=False,
+        )
+    except Exception as exc:
+        node.logger.debug("Block verify batch fetch failed root=%s error=%s", _hex(root_hash), exc)
 
 
 def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str]]:
@@ -211,6 +251,11 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         )
         return False, "tx head mismatch"
 
+    # The parent's accounts trie is read next, and its record is built after
+    # that. Fetch what is new in the parent in rounds of batched requests,
+    # not one request per cell.
+    _fetch_new_nodes(node, prev_block.accounts_hash, ACCOUNT_SHAPE, prev_block.expr_id, block.contact)
+
     # Start from the same accounts the creator builds on: the previous state
     # after the scheduled validator's stake has been halved. The creator calls
     # current_validator without a target_time (one slot), so this does too.
@@ -283,6 +328,13 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
     # Pre-commit previous block expr to storage data (replicating block builder)
     storage_account = work_block.accounts.get_account(STORAGE_ADDRESS, node)
     if storage_account is not None:
+        _fetch_new_nodes(
+            node,
+            storage_account.data.root_hash,
+            STORAGE_RECORD_SHAPE,
+            storage_account.data.root_block,
+            block.contact,
+        )
         try:
             result = generate_initial_storage_record(
                 node,

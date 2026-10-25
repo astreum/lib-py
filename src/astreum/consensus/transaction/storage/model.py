@@ -6,6 +6,7 @@ from typing import Any, Optional
 from astreum.consensus.constants import PROVIDERS_PER_RECORD
 from astreum.expression import Expr, NIL, resolve_list_exprs, link, int_, bytes_, exprs_to_linked_expr
 from astreum.expression import ZERO32, get_expr_tag, get_expr_builtin_tag, get_expr_value
+from astreum.expression.shape import HOLD, INT, SEND, pair, repeat
 from astreum.storage.exprs import get_expr
 
 
@@ -26,6 +27,17 @@ class StorageLane:
 
 def _empty_lanes() -> tuple[StorageLane, ...]:
     return tuple(StorageLane() for _ in range(PROVIDERS_PER_RECORD))
+
+
+# A lane: block link, height, winner. See ``storage_lane_to_expr``.
+_LANE_SHAPE = pair(SEND, pair(INT, pair(SEND, HOLD)))
+
+# The record expr: lanes, creation block link, slots root, new count, new size.
+# This is the layout of ``storage_record_to_expr``.
+STORAGE_RECORD_SHAPE = pair(
+    repeat(_LANE_SHAPE),
+    pair(SEND, pair(SEND, pair(INT, pair(INT, HOLD)))),
+)
 
 
 @dataclass

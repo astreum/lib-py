@@ -5,7 +5,23 @@ from typing import Any, Optional
 
 from astreum.expression import Expr, NIL, ZERO32, link, int_
 from astreum.expression.refs import pointer_item
+from astreum.expression.shape import HOLD, INT, SEND, pair
 from astreum.storage.radix import RadixTree, clone_radix_tree, get_radix_node_expr
+
+
+# A trie root field of a record: a stored ref is a list of three cells, a plain
+# wrapper is shorter. This rule sends the first three cells with their heads.
+ROOT_POINTER_SHAPE = pair(SEND, pair(SEND, pair(SEND, HOLD)))
+
+# The account expr: data root, counter, code root, channels root, balance.
+# This is the layout of ``Account.to_expr``.
+ACCOUNT_SHAPE = pair(
+    ROOT_POINTER_SHAPE,
+    pair(
+        INT,
+        pair(ROOT_POINTER_SHAPE, pair(ROOT_POINTER_SHAPE, pair(INT, HOLD))),
+    ),
+)
 
 
 def _root_item(root_hash: bytes, block: Optional[bytes]) -> Expr:

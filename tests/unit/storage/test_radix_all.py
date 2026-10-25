@@ -326,9 +326,9 @@ class TestClient(unittest.TestCase):
         self.source = self.chain.source
         self.requester = _store_node()
 
-    def _fetch(self, root=None, block=B3, shape=DEEP):
+    def _fetch(self, root=None, block=B3, shape=DEEP, **kwargs):
         return get_radix_all_from_network(
-            self.requester, root or self.chain.root3, shape, block_hash=block
+            self.requester, root or self.chain.root3, shape, block_hash=block, **kwargs
         )
 
     def _read_all(self, root=None, block=B3):
@@ -403,6 +403,27 @@ class TestClient(unittest.TestCase):
         self.assertTrue(self._read_all())
         self.assertGreater(len(cut.calls), len(whole.calls))
         self.assertEqual(len(cut.ids), len(set(cut.ids)))
+
+    def test_without_refs_the_loop_stays_in_the_block(self):
+        with _Provider(self.source, self.requester) as provider:
+            self.assertTrue(self._fetch(follow_refs=False))
+        older = self.chain.new1 | self.chain.new2
+        self.assertEqual({b for _, _, b in provider.calls}, {B3})
+        self.assertFalse(set(provider.ids) & older)
+        self.assertTrue(set(provider.ids) <= self.chain.new3)
+
+    def test_without_refs_nothing_is_sent_if_the_block_is_held(self):
+        with _Provider(self.source, self.requester) as provider:
+            self._fetch(follow_refs=False)
+            before = len(provider.calls)
+            self.assertTrue(self._fetch(follow_refs=False))
+        self.assertEqual(len(provider.calls), before)
+
+    def test_by_default_the_loop_follows_refs(self):
+        with _Provider(self.source, self.requester) as provider:
+            self._fetch()
+        self.assertTrue({b for _, _, b in provider.calls} - {B3})
+        self.assertTrue(set(provider.ids) & (self.chain.new1 | self.chain.new2))
 
     def test_a_round_that_brings_nothing_ends_the_loop(self):
         with _Provider(self.source, self.requester, answer=False) as provider:
