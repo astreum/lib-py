@@ -4,7 +4,11 @@ from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import increment_peer_metric
 from astreum.communication.storage_request.code import StorageRequestCode
 from astreum.communication.models.peer_info import PEER_INFO_BYTES, PeerInfo, encode_peer_info
-from astreum.communication.storage_request.model import StorageRequest, parse_radix_param
+from astreum.communication.storage_request.model import (
+    StorageRequest,
+    parse_radix_all_param,
+    parse_radix_key_param,
+)
 from astreum.communication.storage_request.payment_required import (
     _queue_storage_payment_required,
     _requires_storage_channel,
@@ -12,13 +16,15 @@ from astreum.communication.storage_request.payment_required import (
 from astreum.communication.storage_response.code import StorageResponseCode
 from astreum.communication.storage_response.model import StorageResponse
 from astreum.communication.storage_response.storage_found import (
+    PAGE_ENTRY_BUDGET,
     encode_found_pages,
     found_page_expr_bytes,
 )
 from astreum.communication.outgoing_queue import enqueue_outgoing
 from astreum.expression import (
     RESOLUTION_DYNAMIC,
-    RESOLUTION_RADIX,
+    RESOLUTION_RADIX_ALL,
+    RESOLUTION_RADIX_KEY,
     RESOLUTION_SINGLE,
     RESOLUTION_LIST,
     RESOLUTION_FULL,
@@ -28,7 +34,7 @@ from astreum.expression import (
 from astreum.expression.encoding import encode_expr_to_bytes
 from astreum.expression.shape import parse_shape, walk_shape
 from astreum.storage.exprs import get_expr_from_local_storage
-from astreum.storage.radix.tree.walk import walk_radix
+from astreum.storage.radix.tree.walk import collect_radix_all, walk_radix_key
 from astreum.storage.records import get_record_from_cold_storage
 from astreum.communication.util import xor_distance
 from astreum.consensus.constants import PROVIDERS_PER_RECORD
@@ -193,10 +199,19 @@ def _serve_get(
     storage. The reply holds the exprs the walk finds. A child this node does
     not hold is left out, and the requester asks for it again.
 
-    A RADIX entry (resolution 4) is served by walking the radix tree from
+    A RADIX_KEY entry (resolution 4) is served by walking the radix tree from
     *expr_id* towards the key in *shape*, over local storage. The reply holds
-    the exprs for each node on the way. The walk stops at the first node this
-    node does not hold, and the requester asks again from there.
+    the exprs for each node on the way, and the exprs the value shape of the
+    param reaches from the value at the key. The walk stops at the first node
+    this node does not hold, and the requester asks again from there.
+
+    A RADIX_ALL entry (resolution 5) is served by reading the radix tree below
+    *expr_id*, over local storage. The reply holds the exprs of each node that
+    is new in the block of the request, and the exprs the value shape of the
+    param reaches from the value of each of these nodes. It does not enter a
+    child that is a stored ref. The reply is cut at a node boundary before it
+    needs more pages than ``storage_found_max_pages`` allows. The requester
+    asks for the nodes after the cut.
 
     Args:
         node (Node): The node instance serving the request.
@@ -205,20 +220,27 @@ def _serve_get(
         desired (int): The desired resolution level.
         block_hash (bytes | None): Optional block hash for scoped requests.
         shape (bytes): The shape of a DYNAMIC request, or the radix param of a
-            RADIX request, else empty.
+            RADIX_KEY or RADIX_ALL request, else empty.
 
     Returns:
         tuple[bool, str | None]: A tuple of (success, error_reason).
     """
     rule = None
-    radix = None
-    if desired == RESOLUTION_RADIX:
+    radix_key = None
+    radix_all = None
+    if desired in (RESOLUTION_RADIX_KEY, RESOLUTION_RADIX_ALL):
         try:
-            radix = parse_radix_param(shape)
+            if desired == RESOLUTION_RADIX_KEY:
+                radix_key = parse_radix_key_param(shape)
+                value_shape = radix_key[2]
+            else:
+                value_shape = radix_all = parse_radix_all_param(shape)
         except ValueError as exc:
             return False, f"invalid radix param: {exc}"
-        if len(radix[1]) > node.config.storage_radix_key_max_bytes:
+        if radix_key is not None and len(radix_key[1]) > node.config.storage_radix_key_max_bytes:
             return False, "radix key too long"
+        if len(value_shape) > node.config.storage_shape_max_bytes:
+            return False, "value shape too long"
     if desired == RESOLUTION_DYNAMIC:
         if len(shape) > node.config.storage_shape_max_bytes:
             return False, "shape too long"
@@ -229,8 +251,19 @@ def _serve_get(
 
     local_atom = get_expr_from_local_storage(node, expr_id)
     if local_atom is not None:
-        if radix is not None:
-            exprs = walk_radix(node, expr_id, radix[1], radix[0])
+        if radix_key is not None:
+            exprs = walk_radix_key(node, expr_id, radix_key[1], radix_key[0], radix_key[2])
+            if not exprs:
+                return False, "radix selects nothing"
+        elif radix_all is not None:
+            exprs, _ = collect_radix_all(
+                node,
+                expr_id,
+                None,
+                radix_all,
+                follow_refs=False,
+                budget=(node.config.storage_found_max_pages - 1) * PAGE_ENTRY_BUDGET,
+            )
             if not exprs:
                 return False, "radix selects nothing"
         elif rule is None:

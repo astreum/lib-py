@@ -130,7 +130,7 @@ class TestConfig(unittest.TestCase):
 
     def test_the_default_budget_holds_the_longest_entry_and_more(self):
         longest = max_get_entry_bytes(128)
-        self.assertEqual(longest, 65 + 2 + 128)
+        self.assertGreaterEqual(longest, 65 + 2 + 128)
         self.assertGreaterEqual(get_body_budget(1232), longest + 65)
 
     def test_a_budget_too_small_for_the_longest_entry_is_rejected(self):

@@ -7,6 +7,7 @@ from typing import Any, Optional
 from astreum.expression import Expr, NIL, resolve_list_exprs, link, int_, bytes_, get_expr_tag, get_expr_builtin_tag, get_expr_value
 from astreum.expression import ZERO32
 from astreum.expression.refs import pointer_item
+from astreum.expression.shape import HOLD, INT, SEND, pair
 from astreum.storage.exprs import get_expr_list
 from astreum.storage.pointers import read_field
 from astreum.storage.radix import get_from_radix_tree_with_block
@@ -17,6 +18,23 @@ from astreum.consensus.constants import TREASURY_ADDRESS
 BORROW_REQUEST_VERSION = 1
 BORROW_REQUEST_SIZE = 18
 U64_SIZE = 8
+
+
+# A trie root field of a record: a stored ref is a list of three cells, a plain
+# wrapper is shorter. This rule sends the first three cells with their heads.
+_ROOT_POINTER = pair(SEND, pair(SEND, pair(SEND, HOLD)))
+
+# The record of an account in the treasury data trie: balance, loans root,
+# total interest paid, guarantees root, loaned, defaulted, guaranteed. A record
+# of 4 fields ends after the guarantees root, and the rules for the fields
+# after it find no expr.
+USER_RECORD_SHAPE = pair(
+    INT,
+    pair(
+        _ROOT_POINTER,
+        pair(INT, pair(_ROOT_POINTER, pair(INT, pair(INT, pair(INT, HOLD))))),
+    ),
+)
 
 
 class LoanType(IntEnum):

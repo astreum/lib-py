@@ -119,7 +119,9 @@ class TestValidatorPrefetch(unittest.TestCase):
         from astreum.consensus.validation import validator
 
         records = {b"A" * 32: int_(1), b"B" * 32: int_(2)}
-        treasury = SimpleNamespace(data=SimpleNamespace(contact=None))
+        treasury = SimpleNamespace(
+            data=SimpleNamespace(contact=None, root_hash=None, root_block=None)
+        )
         accounts = SimpleNamespace(get_account=lambda address, node: treasury)
         block = SimpleNamespace(timestamp=10, accounts_hash=b"\x01" * 32)
 
@@ -147,7 +149,9 @@ class TestValidatorPrefetch(unittest.TestCase):
             b"B" * 32: (int_(2), block_b),
             b"C" * 32: (int_(3), block_a),
         }
-        treasury = SimpleNamespace(data=SimpleNamespace(contact=None))
+        treasury = SimpleNamespace(
+            data=SimpleNamespace(contact=None, root_hash=None, root_block=None)
+        )
         accounts = SimpleNamespace(get_account=lambda address, node: treasury)
         block = SimpleNamespace(timestamp=10, accounts_hash=b"\x01" * 32)
         calls = []
@@ -167,6 +171,39 @@ class TestValidatorPrefetch(unittest.TestCase):
         self.assertEqual(
             calls,
             [([int_(1).hash(), int_(3).hash()], block_a), ([int_(2).hash()], block_b)],
+        )
+
+    def test_the_stake_trie_is_fetched_in_rounds_before_it_is_walked(self):
+        from astreum.consensus.transaction.treasury.record import USER_RECORD_SHAPE
+        from astreum.consensus.validation import validator
+
+        root, root_block, contact = b"\x0a" * 32, b"\x0b" * 32, object()
+        treasury = SimpleNamespace(
+            data=SimpleNamespace(contact=contact, root_hash=root, root_block=root_block)
+        )
+        accounts = SimpleNamespace(get_account=lambda address, node: treasury)
+        block = SimpleNamespace(timestamp=10, accounts_hash=b"\x01" * 32)
+        order = []
+
+        with patch.object(validator, "get_block_from_storage", return_value=block), \
+             patch.object(validator, "Accounts", return_value=accounts), \
+             patch.object(
+                 validator,
+                 "get_radix_all_from_network",
+                 side_effect=lambda *a, **kw: order.append("fetch"),
+             ) as fetch, \
+             patch.object(
+                 validator,
+                 "get_all_from_radix_tree_with_blocks",
+                 side_effect=lambda *a, **kw: order.append("walk") or {},
+             ):
+            with self.assertRaises(ValueError):
+                validator.current_validator(_node(), b"\x02" * 32, contact=contact)
+
+        self.assertEqual(order, ["fetch", "walk"])
+        self.assertEqual(fetch.call_args.args[1:3], (root, USER_RECORD_SHAPE))
+        self.assertEqual(
+            fetch.call_args.kwargs, {"contact": contact, "block_hash": root_block}
         )
 
 

@@ -11,7 +11,8 @@ from astreum.expression import (
     RESOLUTION_SINGLE,
     RESOLUTION_LIST,
     RESOLUTION_FULL,
-    RESOLUTION_RADIX,
+    RESOLUTION_RADIX_ALL,
+    RESOLUTION_RADIX_KEY,
 )
 from astreum.expression.helpers import get_expr_builtin_tag
 
@@ -250,8 +251,8 @@ def _resend_to_next_provider(
         node: A Node instance with the request registry and the index.
         missing: ``(expr_id, resolution)`` pairs that the first poll missed.
         block_hash: Optional block hash of a scoped fetch.
-        shape: The shape or radix param sent again with every DYNAMIC or
-            RADIX pair in *missing*.
+        shape: The shape or radix param sent again with every DYNAMIC,
+            RADIX_KEY or RADIX_ALL pair in *missing*.
 
     Returns:
         The set of hashes for which a GET was queued.
@@ -288,7 +289,12 @@ def _resend_to_next_provider(
             resolution,
             contact=contact,
             preclaimed=live,
-            shape=shape if resolution in (RESOLUTION_DYNAMIC, RESOLUTION_RADIX) else b"",
+            shape=(
+                shape
+                if resolution
+                in (RESOLUTION_DYNAMIC, RESOLUTION_RADIX_KEY, RESOLUTION_RADIX_ALL)
+                else b""
+            ),
             **scope,
         ):
             queued.add(expr_id)

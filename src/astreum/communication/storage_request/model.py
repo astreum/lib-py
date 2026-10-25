@@ -4,7 +4,11 @@ from astreum.communication.message_pow import (
 )
 from astreum.communication.models.peer_info import PEER_INFO_BYTES
 from astreum.communication.storage_request.code import StorageRequestCode
-from astreum.expression.expr import RESOLUTION_DYNAMIC, RESOLUTION_RADIX
+from astreum.expression.expr import (
+    RESOLUTION_DYNAMIC,
+    RESOLUTION_RADIX_ALL,
+    RESOLUTION_RADIX_KEY,
+)
 from astreum.expression.shape import parse_shape
 
 # STORAGE_PUT layout (after the 1-byte request code):
@@ -23,7 +27,9 @@ BATCH_ENTRY_BYTES = 32 + 1
 # is followed by a shape: a varint length and that many shape bytes. The shape
 # comes after the block_hash of a scoped entry. Resolution 4 (RADIX) is
 # followed by a radix param: the key bit offset as a varint, the key length as a
-# varint, and the key bytes. It comes after the block_hash of a scoped entry.
+# varint, the key bytes, then a value shape (a varint length and that many shape
+# bytes, length 0 for none). Resolution 5 (RADIX_ALL) is followed by a value
+# shape only. A radix param comes after the block_hash of a scoped entry.
 GET_HEADER_BYTES = 2
 GET_ENTRY_BYTES = 32 + 1
 SCOPED_GET_ENTRY_BYTES = GET_ENTRY_BYTES + 32
@@ -74,38 +80,103 @@ def _read_varint(data: bytes, pos: int) -> tuple[int, int]:
     raise ValueError("STORAGE_GET shape length is too long")
 
 
-def encode_radix_param(key_bit_offset: int, key: bytes) -> bytes:
-    """Encode the param of a RADIX entry.
+def _encode_shape(shape: bytes) -> bytes:
+    """Encode a shape field: a varint length and the shape bytes.
+
+    Args:
+        shape (bytes): The shape bytes. Empty for none.
+
+    Returns:
+        bytes: The length varint and the shape bytes.
+    """
+    return _varint_bytes(len(shape)) + shape
+
+
+def _read_shape(data: bytes, pos: int) -> tuple[bytes, int]:
+    """Read a shape field from ``data`` at ``pos``.
+
+    Args:
+        data (bytes): The bytes to read from.
+        pos (int): The offset of the length varint.
+
+    Returns:
+        tuple[bytes, int]: The shape bytes and the offset after them.
+
+    Raises:
+        ValueError: If the field is cut short.
+    """
+    length, pos = _read_varint(data, pos)
+    if pos + length > len(data):
+        raise ValueError("STORAGE_GET truncated shape")
+    return bytes(data[pos : pos + length]), pos + length
+
+
+def _encode_value_shape(value_shape: bytes) -> bytes:
+    """Encode the value shape of a radix param. Empty is allowed.
+
+    Raises:
+        ValueError: If the shape is not empty and cannot be parsed.
+    """
+    if value_shape:
+        parse_shape(value_shape)
+    return _encode_shape(value_shape)
+
+
+def _read_value_shape(data: bytes, pos: int) -> tuple[bytes, int]:
+    """Read the value shape of a radix param. Empty is allowed.
+
+    Raises:
+        ValueError: If the field is cut short or the shape cannot be parsed.
+    """
+    value_shape, pos = _read_shape(data, pos)
+    if value_shape:
+        parse_shape(value_shape)
+    return value_shape, pos
+
+
+def encode_radix_key_param(
+    key_bit_offset: int, key: bytes, value_shape: bytes = b""
+) -> bytes:
+    """Encode the param of a RADIX_KEY entry.
 
     Args:
         key_bit_offset (int): The number of key bits that earlier nodes matched.
         key (bytes): The key to walk to.
+        value_shape (bytes): The shape to apply to the value of the node at
+            the key. Empty for none.
 
     Returns:
-        bytes: The offset varint, the key length varint and the key.
+        bytes: The offset varint, the key length varint, the key, the value
+        shape length varint and the value shape.
 
     Raises:
-        ValueError: If the offset is negative or past the end of the key.
+        ValueError: If the offset is negative or past the end of the key, or
+            the value shape cannot be parsed.
     """
     if not 0 <= key_bit_offset <= len(key) * 8:
         raise ValueError("radix key bit offset is outside the key")
-    return _varint_bytes(key_bit_offset) + _varint_bytes(len(key)) + key
+    return (
+        _varint_bytes(key_bit_offset)
+        + _varint_bytes(len(key))
+        + key
+        + _encode_value_shape(value_shape)
+    )
 
 
-def read_radix_param(data: bytes, pos: int) -> tuple[int, bytes, int]:
-    """Read the param of a RADIX entry from ``data`` at ``pos``.
+def read_radix_key_param(data: bytes, pos: int) -> tuple[int, bytes, bytes, int]:
+    """Read the param of a RADIX_KEY entry from ``data`` at ``pos``.
 
     Args:
         data (bytes): The bytes to read from.
         pos (int): The offset of the first param byte.
 
     Returns:
-        tuple[int, bytes, int]: The key bit offset, the key and the offset
-        after the param.
+        tuple[int, bytes, bytes, int]: The key bit offset, the key, the value
+        shape and the offset after the param.
 
     Raises:
-        ValueError: If the param is cut short, or the offset is past the end
-            of the key.
+        ValueError: If the param is cut short, the offset is past the end of
+            the key, or the value shape cannot be parsed.
     """
     key_bit_offset, pos = _read_varint(data, pos)
     length, pos = _read_varint(data, pos)
@@ -114,25 +185,78 @@ def read_radix_param(data: bytes, pos: int) -> tuple[int, bytes, int]:
     key = bytes(data[pos : pos + length])
     if key_bit_offset > length * 8:
         raise ValueError("radix key bit offset is outside the key")
-    return key_bit_offset, key, pos + length
+    value_shape, pos = _read_value_shape(data, pos + length)
+    return key_bit_offset, key, value_shape, pos
 
 
-def parse_radix_param(param: bytes) -> tuple[int, bytes]:
-    """Decode the param of a RADIX entry.
+def parse_radix_key_param(param: bytes) -> tuple[int, bytes, bytes]:
+    """Decode the param of a RADIX_KEY entry.
 
     Args:
         param (bytes): The encoded param.
 
     Returns:
-        tuple[int, bytes]: The key bit offset and the key.
+        tuple[int, bytes, bytes]: The key bit offset, the key and the value
+        shape.
 
     Raises:
         ValueError: If the param is malformed or has bytes left over.
     """
-    key_bit_offset, key, pos = read_radix_param(param, 0)
+    key_bit_offset, key, value_shape, pos = read_radix_key_param(param, 0)
     if pos != len(param):
         raise ValueError("radix param has bytes left over")
-    return key_bit_offset, key
+    return key_bit_offset, key, value_shape
+
+
+def encode_radix_all_param(value_shape: bytes = b"") -> bytes:
+    """Encode the param of a RADIX_ALL entry.
+
+    Args:
+        value_shape (bytes): The shape to apply to the value of each node.
+            Empty for none.
+
+    Returns:
+        bytes: The value shape length varint and the value shape.
+
+    Raises:
+        ValueError: If the value shape cannot be parsed.
+    """
+    return _encode_value_shape(value_shape)
+
+
+def read_radix_all_param(data: bytes, pos: int) -> tuple[bytes, int]:
+    """Read the param of a RADIX_ALL entry from ``data`` at ``pos``.
+
+    Args:
+        data (bytes): The bytes to read from.
+        pos (int): The offset of the first param byte.
+
+    Returns:
+        tuple[bytes, int]: The value shape and the offset after the param.
+
+    Raises:
+        ValueError: If the param is cut short or the value shape cannot be
+            parsed.
+    """
+    return _read_value_shape(data, pos)
+
+
+def parse_radix_all_param(param: bytes) -> bytes:
+    """Decode the param of a RADIX_ALL entry.
+
+    Args:
+        param (bytes): The encoded param.
+
+    Returns:
+        bytes: The value shape. Empty for none.
+
+    Raises:
+        ValueError: If the param is malformed or has bytes left over.
+    """
+    value_shape, pos = read_radix_all_param(param, 0)
+    if pos != len(param):
+        raise ValueError("radix param has bytes left over")
+    return value_shape
 
 
 def get_entry_size(entry: tuple) -> int:
@@ -140,13 +264,14 @@ def get_entry_size(entry: tuple) -> int:
 
     Args:
         entry (tuple): ``(expr_id, resolution, block_hash, shape)``. A
-            shorter tuple is taken as unscoped and shapeless. For a RADIX
-            entry the last field holds the encoded radix param.
+            shorter tuple is taken as unscoped and shapeless. For a
+            RADIX_KEY or RADIX_ALL entry the last field holds the encoded
+            radix param.
 
     Returns:
         int: 33 for a plain entry, plus 32 if scoped, plus the length varint
         and the shape bytes if the entry carries a shape, or the param bytes
-        if it is a RADIX entry.
+        if it is a RADIX_KEY or RADIX_ALL entry.
     """
     block_hash = entry[2] if len(entry) > 2 else None
     shape = entry[3] if len(entry) > 3 else b""
@@ -155,7 +280,7 @@ def get_entry_size(entry: tuple) -> int:
         size += 32
     if entry[1] == RESOLUTION_DYNAMIC:
         size += len(_varint_bytes(len(shape))) + len(shape)
-    elif entry[1] == RESOLUTION_RADIX:
+    elif entry[1] in (RESOLUTION_RADIX_KEY, RESOLUTION_RADIX_ALL):
         size += len(shape)
     return size
 
@@ -164,21 +289,24 @@ def max_get_entry_bytes(shape_max_bytes: int, radix_key_max_bytes: int = 0) -> i
     """Return the size of the longest STORAGE_GET entry.
 
     Args:
-        shape_max_bytes (int): The longest shape that is allowed.
+        shape_max_bytes (int): The longest shape that is allowed. It is also
+            the longest value shape of a radix param.
         radix_key_max_bytes (int): The longest radix key that is allowed.
 
     Returns:
         int: The size of a scoped entry with a shape of that length, or of a
-        scoped RADIX entry with a key of that length, whichever is longer.
+        scoped RADIX_KEY entry with a key and a value shape of that length,
+        whichever is longer. A RADIX_ALL entry is shorter than a RADIX_KEY
+        entry.
     """
-    shaped = SCOPED_GET_ENTRY_BYTES + len(_varint_bytes(shape_max_bytes)) + shape_max_bytes
-    radix = (
-        SCOPED_GET_ENTRY_BYTES
-        + len(_varint_bytes(radix_key_max_bytes * 8))
+    shape = len(_varint_bytes(shape_max_bytes)) + shape_max_bytes
+    radix_key = (
+        len(_varint_bytes(radix_key_max_bytes * 8))
         + len(_varint_bytes(radix_key_max_bytes))
         + radix_key_max_bytes
+        + shape
     )
-    return max(shaped, radix)
+    return SCOPED_GET_ENTRY_BYTES + max(shape, radix_key)
 
 
 def get_body_budget(budget_bytes: int) -> int:
@@ -307,14 +435,16 @@ class StorageRequest:
                 raise ValueError("STORAGE_GET expr_id must be 32 bytes")
             if resolution == RESOLUTION_DYNAMIC:
                 parse_shape(shape)
-            elif resolution == RESOLUTION_RADIX:
-                parse_radix_param(shape)
+            elif resolution == RESOLUTION_RADIX_KEY:
+                parse_radix_key_param(shape)
+            elif resolution == RESOLUTION_RADIX_ALL:
+                parse_radix_all_param(shape)
             elif shape:
                 raise ValueError("STORAGE_GET shape needs resolution 0")
             tail = b""
             if resolution == RESOLUTION_DYNAMIC:
-                tail = _varint_bytes(len(shape)) + shape
-            elif resolution == RESOLUTION_RADIX:
+                tail = _encode_shape(shape)
+            elif resolution in (RESOLUTION_RADIX_KEY, RESOLUTION_RADIX_ALL):
                 tail = shape
             if block_hash is None:
                 parts.append(expr_id + bytes([resolution]) + tail)
@@ -438,15 +568,15 @@ class StorageRequest:
                 pos += 32
             shape = b""
             if resolution == RESOLUTION_DYNAMIC:
-                length, pos = _read_varint(body, pos)
-                if pos + length > len(body):
-                    raise ValueError("STORAGE_GET truncated shape")
-                shape = bytes(body[pos : pos + length])
-                pos += length
+                shape, pos = _read_shape(body, pos)
                 parse_shape(shape)
-            elif resolution == RESOLUTION_RADIX:
+            elif resolution == RESOLUTION_RADIX_KEY:
                 start = pos
-                _, _, pos = read_radix_param(body, pos)
+                *_, pos = read_radix_key_param(body, pos)
+                shape = bytes(body[start:pos])
+            elif resolution == RESOLUTION_RADIX_ALL:
+                start = pos
+                _, pos = read_radix_all_param(body, pos)
                 shape = bytes(body[start:pos])
             entries.append((expr_id, resolution, block_hash, shape))
         if pos != len(body):

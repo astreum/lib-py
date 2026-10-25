@@ -19,9 +19,14 @@ from typing import TYPE_CHECKING, Optional
 from astreum.communication.storage_request.model import (
     SCOPED_GET_ENTRY_BYTES,
     get_entry_size,
-    parse_radix_param,
+    parse_radix_all_param,
+    parse_radix_key_param,
 )
-from astreum.expression.expr import RESOLUTION_DYNAMIC, RESOLUTION_RADIX
+from astreum.expression.expr import (
+    RESOLUTION_DYNAMIC,
+    RESOLUTION_RADIX_ALL,
+    RESOLUTION_RADIX_KEY,
+)
 from astreum.expression.shape import parse_shape
 from astreum.storage.requests import claim_expr_req, has_expr_req, pop_expr_req
 
@@ -171,16 +176,19 @@ def queue_storage_get(
         block_hash: Ask the provider of this block for *expr_id* (a scoped
             entry) instead of routing by *expr_id*.
         shape: The shape of a DYNAMIC (0) request, or the encoded radix param
-            of a RADIX (4) request. Empty for the other resolutions.
+            of a RADIX_KEY (4) or RADIX_ALL (5) request. Empty for the other
+            resolutions.
 
     Returns:
         bool: True if the GET was buffered or already exists, False if nowhere to send.
 
     Raises:
         ValueError: If the shape is malformed or longer than
-            ``storage_shape_max_bytes``, the radix param is malformed or its
-            key is longer than ``storage_radix_key_max_bytes``, or a shape is
-            given with a resolution other than DYNAMIC or RADIX.
+            ``storage_shape_max_bytes``, the radix param is malformed, its
+            key is longer than ``storage_radix_key_max_bytes`` or its value
+            shape is longer than ``storage_shape_max_bytes``, or a shape is
+            given with a resolution other than DYNAMIC, RADIX_KEY or
+            RADIX_ALL.
     """
     if resolution == RESOLUTION_DYNAMIC:
         parse_shape(shape)
@@ -189,15 +197,25 @@ def queue_storage_get(
                 f"shape is {len(shape)} bytes, the limit is "
                 f"{node.config.storage_shape_max_bytes}"
             )
-    elif resolution == RESOLUTION_RADIX:
-        _, key = parse_radix_param(shape)
-        if len(key) > node.config.storage_radix_key_max_bytes:
+    elif resolution in (RESOLUTION_RADIX_KEY, RESOLUTION_RADIX_ALL):
+        if resolution == RESOLUTION_RADIX_KEY:
+            _, key, value_shape = parse_radix_key_param(shape)
+            if len(key) > node.config.storage_radix_key_max_bytes:
+                raise ValueError(
+                    f"radix key is {len(key)} bytes, the limit is "
+                    f"{node.config.storage_radix_key_max_bytes}"
+                )
+        else:
+            value_shape = parse_radix_all_param(shape)
+        if len(value_shape) > node.config.storage_shape_max_bytes:
             raise ValueError(
-                f"radix key is {len(key)} bytes, the limit is "
-                f"{node.config.storage_radix_key_max_bytes}"
+                f"value shape is {len(value_shape)} bytes, the limit is "
+                f"{node.config.storage_shape_max_bytes}"
             )
     elif shape:
-        raise ValueError("a shape needs resolution 0 (DYNAMIC) or 4 (RADIX)")
+        raise ValueError(
+            "a shape needs resolution 0 (DYNAMIC), 4 (RADIX_KEY) or 5 (RADIX_ALL)"
+        )
     with node.storage_request_buffer_lock:
         if expr_id in node.storage_request_buffered:
             return True

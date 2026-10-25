@@ -12,13 +12,14 @@ from astreum.consensus.transaction.treasury.loans import (
     apply_treasury_loan_payments_from_stake_return,
 )
 from astreum.consensus.transaction.treasury.record import (
+    USER_RECORD_SHAPE,
     TreasuryUserRecord,
     load_user_record,
 )
 from astreum.consensus.models.accounts import Accounts
 from astreum.consensus.block.encoding.decode import get_block_from_storage
 from astreum.expression import RESOLUTION_FULL, ZERO32
-from astreum.storage.exprs import prefetch_exprs_from_network
+from astreum.storage.exprs import get_radix_all_from_network, prefetch_exprs_from_network
 
 
 SLOT_DURATION_SECONDS = 2
@@ -59,6 +60,16 @@ def current_validator(
 
     stakes: Dict[bytes, int] = {}
     treasury_user_records: Dict[bytes, TreasuryUserRecord] = {}
+    # Fetch the stake trie and the stake records in rounds of batched requests,
+    # not one request per node. The reads below then find them in local storage.
+    if stake_trie.root_hash and stake_trie.root_hash != ZERO32:
+        get_radix_all_from_network(
+            node,
+            stake_trie.root_hash,
+            USER_RECORD_SHAPE,
+            contact=contact,
+            block_hash=stake_trie.root_block,
+        )
     stake_entries = get_all_from_radix_tree_with_blocks(stake_trie, node)
     # Fetch the missing stake records in one batch per block, not one request
     # per account.

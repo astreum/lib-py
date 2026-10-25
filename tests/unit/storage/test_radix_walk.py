@@ -1,4 +1,4 @@
-"""``walk_radix``, the RADIX request on the client, and the ``local`` arg."""
+"""``walk_radix_key``, the RADIX request on the client, and the ``local`` arg."""
 
 from __future__ import annotations
 
@@ -12,13 +12,13 @@ for path in (ROOT, ROOT / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from astreum.communication.storage_request.model import parse_radix_param  # noqa: E402
-from astreum.expression import RESOLUTION_RADIX, bytes_  # noqa: E402
+from astreum.communication.storage_request.model import parse_radix_key_param  # noqa: E402
+from astreum.expression import RESOLUTION_RADIX_KEY, bytes_  # noqa: E402
 from astreum.expression.encoding import (  # noqa: E402
     decode_expr_from_bytes,
     encode_expr_to_bytes,
 )
-from astreum.storage.exprs import get_expr, get_radix_from_network  # noqa: E402
+from astreum.storage.exprs import get_expr, get_radix_key_from_network  # noqa: E402
 from astreum.storage.radix import (  # noqa: E402
     RadixTree,
     get_all_from_radix_tree,
@@ -26,7 +26,7 @@ from astreum.storage.radix import (  # noqa: E402
     get_radix_node_expr,
     put_in_radix_tree,
 )
-from astreum.storage.radix.tree.walk import walk_radix  # noqa: E402
+from astreum.storage.radix.tree.walk import walk_radix_key  # noqa: E402
 from tests.unit.storage.test_contact import QUEUE, _put, _store_node  # noqa: E402
 
 
@@ -56,11 +56,11 @@ class _Provider:
         def fake_queue(node, expr_id, resolution, *, contact=None, preclaimed=False,
                        block_hash=None, shape=b""):
             self.calls.append((expr_id, resolution))
-            if resolution == RESOLUTION_RADIX:
+            if resolution == RESOLUTION_RADIX_KEY:
                 if not self.answer_radix:
                     return False
-                offset, key = parse_radix_param(shape)
-                served = walk_radix(self.source, expr_id, key, offset)
+                offset, key, value_shape = parse_radix_key_param(shape)
+                served = walk_radix_key(self.source, expr_id, key, offset, value_shape)
             else:
                 expr = self.source.hot_storage.get(expr_id)
                 served = [] if expr is None else [expr]
@@ -81,7 +81,7 @@ class _Provider:
 
     @property
     def radix_calls(self) -> int:
-        return sum(1 for _, r in self.calls if r == RESOLUTION_RADIX)
+        return sum(1 for _, r in self.calls if r == RESOLUTION_RADIX_KEY)
 
 
 class TestWalkRadix(unittest.TestCase):
@@ -98,46 +98,46 @@ class TestWalkRadix(unittest.TestCase):
         return store
 
     def test_root_comes_first(self):
-        exprs = walk_radix(self.source, self.root, self.key, 0)
+        exprs = walk_radix_key(self.source, self.root, self.key, 0)
         self.assertEqual(exprs[0].hash(), self.root)
 
     def test_each_expr_is_sent_once(self):
-        exprs = walk_radix(self.source, self.root, self.key, 0)
+        exprs = walk_radix_key(self.source, self.root, self.key, 0)
         hashes = [e.hash() for e in exprs]
         self.assertEqual(len(hashes), len(set(hashes)))
 
     def test_the_key_is_found_from_the_exprs_alone(self):
         for key, value in self.values.items():
             with self.subTest(key=key):
-                store = self._fresh_with(walk_radix(self.source, self.root, key, 0))
+                store = self._fresh_with(walk_radix_key(self.source, self.root, key, 0))
                 got = get_from_radix_tree(RadixTree(root_hash=self.root), store, key, local=True)
                 self.assertEqual(got.hash(), value.hash())
 
     def test_the_walk_sends_less_than_the_whole_tree(self):
-        exprs = walk_radix(self.source, self.root, self.key, 0)
+        exprs = walk_radix_key(self.source, self.root, self.key, 0)
         self.assertLess(len(exprs), len(self.source.hot_storage))
 
     def test_a_key_that_is_not_in_the_tree_sends_the_nodes_it_passed(self):
-        exprs = walk_radix(self.source, self.root, b"\xfe" * 4, 0)
+        exprs = walk_radix_key(self.source, self.root, b"\xfe" * 4, 0)
         self.assertTrue(exprs)
         self.assertEqual(exprs[0].hash(), self.root)
 
     def test_nothing_is_sent_if_the_root_is_not_held(self):
-        self.assertEqual(walk_radix(self.source, b"\x09" * 32, self.key, 0), [])
+        self.assertEqual(walk_radix_key(self.source, b"\x09" * 32, self.key, 0), [])
 
     def test_an_offset_outside_the_key_sends_nothing(self):
-        self.assertEqual(walk_radix(self.source, self.root, self.key, 33), [])
+        self.assertEqual(walk_radix_key(self.source, self.root, self.key, 33), [])
 
     def test_the_walk_stops_at_a_node_that_is_not_held(self):
         tree = RadixTree(root_hash=self.root)
         get_from_radix_tree(tree, self.source, self.key, local=True)
         path = list(tree.nodes)
         self.assertGreaterEqual(len(path), 3)
-        full = [e.hash() for e in walk_radix(self.source, self.root, self.key, 0)]
+        full = [e.hash() for e in walk_radix_key(self.source, self.root, self.key, 0)]
         broken = _store_node()
         broken.hot_storage.update(self.source.hot_storage)
         del broken.hot_storage[path[1]]
-        cut = [e.hash() for e in walk_radix(broken, self.root, self.key, 0)]
+        cut = [e.hash() for e in walk_radix_key(broken, self.root, self.key, 0)]
         self.assertEqual(cut[0], self.root)
         self.assertLess(len(cut), len(full))
         self.assertNotIn(path[2], cut)
@@ -148,15 +148,15 @@ class TestWalkRadix(unittest.TestCase):
         path = list(tree.nodes)
         inner = tree.nodes[path[0]]
         offset = inner.key_len + 1
-        from_inner = walk_radix(self.source, path[1], self.key, offset)
-        full = {e.hash() for e in walk_radix(self.source, self.root, self.key, 0)}
+        from_inner = walk_radix_key(self.source, path[1], self.key, offset)
+        full = {e.hash() for e in walk_radix_key(self.source, self.root, self.key, 0)}
         self.assertEqual(from_inner[0].hash(), path[1])
         self.assertTrue({e.hash() for e in from_inner} <= full)
 
     def test_the_walk_does_not_use_the_network(self):
         self.source.is_connected = True
         with patch(QUEUE) as queue:
-            walk_radix(self.source, self.root, self.key, 0)
+            walk_radix_key(self.source, self.root, self.key, 0)
         queue.assert_not_called()
 
 
@@ -228,7 +228,7 @@ class TestClient(unittest.TestCase):
                 self.assertEqual(got.hash(), value.hash())
                 sent = provider.calls[before:]
                 self.assertLessEqual(len(sent), 1, msg=key.hex())
-                self.assertTrue(all(r == RESOLUTION_RADIX for _, r in sent))
+                self.assertTrue(all(r == RESOLUTION_RADIX_KEY for _, r in sent))
 
     def test_a_node_whose_root_is_held_but_cells_are_not_is_requested(self):
         root_expr = self.source.hot_storage[self.root]
@@ -269,12 +269,12 @@ class TestClient(unittest.TestCase):
     def test_a_key_longer_than_the_limit_is_refused(self):
         self.requester.config.storage_radix_key_max_bytes = 2
         with self.assertRaises(ValueError):
-            get_radix_from_network(self.requester, self.root, b"\x01" * 3, 0)
+            get_radix_key_from_network(self.requester, self.root, b"\x01" * 3, 0)
 
     def test_a_node_that_is_held_is_not_requested(self):
         with _Provider(self.source, self.requester) as provider:
             self.requester.hot_storage.update(self.source.hot_storage)
-            get_radix_from_network(self.requester, self.root, self.key, 0)
+            get_radix_key_from_network(self.requester, self.root, self.key, 0)
         self.assertEqual(provider.calls, [])
 
 

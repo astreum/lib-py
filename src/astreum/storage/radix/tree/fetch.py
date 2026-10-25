@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
 
-from astreum.storage.exprs import get_expr, get_radix_from_network
+from astreum.storage.exprs import get_expr, get_radix_key_from_network
 from astreum.storage.radix.node import RadixNode, get_radix_node_from_storage
 from astreum.storage.radix.tree.model import RadixTree
 
@@ -25,7 +25,7 @@ def fetch_node_from_radix_tree(
 
     A reader that looks up *key* passes it with *key_pos*, the number of key
     bits that earlier nodes matched. If the whole node is not in local storage,
-    one RADIX request then fetches it with the nodes on the way to the key, and
+    one RADIX_KEY request then fetches it with the nodes on the way to the key, and
     the reads that follow find them in local storage. A node that does not arrive
     that way is fetched as without a key.
 
@@ -48,7 +48,7 @@ def fetch_node_from_radix_tree(
 
     scope = {} if block is None else {"block_hash": block}
     if key is not None and len(key) <= astreum_node.config.storage_radix_key_max_bytes:
-        get_radix_from_network(
+        get_radix_key_from_network(
             astreum_node, h, key, key_pos, contact=tree.contact, **scope
         )
     if get_expr(astreum_node, h, contact=tree.contact, **scope) is None:
