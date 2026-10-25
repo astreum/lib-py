@@ -69,6 +69,8 @@ def _node(peers=(), synced=True):
         peers_lock=threading.RLock(),
         index_requests=[],
         index_requests_lock=threading.Lock(),
+        put_requests=[],
+        put_requests_lock=threading.Lock(),
         index_requested=False,
         latest_block=object() if synced else None,
     )
@@ -300,6 +302,8 @@ class TestReplyUsesTrieCheck(unittest.TestCase):
             "astreum.storage.admission.get_latest_storage_account", return_value=None
         ):
             put_handle.handle_storage_request(requester, sender, message)
+            queued_peer, queued_request = requester.put_requests.pop(0)
+            put_handle.handle_put(requester, queued_peer, queued_request)
         self.assertEqual(requester.storage_index, {})
 
 

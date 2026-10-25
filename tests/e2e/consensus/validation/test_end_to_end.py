@@ -533,7 +533,7 @@ class TestEndToEnd(unittest.TestCase):
         from types import SimpleNamespace
 
         from astreum.communication.storage_request.code import StorageRequestCode
-        from astreum.communication.storage_request.handle import _handle_put
+        from astreum.communication.storage_request.handle import handle_put
         from astreum.communication.storage_request.model import StorageRequest
         from astreum.storage.admission import is_expr_in_latest_block
 
@@ -558,7 +558,7 @@ class TestEndToEnd(unittest.TestCase):
             entries=[(expr_id, 4) for expr_id in inner],
         )
         before = dict(self.node.storage_index)
-        ok, reason = _handle_put(self.node, peer, request)
+        ok, reason = handle_put(self.node, peer, request)
         self.assertFalse(ok)
         self.assertIn("no exprs committed", reason)
         self.assertEqual(self.node.storage_index, before)

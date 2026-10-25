@@ -316,6 +316,32 @@ def _serve_one_index_request(node: "Node") -> bool:
     return True
 
 
+def _serve_one_put(node: "Node") -> bool:
+    """Handle one queued ``STORAGE_PUT``.
+
+    The message thread queues each put. This function runs the admission
+    check, the indexing, the record fetch and the forward on the loop thread.
+    The loop thread does not receive replies, so it can wait on the network.
+
+    Args:
+        node: A Node instance.
+
+    Returns:
+        True if more puts remain in the queue, False otherwise.
+    """
+    from astreum.communication.storage_request.handle import handle_put
+
+    with node.put_requests_lock:
+        if not node.put_requests:
+            return False
+        peer, request = node.put_requests.pop(0)
+    ok, reason = handle_put(node, peer, request)
+    if not ok:
+        node.logger.debug("STORAGE_PUT from %s not handled: %s", peer.address, reason)
+    with node.put_requests_lock:
+        return bool(node.put_requests)
+
+
 def _index_handoff_step(node: "Node", timer: SelfLookupTimer) -> bool:
     """Run one index handoff step: the walk, our request, then one reply.
 
@@ -352,7 +378,9 @@ def advertise_storage(astreum_node: "Node") -> None:
     seconds: entries missing from the records table are fetched and written
     to cold storage plus the records table. Fresh-expr advertisement happens
     at block creation via ``advertise_exprs(entries=...)``. The periodic
-    re-advertise loop was removed.
+    re-advertise loop was removed. The loop also handles one queued
+    ``STORAGE_PUT`` per turn, because the message thread must not wait on the
+    network.
 
     The thread exits when you set ``communication_stop_event``.
 
@@ -389,6 +417,7 @@ def advertise_storage(astreum_node: "Node") -> None:
     next_prune_at = now + prune_interval if prune_interval > 0 else None
     next_announce_at = now if getattr(astreum_node, "is_storage_provider", False) else None
     next_index_at = now
+    next_put_at = now
     timer = SelfLookupTimer()
 
     while not stop.is_set():
@@ -427,6 +456,14 @@ def advertise_storage(astreum_node: "Node") -> None:
                 more = False
             next_index_at = now if more else now + 1.0
 
+        if now >= next_put_at:
+            try:
+                more = _serve_one_put(astreum_node)
+            except Exception as exc:
+                astreum_node.logger.exception("Storage put step failed: %s", exc)
+                more = False
+            next_put_at = now if more else now + 1.0
+
         if next_prune_at is not None and now >= next_prune_at:
             try:
                 removed = prune_expired_expr_reqs(astreum_node)
@@ -445,6 +482,7 @@ def advertise_storage(astreum_node: "Node") -> None:
                 next_prune_at,
                 next_announce_at,
                 next_index_at,
+                next_put_at,
             )
             if d is not None
         ]

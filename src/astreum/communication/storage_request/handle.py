@@ -67,15 +67,18 @@ def _collect_for_resolution(expr, desired: int) -> list:
     return [expr]
 
 
-# Max records fetched inline (in the message-handling thread) per received
+# Max records fetched inline (in the ``advertise_storage`` loop) per handled
 # STORAGE_PUT; the rest drain through the long-term store loop.
 BATCH_INLINE_FETCH_LIMIT = 8
 
 
-def _handle_put(
+def handle_put(
     node: "Node", peer: "Peer", storage_request: StorageRequest
 ) -> tuple[bool, str | None]:
     """Handle a STORAGE_PUT request by indexing and forwarding entries.
+
+    This function waits on the network. The ``advertise_storage`` loop calls
+    it for each queued put. The message thread must not call it.
 
     Args:
         node (Node): The node instance handling the request.
@@ -477,7 +480,9 @@ def handle_storage_request(node: "Node", peer: "Peer", message: Message) -> tupl
                 len(storage_request.entries or []),
                 peer.address,
             )
-            return _handle_put(node, peer, storage_request)
+            with node.put_requests_lock:
+                node.put_requests.append((peer, storage_request))
+            return True, None
 
         case StorageRequestCode.STORAGE_INDEX_REQUEST:
             node.logger.debug("Queued STORAGE_INDEX_REQUEST from %s", peer.address)

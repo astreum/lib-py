@@ -1,5 +1,6 @@
 import queue
 import sys
+import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -67,6 +68,8 @@ def _make_node(peers=(), budget=DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES):
         storage_index={},
         storage_providers=[],
         is_storage_provider=False,
+        put_requests=[],
+        put_requests_lock=threading.Lock(),
     )
 
 
@@ -334,7 +337,10 @@ class TestReceivePath(unittest.TestCase):
         ), patch(
             "astreum.storage.records.fetch_and_store_record", return_value=True
         ) as fetch:
-            result = put_handle.handle_storage_request(node, self.sender, message)
+            queued = put_handle.handle_storage_request(node, self.sender, message)
+            assert queued == (True, None), queued
+            peer, queued_request = node.put_requests.pop(0)
+            result = put_handle.handle_put(node, peer, queued_request)
         return result, fetch
 
     def test_admission_failure_does_not_fail_batch(self):
