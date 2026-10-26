@@ -95,7 +95,6 @@ class TestNonValidatorPeer(unittest.TestCase):
                 nodes={"validator": validator, "peer": peer},
             )
 
-    @unittest.expectedFailure
     def test_trusted_peer_has_a_head_block(self) -> None:
         # The ping handler sets ``latest_block = None`` on a new head hash and
         # nothing loads the block again.
