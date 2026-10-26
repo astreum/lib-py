@@ -4,6 +4,7 @@ import sys
 import threading
 import time as time_module
 import unittest
+import unittest.mock
 from types import SimpleNamespace
 
 sys.path.insert(0, "src")
@@ -17,7 +18,13 @@ from astreum.communication.models.handshake import build_handshake, parse_handsh
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.models.peer import Peer
 from astreum.communication.models.route import Route
+from astreum.communication.models.relay_endpoint import RelayEndpoint
 from astreum.communication.processors import incoming as incoming_processor
+from astreum.consensus.block.holders import (
+    block_holder,
+    init_block_holders,
+    record_block_holder,
+)
 from astreum.utils.config import NodeConfig
 
 WINDOW = 60
@@ -164,6 +171,43 @@ class TestKnownPeerHandshake(unittest.TestCase):
         self.assertNotEqual(self.peer.shared_key_bytes, old_shared)
         self.assertEqual(self.peer.handshake_timestamp, new_stamp)
         self.assertIs(old_route_peer, self.peer)
+
+    def _holder(self, relay_key):
+        init_block_holders(self.node)
+        record_block_holder(self.node, b"\x31" * 32, RelayEndpoint(relay_key, self.addr))
+
+    def test_key_change_updates_block_holders(self):
+        self._holder(self.remote.relay_public_key_bytes)
+        _restart(self.remote)
+        handle_handshake(self.node, self.addr, _handshake_from(self.remote, False))
+        self.assertEqual(
+            block_holder(self.node, b"\x31" * 32).relay_key,
+            self.remote.relay_public_key_bytes,
+        )
+        self.assertEqual(block_holder(self.node, b"\x31" * 32).address, self.addr)
+
+    def test_older_handshake_leaves_holders(self):
+        old_key = self.remote.relay_public_key_bytes
+        self._holder(old_key)
+        stored = self.peer.handshake_timestamp
+        _restart(self.remote)
+        handle_handshake(self.node, self.addr, build_handshake(self.remote, False, now=stored - 5))
+        self.assertEqual(block_holder(self.node, b"\x31" * 32).relay_key, old_key)
+
+    def test_same_key_leaves_holders(self):
+        old_key = self.remote.relay_public_key_bytes
+        self._holder(old_key)
+        handle_handshake(self.node, self.addr, _handshake_from(self.remote, False))
+        self.assertEqual(block_holder(self.node, b"\x31" * 32).relay_key, old_key)
+
+    def test_rejected_key_leaves_holders(self):
+        old_key = self.remote.relay_public_key_bytes
+        self._holder(old_key)
+        _restart(self.remote)
+        message = _handshake_from(self.remote, False)
+        with unittest.mock.patch.object(Peer, "set_relay_key", side_effect=ValueError("bad")):
+            handle_handshake(self.node, self.addr, message)
+        self.assertEqual(block_holder(self.node, b"\x31" * 32).relay_key, old_key)
 
     def test_older_relay_key_dropped(self):
         stored = self.peer.handshake_timestamp

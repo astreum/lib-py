@@ -83,6 +83,34 @@ def record_block_holder(node: Any, block_hash: bytes, contact: "RelayEndpoint") 
         return True
 
 
+def replace_holder_relay_key(node: Any, old_key: bytes, new_key: bytes) -> int:
+    """Change the relay key of every holder that has *old_key*.
+
+    A peer that restarts gets a new relay key. A request for a block goes to
+    the holder of that block, so the holder must carry the new key.
+
+    Args:
+        node: The node that holds the table.
+        old_key: The relay key that the peer had.
+        new_key: The relay key that the peer has now.
+
+    Returns:
+        The number of entries that changed. 0 if the node has no table.
+    """
+    holders = getattr(node, "block_holders", None)
+    if holders is None:
+        return 0
+    from astreum.communication.models.relay_endpoint import RelayEndpoint
+
+    changed = 0
+    with node.block_holders_lock:
+        for block_hash, endpoint in holders.items():
+            if endpoint.relay_key == old_key:
+                holders[block_hash] = RelayEndpoint(new_key, endpoint.address)
+                changed += 1
+    return changed
+
+
 def get_ping_holder(
     node: Any, block_hash: Optional[bytes], block: Any = None
 ) -> Optional["RelayEndpoint"]:

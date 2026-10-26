@@ -14,7 +14,7 @@ from astreum.communication.models.handshake import (
     verify_handshake,
 )
 from astreum.communication.models.ping import Ping
-from astreum.consensus.block.holders import get_ping_holder
+from astreum.consensus.block.holders import get_ping_holder, replace_holder_relay_key
 from astreum.communication.difficulty import message_difficulty
 
 if TYPE_CHECKING:
@@ -101,12 +101,14 @@ def handle_handshake(node: "Node", addr: Sequence[object], message: Message) -> 
                     peer_address,
                 )
                 return True
+            old_relay_key = existing_peer.relay_public_key_bytes
             try:
                 existing_peer.set_relay_key(
                     node.relay_secret_key, relay_key_bytes, handshake_timestamp
                 )
             except ValueError:
                 return True
+            replace_holder_relay_key(node, old_relay_key, relay_key_bytes)
             node.logger.info("Relay key changed for peer at %s", peer_address)
         elif handshake_timestamp > existing_peer.handshake_timestamp:
             existing_peer.handshake_timestamp = handshake_timestamp
