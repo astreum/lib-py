@@ -269,7 +269,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
             _hex(block.expr_id),
             exc,
         )
-        return False, "failed deriving scheduled validator"
+        return False, f"failed deriving scheduled validator: {exc}"
     if scheduled_validator != block.validator_public_key_bytes:
         node.logger.debug(
             "Block verify unscheduled validator block=%s expected=%s actual=%s",

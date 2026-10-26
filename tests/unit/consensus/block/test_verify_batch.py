@@ -24,7 +24,7 @@ CONTACT = object()
 
 
 class TestVerifyBatch(unittest.TestCase):
-    def _run(self, data_root, fetch_side_effect=None):
+    def _run(self, data_root, fetch_side_effect=None, validator_error=None):
         """Run verify up to the record. Return (result, calls in order)."""
         calls = mock.Mock()
         prev_block = SimpleNamespace(
@@ -58,6 +58,8 @@ class TestVerifyBatch(unittest.TestCase):
 
         def validator(*args, **kwargs):
             calls.validator(*args, **kwargs)
+            if validator_error is not None:
+                raise validator_error
             return block.validator_public_key_bytes, accounts
 
         def record(*args, **kwargs):
@@ -112,6 +114,15 @@ class TestVerifyBatch(unittest.TestCase):
         result, calls, _, _ = self._run(b"\x05" * 32, fetch_side_effect=ValueError("boom"))
         self.assertEqual(result, "reached the record")
         self.assertEqual(calls.fetch.call_count, 2)
+
+    def test_a_failed_validator_draw_puts_the_error_in_the_reason(self):
+        result, _, _, _ = self._run(
+            b"\x05" * 32, validator_error=ValueError("unable to load block header from storage")
+        )
+        self.assertEqual(
+            result,
+            (False, "failed deriving scheduled validator: unable to load block header from storage"),
+        )
 
 
 if __name__ == "__main__":
