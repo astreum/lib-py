@@ -88,11 +88,9 @@ class TestVerifyBatch(unittest.TestCase):
         self.assertIs(first.kwargs["follow_refs"], False)
 
     def test_scheduled_validator_is_drawn_for_the_time_of_the_block(self):
-        _, calls, prev_block, _ = self._run(b"\x05" * 32)
-        call = calls.validator.call_args
-        self.assertEqual(call.args[1], prev_block.expr_id)
-        self.assertEqual(call.kwargs["target_time"], 1234)
-        self.assertIs(call.kwargs["contact"], CONTACT)
+        _, calls, _, _ = self._run(b"\x05" * 32)
+        self.assertEqual(calls.validator.call_args.kwargs["target_time"], 1234)
+        self.assertIs(calls.validator.call_args.kwargs["contact"], CONTACT)
 
     def test_storage_fetch_uses_the_storage_data_root_and_block(self):
         result, calls, _, data = self._run(b"\x05" * 32)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import sys
 import threading
 import unittest
@@ -17,11 +16,12 @@ for path in (ROOT, ROOT / "src"):
 
 from astreum.consensus.block.encoding.decode import get_previous_block_hash_local  # noqa: E402
 from astreum.consensus.block.encoding.expr import get_block_expr  # noqa: E402
+from astreum.consensus.account.model import ACCOUNT_SHAPE  # noqa: E402
 from astreum.consensus.block.nonce import generate_block_nonce  # noqa: E402
+from astreum.consensus.transaction.storage.model import STORAGE_RECORD_SHAPE  # noqa: E402
 from astreum.consensus.validation import worker as worker_module  # noqa: E402
 from astreum.consensus.validation.genesis import create_genesis_block  # noqa: E402
 from astreum.consensus.validation.worker import (  # noqa: E402
-    _block_time,
     _walk_back,
     make_validation_worker,
 )
@@ -43,25 +43,6 @@ def _node(head=None, latest_block=None):
         block_spacing=2,
         nonce_time_ms=0,
     )
-
-
-class TestBlockTime(unittest.TestCase):
-    def test_time_is_at_least_one_spacing_after_the_parent(self):
-        parent = SimpleNamespace(timestamp=10**10)
-        self.assertEqual(_block_time(_node(), parent), 10**10 + 2)
-
-    def test_time_follows_the_clock_when_the_parent_is_old(self):
-        parent = SimpleNamespace(timestamp=100)
-        node = _node()
-        node.nonce_time_ms = 500
-        with mock.patch.object(worker_module.time, "time", return_value=1000.2):
-            self.assertEqual(_block_time(node, parent), math.ceil(1000.2 + 0.5 + 2))
-
-    def test_later_time_gives_more_slots(self):
-        parent = SimpleNamespace(timestamp=100)
-        with mock.patch.object(worker_module.time, "time", return_value=108.0):
-            late = _block_time(_node(), parent)
-        self.assertEqual(math.ceil((late - 100) / 2), 5)
 
 
 class TestWalkBack(unittest.TestCase):
@@ -130,7 +111,7 @@ class TestWorkerLoop(unittest.TestCase):
         node = _node(head=last_good)
         node.config = SimpleNamespace(validation_public_key_bytes=self.KEY)
         node._validation_stop_event = threading.Event()
-        parent = SimpleNamespace(timestamp=500, height=2)
+        parent = SimpleNamespace(timestamp=500, height=2, accounts_hash=_h(0x0A), expr_id=head)
         draws = []
 
         def draw(*args, **kwargs):
@@ -146,19 +127,12 @@ class TestWorkerLoop(unittest.TestCase):
         with mock.patch.object(worker_module, "flush_ads", side_effect=move_head), \
              mock.patch.object(worker_module, "block_holder", return_value=None), \
              mock.patch.object(worker_module, "get_block_from_storage", return_value=parent), \
+             mock.patch.object(worker_module, "_fetch_new_nodes"), \
              mock.patch.object(worker_module, "current_validator", side_effect=draw), \
              mock.patch.object(worker_module, "get_previous_block_hash_local", return_value=previous_hash), \
              mock.patch.object(worker_module.time, "sleep", side_effect=stop_after_sleep):
             make_validation_worker(node)()
         return node, draws, parent
-
-    def test_draw_gets_the_block_time(self):
-        def ok(args, kwargs):
-            return b"\x09" * 32, mock.Mock()
-
-        node, draws, parent = self._run(validator_side_effect=ok)
-        (args, kwargs), = draws
-        self.assertGreaterEqual(kwargs["target_time"], parent.timestamp + 2)
 
     def test_failed_load_walks_back_to_the_parent(self):
         def boom(args, kwargs):
@@ -180,6 +154,116 @@ class TestWorkerLoop(unittest.TestCase):
 
         node, _, _ = self._run(validator_side_effect=other, previous_hash=_h(1))
         self.assertEqual(node.latest_block_hash, _h(2))
+
+
+class TestWorkerBatchFetch(unittest.TestCase):
+    """The worker fetches the new nodes of the head in batches before it reads them."""
+
+    KEY = b"\x07" * 32
+    ACCOUNTS_ROOT = _h(0x0A)
+    STORAGE_ROOT = _h(0x0B)
+    STORAGE_BLOCK = _h(0x0C)
+
+    def _run(self, *, network_fails=False, parent_timestamp=500, now=1000.2):
+        """Run one pass of the loop as the scheduled validator.
+
+        The record walk ends the pass by raising ``UnresolvedRecordExpr``.
+
+        Returns:
+            The list of calls in order, as ``(name, args)``.
+        """
+        head = _h(2)
+        node = _node(head=head)
+        node.nonce_time_ms = 500
+        node.config = SimpleNamespace(validation_public_key_bytes=self.KEY)
+        node._validation_stop_event = threading.Event()
+        node._validation_transaction_queue = mock.Mock()
+        parent = SimpleNamespace(
+            timestamp=parent_timestamp,
+            height=2,
+            accounts_hash=self.ACCOUNTS_ROOT,
+            expr_id=head,
+            bloom_hash=ZERO32,
+        )
+        storage_account = SimpleNamespace(
+            data=SimpleNamespace(root_hash=self.STORAGE_ROOT, root_block=self.STORAGE_BLOCK)
+        )
+        new_block = SimpleNamespace(
+            height=3,
+            transactions=[],
+            receipts=[],
+            pending_exprs=[],
+            accounts=SimpleNamespace(get_account=lambda *a, **k: storage_account),
+        )
+        calls = []
+
+        def fetch(*args, **kwargs):
+            calls.append(("fetch", args))
+
+        def draw(*args, **kwargs):
+            calls.append(("draw", args))
+            self.draw_kwargs = kwargs
+            return self.KEY, mock.Mock()
+
+        def walk(*args, **kwargs):
+            calls.append(("walk", args))
+            raise worker_module.UnresolvedRecordExpr(_h(0x0D))
+
+        def stop_after_sleep(_seconds):
+            node._validation_stop_event.set()
+
+        with mock.patch.object(worker_module, "flush_ads"), \
+             mock.patch.object(worker_module, "block_holder", return_value="holder"), \
+             mock.patch.object(worker_module, "get_block_from_storage", return_value=parent), \
+             mock.patch.object(
+                 worker_module,
+                 "_fetch_new_nodes",
+                 side_effect=None if network_fails else fetch,
+                 **({"wraps": worker_module._fetch_new_nodes} if network_fails else {}),
+             ), \
+             mock.patch(
+                 "astreum.consensus.block.verify.transactions.get_radix_all_from_network",
+                 side_effect=OSError("no peer"),
+             ), \
+             mock.patch.object(worker_module, "current_validator", side_effect=draw), \
+             mock.patch.object(worker_module, "_next_signed_transaction", side_effect=worker_module.Empty), \
+             mock.patch.object(worker_module, "create_block", return_value=new_block), \
+             mock.patch.object(worker_module, "generate_initial_storage_record", side_effect=walk), \
+             mock.patch("astreum.consensus.block.encoding.expr.get_block_expr"), \
+             mock.patch.object(worker_module, "_walk_back", return_value=None), \
+             mock.patch.object(worker_module.time, "time", return_value=now), \
+             mock.patch.object(worker_module.time, "sleep", side_effect=stop_after_sleep):
+            make_validation_worker(node)()
+        return calls
+
+    def test_accounts_batch_comes_before_the_draw(self):
+        calls = self._run()
+        self.assertEqual([name for name, _ in calls], ["fetch", "draw", "fetch", "walk"])
+        self.assertEqual(
+            calls[0][1],
+            (mock.ANY, self.ACCOUNTS_ROOT, ACCOUNT_SHAPE, _h(2), "holder"),
+        )
+
+    def test_storage_batch_comes_before_the_record_walk(self):
+        calls = self._run()
+        self.assertEqual(
+            calls[2][1],
+            (mock.ANY, self.STORAGE_ROOT, STORAGE_RECORD_SHAPE, self.STORAGE_BLOCK, "holder"),
+        )
+
+    def test_the_draw_is_for_the_time_the_block_will_carry(self):
+        # 1000.2 s now, 0.5 s to find the nonce, 2 s of spacing: ceil(1002.7).
+        self._run()
+        self.assertEqual(self.draw_kwargs["target_time"], 1003)
+        self.assertEqual(self.draw_kwargs["contact"], "holder")
+
+    def test_the_draw_time_is_at_least_one_spacing_after_the_parent(self):
+        self._run(parent_timestamp=2000)
+        self.assertEqual(self.draw_kwargs["target_time"], 2002)
+
+    def test_a_failed_batch_does_not_stop_the_build(self):
+        calls = self._run(network_fails=True)
+        self.assertEqual([name for name, _ in calls], ["draw", "walk"])
 
 
 if __name__ == "__main__":

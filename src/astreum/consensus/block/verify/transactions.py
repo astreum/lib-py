@@ -257,8 +257,8 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
     _fetch_new_nodes(node, prev_block.accounts_hash, ACCOUNT_SHAPE, prev_block.expr_id, block.contact)
 
     # Start from the same accounts the creator builds on: the previous state
-    # after the scheduled validator's stake has been halved. The creator calls
-    # current_validator with the time of the block, so this does too.
+    # after the scheduled validator's stake has been halved. The creator draws
+    # for the time the block carries, so this draws for the same time.
     try:
         scheduled_validator, accounts_snapshot = current_validator(
             node, prev_hash, target_time=block.timestamp, contact=block.contact

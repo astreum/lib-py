@@ -19,7 +19,12 @@ from astreum.consensus.block.encoding.decode import (
     get_previous_block_hash_local,
 )
 from astreum.consensus.transaction import Transaction, apply_transaction_obj
-from astreum.consensus.transaction.storage.model import storage_record_to_expr
+from astreum.consensus.account.model import ACCOUNT_SHAPE
+from astreum.consensus.block.verify.transactions import _fetch_new_nodes
+from astreum.consensus.transaction.storage.model import (
+    STORAGE_RECORD_SHAPE,
+    storage_record_to_expr,
+)
 from astreum.consensus.transaction.storage.initial import (
     UnresolvedRecordExpr,
     generate_initial_storage_record,
@@ -97,26 +102,6 @@ def included_transaction_exprs(node: Any, transactions: list) -> list:
             seen.add(h)
             collected.append(expr)
     return collected
-
-
-def _block_time(node: Any, previous_block: Block) -> int:
-    """Return the timestamp for the block built on ``previous_block``.
-
-    The schedule draws the validator from this time, and the block carries
-    it, so the verifier draws the same validator.
-
-    Args:
-        node: The node that builds the block.
-        previous_block: The parent block.
-
-    Returns:
-        The block timestamp in whole seconds.
-    """
-    spacing = node.block_spacing
-    min_allowed = previous_block.timestamp + spacing
-    nonce_time_seconds = node.nonce_time_ms / 1000.0
-    expected_blocktime = time.time() + nonce_time_seconds + spacing
-    return max(math.ceil(expected_blocktime), min_allowed)
 
 
 def _walk_back(node: Any, failed_hash: bytes, last_good_head: bytes | None) -> bytes | None:
@@ -287,7 +272,26 @@ def make_validation_worker(
                 previous_block = get_block_from_storage(
                     astreum_node=node, block_hash=latest_block_hash, contact=head_holder
                 )
-                block_time = _block_time(node, previous_block)
+                # The draw reads the accounts trie of the head next. Fetch what
+                # is new in the head in rounds of batched requests, not one
+                # request per expr.
+                _fetch_new_nodes(
+                    node,
+                    previous_block.accounts_hash,
+                    ACCOUNT_SHAPE,
+                    previous_block.expr_id,
+                    head_holder,
+                )
+                # The draw is for the time the block carries, so the verifier
+                # draws the same validator from the block timestamp.
+                block_time = max(
+                    math.ceil(
+                        time.time()
+                        + node.nonce_time_ms / 1000.0
+                        + node.block_spacing
+                    ),
+                    previous_block.timestamp + node.block_spacing,
+                )
                 scheduled_validator, accounts_snapshot = current_validator(
                     node,
                     latest_block_hash,
@@ -361,6 +365,15 @@ def make_validation_worker(
                 # including the tries its header names by root hash. Those
                 # were fetched from its holder, so they are stored here too.
                 previous_block_exprs: dict[bytes, Any] = {}
+                # The walk reads the storage trie next. Fetch what is new in
+                # it in rounds of batched requests, as the verifier does.
+                _fetch_new_nodes(
+                    node,
+                    storage_account.data.root_hash,
+                    STORAGE_RECORD_SHAPE,
+                    storage_account.data.root_block,
+                    head_holder,
+                )
                 try:
                     result = generate_initial_storage_record(
                         node,
@@ -615,6 +628,22 @@ def make_validation_worker(
             for pending_expr in pending_exprs:
                 put_expr_in_cold_storage(node, pending_expr)
 
+            # Another block may have become the head while this one was built.
+            # This block extends the old head, so it is dropped then and not
+            # announced.
+            with node.latest_block_lock:
+                still_parent = node.latest_block_hash == latest_block_hash
+                if still_parent:
+                    node.latest_block_hash = new_block_hash
+                    node.latest_block = new_block
+            if not still_parent:
+                node.logger.warning(
+                    "Block #%s dropped; the head moved while it was built",
+                    new_block.height,
+                )
+                continue
+            last_good_head = new_block_hash
+
             _announce_block(node, new_block)
             queue_ads(node, new_block.height, new_block_hash, storage_ids)
 
@@ -677,10 +706,6 @@ def make_validation_worker(
                         except Exception:
                             node.logger.exception("Failed queueing validator ping to %s", address)
 
-            with node.latest_block_lock:
-                node.latest_block_hash = new_block_hash
-                node.latest_block = new_block
-            last_good_head = new_block_hash
 
         node.logger.info("Validation worker stopped")
 

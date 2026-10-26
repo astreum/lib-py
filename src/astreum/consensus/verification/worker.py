@@ -112,6 +112,30 @@ def _scan_peer_heads(node: Any) -> None:
             fork.peers = set(peer_ids)
 
 
+def _current_head_height(node: Any, head_hash: Any) -> int | None:
+    """Return the height of the node head, or None when it cannot be read.
+
+    Args:
+        node: The node.
+        head_hash: The head hash.
+
+    Returns:
+        The height, or None when the head is not set or does not load.
+    """
+    if not isinstance(head_hash, (bytes, bytearray)):
+        return None
+    with node.latest_block_lock:
+        block = node.latest_block
+    if block is None or block.expr_id != head_hash:
+        try:
+            block = get_block_from_storage(
+                astreum_node=node, block_hash=head_hash, contact=block_holder(node, head_hash)
+            )
+        except Exception:
+            return None
+    return block.height
+
+
 def _select_latest_block(node: Any) -> None:
     """Select the latest verified block as the chain head.
 
@@ -126,6 +150,9 @@ def _select_latest_block(node: Any) -> None:
     now = int(time.time())
     with node.latest_block_lock:
         current_head = node.latest_block_hash
+    # A peer reports its head with a delay, so the only fork with peers can
+    # be older than the head of this node. The head never moves to a lower one.
+    current_height = _current_head_height(node, current_head)
 
     best_head = None
     best_block = None
@@ -156,6 +183,8 @@ def _select_latest_block(node: Any) -> None:
         if max_future >= 0 and (ts_int - now) > max_future:
             continue
         height = block.height
+        if current_height is not None and height < current_height:
+            continue
         if height > best_height:
             best_head = head
             best_block = block
@@ -175,6 +204,8 @@ def _select_latest_block(node: Any) -> None:
     if best_head is None or best_block is None:
         return
     with node.latest_block_lock:
+        if node.latest_block_hash != current_head:
+            return
         if node.latest_block_hash != best_head:
             node.latest_block_hash = best_head
             node.latest_block = best_block

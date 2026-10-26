@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import time
 from dataclasses import replace
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -34,6 +35,8 @@ def current_validator(
     """Return the scheduled validator for the block after *block_hash*.
 
     Also returns the accounts to build it on (that validator's stake halved).
+    *target_time* is the time the block is drawn for. It is the current time
+    when it is None. Each 2 seconds after the parent block is one slot.
     *contact* is the ``RelayEndpoint`` of the peer holding
     *block_hash*'s uncommitted state. Every fetch made here goes to it.
     """
@@ -43,7 +46,7 @@ def current_validator(
         raise ValueError("block timestamp missing")
 
     block_timestamp = block.timestamp
-    target_timestamp = int(target_time) if target_time is not None else block_timestamp + 1
+    target_timestamp = int(target_time) if target_time is not None else int(time.time())
     if target_timestamp <= block_timestamp:
         target_timestamp = block_timestamp + 1
 
