@@ -382,7 +382,8 @@ def make_validation_worker(
                         follow_refs=True,
                         collected=previous_block_exprs,
                     )
-                except UnresolvedRecordExpr as exc:
+                except (UnresolvedRecordExpr, ValueError) as exc:
+                    # ValueError: a storage trie node could not be read.
                     node.logger.warning(
                         "Cannot build block #%s: %s", new_block.height, exc
                     )

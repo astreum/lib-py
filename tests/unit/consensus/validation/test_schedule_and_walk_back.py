@@ -164,7 +164,7 @@ class TestWorkerBatchFetch(unittest.TestCase):
     STORAGE_ROOT = _h(0x0B)
     STORAGE_BLOCK = _h(0x0C)
 
-    def _run(self, *, network_fails=False, parent_timestamp=500, now=1000.2):
+    def _run(self, *, network_fails=False, parent_timestamp=500, now=1000.2, walk_error=None):
         """Run one pass of the loop as the scheduled validator.
 
         The record walk ends the pass by raising ``UnresolvedRecordExpr``.
@@ -207,7 +207,7 @@ class TestWorkerBatchFetch(unittest.TestCase):
 
         def walk(*args, **kwargs):
             calls.append(("walk", args))
-            raise worker_module.UnresolvedRecordExpr(_h(0x0D))
+            raise walk_error or worker_module.UnresolvedRecordExpr(_h(0x0D))
 
         def stop_after_sleep(_seconds):
             node._validation_stop_event.set()
@@ -230,10 +230,11 @@ class TestWorkerBatchFetch(unittest.TestCase):
              mock.patch.object(worker_module, "create_block", return_value=new_block), \
              mock.patch.object(worker_module, "generate_initial_storage_record", side_effect=walk), \
              mock.patch("astreum.consensus.block.encoding.expr.get_block_expr"), \
-             mock.patch.object(worker_module, "_walk_back", return_value=None), \
+             mock.patch.object(worker_module, "_walk_back", return_value=None) as walk_back, \
              mock.patch.object(worker_module.time, "time", return_value=now), \
              mock.patch.object(worker_module.time, "sleep", side_effect=stop_after_sleep):
             make_validation_worker(node)()
+        self.walk_back = walk_back
         return calls
 
     def test_accounts_batch_comes_before_the_draw(self):
@@ -264,6 +265,15 @@ class TestWorkerBatchFetch(unittest.TestCase):
     def test_a_failed_batch_does_not_stop_the_build(self):
         calls = self._run(network_fails=True)
         self.assertEqual([name for name, _ in calls], ["draw", "walk"])
+
+    def test_an_unresolved_expr_walks_back(self):
+        self._run()
+        self.walk_back.assert_called_once()
+
+    def test_an_unreadable_storage_node_walks_back_and_keeps_the_thread(self):
+        error = ValueError("could not retrieve Radix node expr from storage")
+        self._run(walk_error=error)
+        self.walk_back.assert_called_once()
 
 
 if __name__ == "__main__":
