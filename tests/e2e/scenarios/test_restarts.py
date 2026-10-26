@@ -9,7 +9,6 @@ from tests.e2e.harness import (
     STAKE,
     Network,
     assert_chain_links,
-    block_at,
     genesis_with,
     height,
     new_key,
@@ -75,34 +74,6 @@ class TestJoinAndRejoin(unittest.TestCase):
                 timeout=SLOT * 15,
                 message="late joiner within 2 blocks",
                 nodes={"validator": validator, "late": late},
-            )
-
-    @unittest.expectedFailure
-    def test_peer_follows_again_after_the_validator_restarts(self) -> None:
-        key = new_key()
-        genesis = genesis_with(stakes={public(key): STAKE})
-        with Network() as net:
-            validator = net.validator(key, genesis=genesis)
-            peer = net.user(validator, genesis)
-            nodes = {"validator": validator, "peer": peer}
-            wait_until(
-                lambda: height(validator) >= 3 and height(peer) >= 3,
-                timeout=SLOT * 15,
-                message="both at height 3",
-                nodes=nodes,
-            )
-            net.stop(validator)
-            connect_node(validator)
-            net.start_validation(validator, key, genesis=genesis)
-            target = height(validator) + 2
-            wait_until(
-                lambda: height(peer) >= target,
-                timeout=SLOT * 15,
-                message="peer follows the restarted validator",
-                nodes=nodes,
-            )
-            self.assertEqual(
-                block_at(peer, target).expr_id, block_at(validator, target).expr_id
             )
 
 

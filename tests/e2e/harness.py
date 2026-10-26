@@ -32,7 +32,10 @@ from astreum.consensus.models.accounts import Accounts  # noqa: E402
 from astreum.consensus.models.receipt import Receipt  # noqa: E402
 from astreum.consensus.transaction import create_transaction  # noqa: E402
 from astreum.consensus.transaction.code import TransactionCode  # noqa: E402
-from astreum.consensus.transaction.treasury.record import TreasuryUserRecord  # noqa: E402
+from astreum.consensus.transaction.treasury.record import (  # noqa: E402
+    TreasuryUserRecord,
+    load_user_record,
+)
 from astreum.consensus.validation import node as validation_node  # noqa: E402
 from astreum.consensus.validation.node import validate_blockchain  # noqa: E402
 from astreum.consensus.verification.node import verify_blockchain  # noqa: E402
@@ -413,6 +416,13 @@ def balance(node: Node, addr: bytes, block=None) -> int:
     """Return the balance of ``addr``. A missing account counts as 0."""
     found = account(node, addr, block)
     return 0 if found is None else found.balance
+
+
+def stake(node: Node, key: Ed25519PrivateKey, block=None) -> int:
+    """Return the stake of the validator ``key``. A missing record counts as 0."""
+    treasury = account(node, TREASURY_ADDRESS, block)
+    record = load_user_record(node, treasury.data, public(key))
+    return 0 if record is None else record.balance
 
 
 def transfer(node: Node, key: Ed25519PrivateKey, counter: int, to: bytes, amount: int, **kw):
