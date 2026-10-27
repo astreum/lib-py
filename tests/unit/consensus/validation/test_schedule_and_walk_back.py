@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import itertools
 import sys
 import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -42,6 +44,8 @@ def _node(head=None, latest_block=None):
         latest_block_lock=threading.Lock(),
         block_spacing=2,
         nonce_time_ms=0,
+        build_time_ms=0,
+        previous_build_time_ms=0,
     )
 
 
@@ -253,9 +257,9 @@ class TestWorkerBatchFetch(unittest.TestCase):
         )
 
     def test_the_draw_is_for_the_time_the_block_will_carry(self):
-        # 1000.2 s now, 0.5 s to find the nonce, 2 s of spacing: ceil(1002.7).
+        # 1000.2 s now and 1 s of estimate after a parent at 500: slot 251 ends at 1002.
         self._run()
-        self.assertEqual(self.draw_kwargs["target_time"], 1003)
+        self.assertEqual(self.draw_kwargs["target_time"], 1002)
         self.assertEqual(self.draw_kwargs["contact"], "holder")
 
     def test_the_draw_time_is_at_least_one_spacing_after_the_parent(self):
@@ -274,6 +278,133 @@ class TestWorkerBatchFetch(unittest.TestCase):
         error = ValueError("could not retrieve Radix node expr from storage")
         self._run(walk_error=error)
         self.walk_back.assert_called_once()
+
+
+class TestWorkerBuildTime(unittest.TestCase):
+    """The worker measures each build and uses the measure for the next block time."""
+
+    KEY = b"\x07" * 32
+    BUILD_SECONDS = 20
+
+    def _run(self, *, passes=1, scheduled=None, build_time_ms=0, previous_build_time_ms=0):
+        """Run ``passes`` passes of the loop with a clock the nonce search advances.
+
+        Each pass reads 1000.2 s as the time of the draw and 2000.0 s as the time
+        of the stale check, so a block that is built is dropped as stale.
+
+        Returns:
+            The node and the list of draw target times.
+        """
+        head = _h(2)
+        node = _node(head=head)
+        node.build_time_ms = build_time_ms
+        node.previous_build_time_ms = previous_build_time_ms
+        node.config = SimpleNamespace(
+            validation_public_key_bytes=self.KEY,
+            validation_secret_key=mock.Mock(),
+        )
+        node._validation_stop_event = threading.Event()
+        node._validation_transaction_queue = mock.Mock()
+        parent = SimpleNamespace(
+            timestamp=500,
+            height=2,
+            accounts_hash=_h(0x0A),
+            expr_id=head,
+            bloom_hash=ZERO32,
+            difficulty=1,
+        )
+        account = SimpleNamespace(
+            data=SimpleNamespace(root_hash=_h(0x0B), root_block=_h(0x0C), nodes={}),
+            balance=0,
+        )
+        new_block = SimpleNamespace(
+            height=3,
+            transactions=[],
+            receipts=[],
+            pending_exprs=[],
+            receipts_trie=None,
+            nonce=0,
+            bloom_hash=ZERO32,
+            accounts=SimpleNamespace(
+                get_account=lambda *a, **k: account,
+                pending_exprs=[],
+                update_trie=lambda _node: _h(0x0E),
+                _trie=SimpleNamespace(nodes={}),
+                _cache={},
+            ),
+        )
+        clock = [100.0]
+        targets = []
+        flushes = [0]
+        times = itertools.cycle([1000.2, 2000.0])
+
+        main_thread = threading.get_ident()
+        real_time = time.time
+        real_perf_counter = time.perf_counter
+
+        def fake_time():
+            # Threads that earlier tests left running must not use up the cycle.
+            if threading.get_ident() != main_thread:
+                return real_time()
+            return next(times)
+
+        def fake_perf_counter():
+            if threading.get_ident() != main_thread:
+                return real_perf_counter()
+            return clock[0]
+
+        def flush(_node):
+            flushes[0] += 1
+            if flushes[0] >= passes:
+                node._validation_stop_event.set()
+
+        def draw(*args, **kwargs):
+            targets.append(kwargs["target_time"])
+            return (scheduled or self.KEY), mock.Mock()
+
+        def search(**kwargs):
+            clock[0] += self.BUILD_SECONDS
+
+        with mock.patch.object(worker_module, "flush_ads", side_effect=flush), \
+             mock.patch.object(worker_module, "block_holder", return_value=None), \
+             mock.patch.object(worker_module, "get_block_from_storage", return_value=parent), \
+             mock.patch.object(worker_module, "_fetch_new_nodes"), \
+             mock.patch.object(worker_module, "current_validator", side_effect=draw), \
+             mock.patch.object(worker_module, "_next_signed_transaction", side_effect=worker_module.Empty), \
+             mock.patch.object(worker_module, "create_block", return_value=new_block), \
+             mock.patch.object(worker_module, "generate_initial_storage_record", return_value=None), \
+             mock.patch.object(worker_module, "BloomTree", mock.MagicMock()), \
+             mock.patch.object(worker_module, "included_transaction_exprs", return_value=[]), \
+             mock.patch.object(worker_module, "update_statistics"), \
+             mock.patch.object(worker_module, "extract_accounts_exprs", return_value=[]), \
+             mock.patch.object(worker_module, "calculate_block_difficulty", return_value=1), \
+             mock.patch.object(worker_module, "generate_block_nonce", side_effect=search), \
+             mock.patch("astreum.consensus.block.encoding.expr.get_block_expr"), \
+             mock.patch.object(worker_module.time, "perf_counter", side_effect=fake_perf_counter), \
+             mock.patch.object(worker_module.time, "time", side_effect=fake_time), \
+             mock.patch.object(worker_module.time, "sleep"):
+            make_validation_worker(node)()
+        return node, targets
+
+    def test_build_time_is_stored_before_the_stale_check(self):
+        node, _ = self._run(build_time_ms=7000)
+        self.assertEqual(node.build_time_ms, self.BUILD_SECONDS * 1000)
+        self.assertEqual(node.previous_build_time_ms, 7000)
+        self.assertIn("already elapsed", node.logger.warning.call_args[0][0])
+
+    def test_next_attempt_uses_the_stored_build_time(self):
+        # The first pass has no history: the estimate is 1 s and the slot ends at 1002.
+        # The second pass has 20 s: the estimate is 21 s and slot 261 ends at 1022.
+        node, targets = self._run(passes=2)
+        self.assertEqual(targets, [1002, 1022])
+        self.assertEqual(node.build_time_ms, self.BUILD_SECONDS * 1000)
+
+    def test_early_exit_does_not_change_the_build_time(self):
+        node, _ = self._run(
+            scheduled=b"\x08" * 32, build_time_ms=7000, previous_build_time_ms=5000
+        )
+        self.assertEqual(node.build_time_ms, 7000)
+        self.assertEqual(node.previous_build_time_ms, 5000)
 
 
 if __name__ == "__main__":

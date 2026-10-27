@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import time
 from queue import Empty
 from typing import Any, Callable
@@ -32,7 +31,11 @@ from astreum.consensus.transaction.storage.initial import (
 from astreum.storage.radix import get_radix_node_expr, put_in_radix_tree
 from astreum.storage.records import put_record_in_cold_storage
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
-from astreum.consensus.validation.validator import current_validator
+from astreum.consensus.validation.validator import (
+    current_validator,
+    estimate_build_seconds,
+    next_block_time,
+)
 from astreum.consensus.validation.ads import flush_ads, queue_ads
 from astreum.consensus.validation.peers import validator_peers
 from astreum.consensus.block.holders import block_holder, get_ping_holder
@@ -283,21 +286,23 @@ def make_validation_worker(
                     head_holder,
                 )
                 # The draw is for the time the block carries, so the verifier
-                # draws the same validator from the block timestamp.
-                block_time = max(
-                    math.ceil(
-                        time.time()
-                        + node.nonce_time_ms / 1000.0
-                        + node.block_spacing
+                # draws the same validator from the block timestamp. The time is
+                # the end of the first slot the build can finish in.
+                block_time = next_block_time(
+                    previous_block.timestamp,
+                    time.time(),
+                    estimate_build_seconds(
+                        node.build_time_ms, node.previous_build_time_ms
                     ),
-                    previous_block.timestamp + node.block_spacing,
                 )
+                build_started = time.perf_counter()
                 scheduled_validator, accounts_snapshot = current_validator(
                     node,
                     latest_block_hash,
                     target_time=block_time,
                     contact=head_holder,
                 )
+                drawn_at = time.perf_counter()
             except Exception as exc:
                 node.logger.exception("Unable to determine current validator: %s", exc)
                 step_back(latest_block_hash, last_good_head)
@@ -407,6 +412,7 @@ def make_validation_worker(
 
             # The state of the head loaded, so a later failure can walk back to it.
             last_good_head = latest_block_hash
+            records_at = time.perf_counter()
 
             offset = new_block.height % ERA_SIZE
             if offset == 0 and new_block.height > 0:
@@ -442,6 +448,8 @@ def make_validation_worker(
                     current_tx = _next_signed_transaction(node)
                 except Empty:
                     current_tx = None
+
+            transactions_at = time.perf_counter()
 
             # Peers fetch an included transaction's body from this validator
             # (nothing else holds it yet, and the queue only keeps it in
@@ -549,6 +557,7 @@ def make_validation_worker(
             except Exception:
                 node.logger.exception("Failed to update accounts trie for block")
 
+            trie_at = time.perf_counter()
 
             # The timestamp is the time the scheduled validator was drawn for.
             new_block.timestamp = block_time
@@ -566,7 +575,8 @@ def make_validation_worker(
                     difficulty=previous_block.difficulty,
                     sign=node.config.validation_secret_key.sign,
                 )
-                elapsed_ms = int((time.perf_counter() - nonce_started) * 1000)
+                nonce_done = time.perf_counter()
+                elapsed_ms = int((nonce_done - nonce_started) * 1000)
                 setattr(node, "nonce_time_ms", elapsed_ms)
                 node.logger.debug(
                     "Found nonce %s for block #%s at difficulty %s",
@@ -578,7 +588,22 @@ def make_validation_worker(
                 node.logger.exception("Failed while searching for block nonce")
                 time.sleep(0.5)
                 continue
-            
+
+            # The build time is kept even when the block is dropped below, so
+            # the next attempt picks a later slot.
+            node.previous_build_time_ms = node.build_time_ms
+            node.build_time_ms = int((nonce_done - build_started) * 1000)
+            node.logger.info(
+                "Built block #%s in %d ms: draw=%d records=%d transactions=%d trie=%d nonce=%d",
+                new_block.height,
+                node.build_time_ms,
+                (drawn_at - build_started) * 1000,
+                (records_at - drawn_at) * 1000,
+                (transactions_at - records_at) * 1000,
+                (trie_at - transactions_at) * 1000,
+                elapsed_ms,
+            )
+
             now = time.time()
             if now > (new_block.timestamp + 2):
                 node.logger.warning(

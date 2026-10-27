@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import random
 import time
 from dataclasses import replace
@@ -24,6 +25,51 @@ from astreum.storage.exprs import get_radix_all_from_network, prefetch_exprs_fro
 
 
 SLOT_DURATION_SECONDS = 2
+BUILD_MARGIN_SECONDS = 1
+
+
+def estimate_build_seconds(last_ms: int, previous_ms: int) -> float:
+    """Estimate how long the next block build takes.
+
+    The estimate is the last build time, plus the growth since the build before
+    it, plus a fixed margin. Only positive growth counts, because a build that
+    ran too long costs a whole block and a build that waits costs only time.
+
+    Args:
+        last_ms: Time of the last build in milliseconds. 0 when unknown.
+        previous_ms: Time of the build before the last one in milliseconds.
+            0 when unknown.
+
+    Returns:
+        The estimated build time in seconds.
+    """
+    growth = max(0, last_ms - previous_ms) if previous_ms > 0 else 0
+    return (last_ms + growth) / 1000 + BUILD_MARGIN_SECONDS
+
+
+def next_block_time(
+    parent_timestamp: int,
+    now: float,
+    estimate_seconds: float,
+    slot: int = SLOT_DURATION_SECONDS,
+) -> int:
+    """Pick the end of the first slot in which a block can be ready.
+
+    Slot ``k`` ends ``k * slot`` seconds after the parent block. Every
+    timestamp inside one slot draws the same validator.
+
+    Args:
+        parent_timestamp: Timestamp of the parent block.
+        now: The current time in seconds.
+        estimate_seconds: Estimated build time in seconds.
+        slot: Slot length in seconds.
+
+    Returns:
+        A timestamp at least one slot after the parent and not before
+        ``now + estimate_seconds``.
+    """
+    slots = max(1, math.ceil((now + estimate_seconds - parent_timestamp) / slot))
+    return parent_timestamp + slots * slot
 
 
 def current_validator(

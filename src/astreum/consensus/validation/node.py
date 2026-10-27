@@ -71,6 +71,8 @@ def validate_blockchain(self, validation_secret_key: Ed25519PrivateKey):
             self.latest_block = None
 
     self.nonce_time_ms = 0
+    self.build_time_ms = 0
+    self.previous_build_time_ms = 0
     self.block_spacing = 2
     
     self.logger.info(
