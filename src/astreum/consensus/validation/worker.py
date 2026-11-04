@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from astreum.consensus.account import create_account
 from astreum.consensus.block.rate_window import update_statistics
+from astreum.consensus.block.reward import fee_income, validator_reward
 from astreum.expression import link_list_to_expr, resolve_inner_exprs, resolve_list_exprs
 from astreum.storage.exprs import put_expr_in_hot_storage
 from astreum.storage.cold import put_expr_in_cold_storage
@@ -469,14 +470,13 @@ def make_validation_worker(
 
             total_transaction_fee = sum(r.transaction_fee for r in new_block.receipts)
             total_storage_fee = sum(r.storage_fee for r in new_block.receipts)
-            total_fee = sum(r.total_fee for r in new_block.receipts)
 
             new_block.total_transaction_fee = total_transaction_fee
             new_block.total_storage_fee = total_storage_fee
 
             treasury_account = new_block.accounts.get_account(TREASURY_ADDRESS, node)
 
-            delta_fee = total_transaction_fee + total_storage_fee
+            delta_fee = fee_income(new_block.receipts)
             delta_stake = treasury_account.balance
             new_block.statistics = update_statistics(
                 new_block.height,
@@ -486,13 +486,13 @@ def make_validation_worker(
                 new_block.storage_claim_count,
             )
 
-            reward_amount = total_fee if total_fee > 0 else 1
-            if total_fee == 0 and queue_empty:
-                node.logger.debug("Awarding base validator reward of 1 aster")
-            elif total_fee > 0:
+            reward_amount = validator_reward(new_block.receipts)
+            if not new_block.receipts and queue_empty:
+                node.logger.debug("Awarding base validator reward of %d aster", reward_amount)
+            elif new_block.receipts:
                 node.logger.debug(
-                    "Collected %d aster in total fees for this block (tx=%d storage=%d)",
-                    total_fee,
+                    "Awarding %d aster in fees for this block (tx=%d storage=%d to the storage account)",
+                    reward_amount,
                     total_transaction_fee,
                     total_storage_fee,
                 )

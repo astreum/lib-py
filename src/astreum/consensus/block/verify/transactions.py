@@ -10,6 +10,7 @@ from astreum.storage.exprs import (
     prefetch_exprs_from_network,
 )
 from astreum.consensus.block.rate_window import update_statistics
+from astreum.consensus.block.reward import fee_income, validator_reward
 from astreum.storage.radix import RadixTree, get_from_radix_tree, put_in_radix_tree
 from astreum.consensus.models.accounts import Accounts
 from astreum.consensus.account.model import ACCOUNT_SHAPE
@@ -386,7 +387,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
     total_fee = sum(r.total_fee for r in work_block.receipts)
 
     # Award validator reward (replicating block builder)
-    reward_amount = total_fee if total_fee > 0 else 1
+    reward_amount = validator_reward(work_block.receipts)
     validator_key = getattr(block, "validator_public_key_bytes", None)
     if validator_key:
         try:
@@ -595,7 +596,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         return False, "missing treasury account"
     treasury_balance = treasury_account.balance or 0
 
-    delta_fee = total_transaction_fee + total_storage_fee
+    delta_fee = fee_income(work_block.receipts)
     delta_stake = treasury_balance
     expected_statistics = update_statistics(
         block.height,

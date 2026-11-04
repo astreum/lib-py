@@ -74,6 +74,8 @@ from astreum.storage.radix import (  # noqa: E402
 )
 from astreum.storage.records import fetch_and_store_record, get_record_from_cold_storage  # noqa: E402
 from tests.e2e.consensus.validation.test_verify_stake_halving import _free_port  # noqa: E402
+from tests.e2e.harness import balance, receipt, tx_hashes  # noqa: E402
+from astreum.consensus.block.rate_window import update_statistics  # noqa: E402
 from astreum.expression.helpers import get_expr_builtin_tag
 
 STAKE = 8
@@ -584,6 +586,52 @@ class TestEndToEnd(unittest.TestCase):
         for block in self.chain[1:-1]:
             ok, reason = verify_block_transactions(self.node, block)
             self.assertTrue(ok, f"height {block.height}: {reason}")
+
+    def _fees(self, block):
+        receipts = [receipt(self.node, block, h) for h in tx_hashes(self.node, block)]
+        paid = sum(r.transaction_fee + r.data_fee for r in receipts)
+        return max(paid, 1), sum(r.storage_fee for r in receipts)
+
+    def test_the_fee_total_grows_by_each_blocks_fee_income(self) -> None:
+        for parent, block in zip(self.chain, self.chain[1:]):
+            reward, storage_fee = self._fees(block)
+            self.assertEqual(
+                block.cumulative_total_fee - parent.cumulative_total_fee,
+                reward + storage_fee,
+                f"height {block.height}",
+            )
+
+    def test_the_validator_is_paid_the_transaction_and_data_fees(self) -> None:
+        for parent, block in zip(self.chain, self.chain[1:]):
+            reward, _ = self._fees(block)
+            key = block.validator_public_key_bytes
+            # The halving moves the returned stake from the treasury to the validator.
+            returned = balance(self.node, TREASURY_ADDRESS, parent) - balance(
+                self.node, TREASURY_ADDRESS, block
+            )
+            gained = balance(self.node, key, block) - balance(self.node, key, parent)
+            self.assertEqual(gained, reward + returned, f"height {block.height}")
+
+    def test_a_block_with_the_old_fee_income_is_rejected(self) -> None:
+        block = next(
+            b for b in self.chain[1:-1] if b.transactions_hash == ZERO32
+        )
+        parent = block.previous_block
+        stats = block.statistics
+        # The old rule added nothing for an empty block.
+        block.statistics = update_statistics(
+            block.height,
+            parent.statistics,
+            0,
+            block.cumulative_stake - parent.cumulative_stake,
+            stats[0][2] - parent.statistics[0][2],
+        )
+        try:
+            ok, reason = verify_block_transactions(self.node, block)
+        finally:
+            block.statistics = stats
+        self.assertFalse(ok)
+        self.assertEqual(reason, "statistics mismatch")
 
     def test_every_block_keeps_storage_difficulty_zero(self) -> None:
         for block in self.chain:
