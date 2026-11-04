@@ -44,6 +44,7 @@ from astreum.consensus.models.accounts import Accounts  # noqa: E402
 from astreum.consensus.transaction.treasury.record import TreasuryUserRecord  # noqa: E402
 from astreum.consensus.validation import node as validation_node  # noqa: E402
 from astreum.consensus.validation.node import validate_blockchain  # noqa: E402
+from astreum.consensus.validation.validator import SLOT_DURATION_SECONDS  # noqa: E402
 from astreum.expression import ZERO32, resolve_inner_exprs  # noqa: E402
 from astreum.expression.encoding import decode_expr_from_bytes, encode_expr_to_bytes  # noqa: E402
 from astreum.crypto.merkle import create_merkle_tree  # noqa: E402
@@ -202,7 +203,16 @@ class TestVerifyStakeHalving(unittest.TestCase):
 
         gets: list[tuple[bytes, object]] = []
 
-        def validator_answers(node, expr_id, resolution, *, contact=None, preclaimed=False):
+        def validator_answers(
+            node,
+            expr_id,
+            resolution,
+            *,
+            contact=None,
+            preclaimed=False,
+            block_hash=None,
+            shape=b"",
+        ):
             gets.append((expr_id, contact))
             expr = get_expr_from_local_storage(self.node, expr_id)
             if expr is None:
@@ -232,11 +242,19 @@ class TestVerifyStakeHalving(unittest.TestCase):
 
     def test_first_block_halved_the_stake(self) -> None:
         # Guards the test itself: the blocks above only exercise the fix if the
-        # creator really halved the stake.
+        # creator really halved the stake. The stake halves once for each
+        # slot between the parent and the block, so a block that comes later
+        # than the next slot halves it more than once.
         first = self.chain[0]
+        delta = first.timestamp - first.previous_block.timestamp
+        slots = max(1, (delta + SLOT_DURATION_SECONDS - 1) // SLOT_DURATION_SECONDS)
+        stake = STAKE
+        for _ in range(slots):
+            stake = max(1, stake // 2)
+        self.assertLess(stake, STAKE)
         accounts = Accounts(root_hash=first.accounts_hash)
         treasury = accounts.get_account(TREASURY_ADDRESS, self.node)
-        self.assertEqual(treasury.balance, STAKE // 2)
+        self.assertEqual(treasury.balance, stake)
 
     def test_unscheduled_validator_is_rejected(self) -> None:
         forged = copy.copy(self.chain[0])
@@ -254,7 +272,7 @@ class TestVerifyStakeHalving(unittest.TestCase):
         # must fail, proving the halving is what makes verification pass.
         first = self.chain[0]
 
-        def plain(node, prev_hash, contact=None):
+        def plain(node, prev_hash, target_time=None, contact=None):
             return (
                 first.validator_public_key_bytes,
                 Accounts(root_hash=first.previous_block.accounts_hash),
