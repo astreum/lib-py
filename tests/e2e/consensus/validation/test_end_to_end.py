@@ -311,11 +311,13 @@ class Provider:
             }
         )
         node.is_connected = True
+        node.expr_requests = {}
+        node.expr_requests_lock = threading.RLock()
         node._provider_dir = directory
         self.remotes.append(node)
         return node
 
-    def answer(self, node, expr_id, resolution, *, contact=None, preclaimed=False, block_hash=None):
+    def answer(self, node, expr_id, resolution, *, contact=None, preclaimed=False, block_hash=None, shape=b""):
         if block_hash is None:
             self.unscoped.append(expr_id)
             return False
