@@ -96,7 +96,7 @@ class TreasuryUserRecord:
     # the block writing this record: the root is written as a stored ref.
     loans_root_block: Optional[bytes] = field(default=None, compare=False)
     guarantees_root_block: Optional[bytes] = field(default=None, compare=False)
-    _expr: Optional[Expr] = field(default=None, repr=False, compare=False)
+    _expr: Optional[Expr] = field(default=None, init=False, repr=False, compare=False)
 
     def to_expr(self) -> Expr:
         """Build (without caching) this record's canonical `Expr` encoding.
@@ -333,7 +333,7 @@ class TreasuryLoanRecord:
     insurance_fee: int = 0
     missed_count: int = 0
     owner: bytes = TREASURY_ADDRESS
-    _expr: Optional[Expr] = field(default=None, repr=False, compare=False)
+    _expr: Optional[Expr] = field(default=None, init=False, repr=False, compare=False)
 
     def to_expr(self) -> Expr:
         """Convert loan record to expression.
@@ -458,7 +458,7 @@ class TreasuryGuarantee:
     price: int
     expiry: int
     claimed_by: bytes = ZERO32
-    _expr: Optional[Expr] = field(default=None, repr=False, compare=False)
+    _expr: Optional[Expr] = field(default=None, init=False, repr=False, compare=False)
 
     def to_expr(self) -> Expr:
         """Build (without caching) this guarantee's canonical `Expr` encoding.

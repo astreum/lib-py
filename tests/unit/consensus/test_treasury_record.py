@@ -1,6 +1,7 @@
 import sys
 import unittest
 import threading
+from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -42,6 +43,13 @@ class _FakeNode:
 
 
 class TestTreasuryRecord(unittest.TestCase):
+    def test_a_replaced_record_encodes_its_own_fields(self):
+        record = TreasuryUserRecord(balance=500)
+        record.expr()
+        updated = replace(record, balance=250)
+        self.assertEqual(updated.expr().hash(), TreasuryUserRecord(balance=250).expr().hash())
+        self.assertNotEqual(updated.expr().hash(), record.expr().hash())
+
     def test_to_expr_uses_expected_field_order(self):
         loans_root_hash = b"\x01" * 32
         guarantees_root_hash = b"\x02" * 32

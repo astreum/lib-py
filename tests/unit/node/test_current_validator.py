@@ -26,6 +26,7 @@ from astreum.consensus.validation import validator as validator_module
 from astreum.consensus.block.nonce import generate_block_nonce
 from astreum.consensus.block.encoding.expr import get_block_expr
 from tests.e2e.harness import genesis_with
+from astreum.consensus.transaction.treasury.record import load_user_record
 
 
 class TestNodeValidator(unittest.TestCase):
@@ -107,6 +108,51 @@ class TestTwoValidators(unittest.TestCase):
         }
         self.assertEqual(drawn, {self.key_a, self.key_b})
         self.assertIn(first, drawn)
+
+
+class TestMultiSlotHalving(unittest.TestCase):
+    """A gap of several slots halves the stake once for each slot, in the trie too."""
+
+    TIMESTAMP = 1_000_000
+    STAKE = 1 << 20
+
+    def setUp(self) -> None:
+        self.node = Node()
+        self.key = b"\x0a" * 32
+        block = genesis_with(
+            stakes={self.key: self.STAKE}, timestamp=self.TIMESTAMP
+        )(self.node, self.key)
+        block.accounts.update_trie(self.node)
+        generate_block_nonce(block=block, difficulty=1)
+        self.block_hash = get_block_expr(block).hash()
+        block_exprs, _ = resolve_inner_exprs(self.node, get_block_expr(block))
+        for e in extract_accounts_exprs(block.accounts):
+            put_expr_in_hot_storage(self.node, e)
+        for e in block_exprs:
+            put_expr_in_hot_storage(self.node, e)
+
+    def _after(self, slots: int):
+        _, accounts = current_validator(
+            self.node, self.block_hash, target_time=self.TIMESTAMP + 2 * slots
+        )
+        for e in accounts.pending_exprs:
+            put_expr_in_hot_storage(self.node, e)
+        treasury = accounts.get_account(TREASURY_ADDRESS, self.node)
+        record = load_user_record(self.node, treasury.data, self.key)
+        return treasury, record, accounts.get_account(self.key, self.node)
+
+    def test_the_stake_record_halves_once_for_each_slot(self) -> None:
+        for slots in range(1, 6):
+            _, record, _ = self._after(slots)
+            self.assertEqual(record.balance, self.STAKE >> slots, f"slots={slots}")
+
+    def test_the_treasury_balance_follows_the_stake_record(self) -> None:
+        for slots in range(1, 6):
+            treasury, record, validator = self._after(slots)
+            self.assertEqual(treasury.balance, record.balance, f"slots={slots}")
+            self.assertEqual(
+                treasury.balance + validator.balance, self.STAKE, f"slots={slots}"
+            )
 
 
 if __name__ == "__main__":

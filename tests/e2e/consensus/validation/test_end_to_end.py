@@ -522,10 +522,14 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(keys - {SEED_ID}, blocks)
 
     def test_slots_per_record_stay_flat_over_empty_blocks(self) -> None:
+        # The record of a block that follows a block with transactions is about
+        # 60 slots larger, so compare only empty blocks that follow an empty one.
         empty = [
             len(_slot_ids(get_record_from_cold_storage(self.node, b.expr_id)))
-            for b in self.chain[:-1]
-            if b.height >= 3 and b.transactions_hash == ZERO32
+            for parent, b in zip(self.chain, self.chain[1:-1])
+            if b.height >= 3
+            and b.transactions_hash == ZERO32
+            and parent.transactions_hash == ZERO32
         ]
         self.assertGreaterEqual(len(empty), 2, "no empty blocks to compare")
         self.assertLess(max(empty), 1000, empty)
