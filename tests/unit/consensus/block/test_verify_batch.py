@@ -41,7 +41,7 @@ class TestVerifyBatch(unittest.TestCase):
             chain_id=0,
             height=4,
             timestamp=1234,
-            difficulty=1,
+            validation_difficulty=1,
             contact=CONTACT,
         )
         data = SimpleNamespace(root_hash=data_root, root_block=b"\x0d" * 32)

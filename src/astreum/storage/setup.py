@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +68,6 @@ def setup_storage(node: Any, config: NodeConfig) -> None:
     from astreum.consensus.block.holders import init_block_holders
 
     init_block_holders(node)
-    node.claim_spacing_eras = {}
     node.cold_storage_lock = threading.RLock()
     node.hot_storage_lock = threading.RLock()
     node.hot_storage_size = 0
@@ -101,6 +101,10 @@ def setup_storage(node: Any, config: NodeConfig) -> None:
         node.is_storage_provider = False
     node.long_term_storage_interval = config.long_term_storage_interval
     node.long_term_cursor = 0
+    node.storage_claim_band = config.storage_claim_band or 1
+    node.storage_claim_hash_rate = config.storage_claim_hash_rate
+    node.storage_claim_inclusion_delay = config.storage_claim_inclusion_delay or 1
+    node.new_record_ids = deque() if node.is_storage_provider else None
 
     node.logger.info(
         "Storage ready (hot_limit=%s bytes, cold_limit=%s bytes, cold_path=%s, storage_fetch_interval=%s, storage_fetch_retries=%s)",

@@ -431,6 +431,8 @@ class TestClaimWorkerGate(unittest.TestCase):
             is_storage_provider=provider,
             communication_stop_event=threading.Event(),
             latest_block=None,
+            storage_claim_band=1,
+            storage_claim_hash_rate=5.0,
             logger=_silent_logger(),
         )
 

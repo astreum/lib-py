@@ -24,10 +24,10 @@ class TestBlockNonce(unittest.TestCase):
             accounts_hash=ZERO32,
             total_transaction_fee=0,
             total_storage_fee=0,
-            statistics=[(1, 1, 0, 0)],
+            statistics=[(1, 1, 0, 0, 0, 0)],
             transactions_hash=None,
             receipts_hash=None,
-            difficulty=1,
+            validation_difficulty=1,
             validator_public_key_bytes=None,
             nonce=0,
         )

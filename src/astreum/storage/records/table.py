@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Iterable, Iterator
 
 from astreum.expression import Expr
-from astreum.storage.cold.get import get_expr_from_cold_storage
+from astreum.storage.cold.get import get_expr_from_cold_storage, get_exprs_from_cold_storage
 from astreum.storage.cold.insert import put_expr_in_cold_storage
 from astreum.storage.cold.iter import iter_exprs_in_cold_storage
 
@@ -27,17 +27,23 @@ def put_record_in_cold_storage(node: "Node", storage_id: bytes, slot_ids: list[b
 
     Returns:
         True on success, False if cold storage is disabled or an
-        I/O error occurs.
+        I/O error occurs. After a write, ``storage_id`` is appended to
+        ``node.new_record_ids`` when the node has that attribute.
     """
     value = b"".join(slot_ids)
     store = Expr("bytes", value=value)
-    return put_expr_in_cold_storage(
+    written = put_expr_in_cold_storage(
         node,
         store,
         table="records",
         size_attr="records_level_0_size",
         key=storage_id,
     )
+    if written:
+        new_record_ids = getattr(node, "new_record_ids", None)
+        if new_record_ids is not None:
+            new_record_ids.append(storage_id)
+    return written
 
 
 def get_record_from_cold_storage(node: "Node", storage_id: bytes) -> bytes | None:
@@ -60,7 +66,22 @@ def get_record_from_cold_storage(node: "Node", storage_id: bytes) -> bytes | Non
     return expr.value
 
 
-def iter_records_in_cold_storage(node: "Node") -> Iterator[bytes]:
+def get_records_from_cold_storage(node: "Node", storage_ids: Iterable[bytes]) -> dict[bytes, bytes]:
+    """Return the raw concat value blobs for many records under one lock.
+
+    Args:
+        node: A Node instance providing ``config`` and ``cold_storage_lock``.
+        storage_ids: The 32-byte keys of the records.
+
+    Returns:
+        A ``storage_id -> slot-id blob`` map holding only the records that
+        are found.
+    """
+    exprs = get_exprs_from_cold_storage(node, storage_ids, table="records")
+    return {key: expr.value for key, expr in exprs.items()}
+
+
+def iter_records_in_cold_storage(node: "Node", batch: int | None = None) -> Iterator[bytes]:
     """Yield record hashes (keys) in the records table, one at a time.
 
     The lock is held only for each segment read (never across the whole
@@ -69,8 +90,10 @@ def iter_records_in_cold_storage(node: "Node") -> Iterator[bytes]:
 
     Args:
         node: A Node instance providing ``config`` and ``cold_storage_lock``.
+        batch: Entries read per lock hold for each index file, or ``None``
+            to read a whole file per lock hold.
 
     Yields:
         The 32-byte record hash of each stored record.
     """
-    yield from iter_exprs_in_cold_storage(node, table="records")
+    yield from iter_exprs_in_cold_storage(node, table="records", batch=batch)

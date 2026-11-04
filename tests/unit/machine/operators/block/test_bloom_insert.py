@@ -32,7 +32,7 @@ def _make_tx(hash_val=None, sender=None, recipient=None):
 
 def _make_block(height=100, previous_block=None):
     if previous_block is None:
-        prev_stats = (1_000_000, 1_000_000, 0, 0)
+        prev_stats = (1_000_000, 1_000_000, 0, 0, 0, 0)
         previous_block = type('Prev', (), {
             'statistics': [prev_stats],
             'cumulative_total_fee': prev_stats[0],

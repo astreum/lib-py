@@ -85,9 +85,9 @@ def get_block_from_storage(
         raise ValueError(
             f"unable to resolve block body (missed={[h.hex()[:8] for h in missed]})"
         )
-    if len(body_nodes) != 18:
+    if len(body_nodes) != 19:
         raise ValueError(
-            f"malformed block body length (got={len(body_nodes)}, expected=18)"
+            f"malformed block body length (got={len(body_nodes)}, expected=19)"
         )
 
     (
@@ -97,12 +97,13 @@ def get_block_from_storage(
         accounts_link,
         bloom_link,
         chain_id_node,
-        difficulty_node,
+        validation_difficulty_node,
         height_node,
         nonce_node,
         prev_link,
         previous_era_link,
         receipts_link,
+        storage_difficulty_node,
         timestamp_node,
         total_storage_fee_node,
         total_transaction_fee_node,
@@ -123,8 +124,8 @@ def get_block_from_storage(
         raise ValueError("expected Link for bloom_hash")
     if not get_expr_tag(chain_id_node, astreum_node, contact, block_hash) == "int":
         raise ValueError("expected Int for chain_id")
-    if not get_expr_tag(difficulty_node, astreum_node, contact, block_hash) == "int":
-        raise ValueError("expected Int for difficulty")
+    if not get_expr_tag(validation_difficulty_node, astreum_node, contact, block_hash) == "int":
+        raise ValueError("expected Int for validation_difficulty")
     if not get_expr_tag(height_node, astreum_node, contact, block_hash) == "int":
         raise ValueError("expected Int for height")
     if not get_expr_tag(nonce_node, astreum_node, contact, block_hash) == "int":
@@ -135,6 +136,8 @@ def get_block_from_storage(
         raise ValueError("expected Link for previous_era_hash")
     if not get_expr_tag(receipts_link, astreum_node, contact, block_hash) == "link":
         raise ValueError("expected Link for receipts_hash")
+    if not get_expr_tag(storage_difficulty_node, astreum_node, contact, block_hash) == "int":
+        raise ValueError("expected Int for storage_difficulty")
     if not get_expr_tag(timestamp_node, astreum_node, contact, block_hash) == "int":
         raise ValueError("expected Int for timestamp")
     if not get_expr_tag(total_storage_fee_node, astreum_node, contact, block_hash) == "int":
@@ -161,10 +164,11 @@ def get_block_from_storage(
                 raise ValueError(
                     f"unable to resolve statistics entry {j} (missed={[h.hex()[:8] for h in missed]})"
                 )
-            if j == 0 and len(int_nodes) == 2:
-                statistics.append((get_expr_value(int_nodes[0], astreum_node, contact, block_hash), get_expr_value(int_nodes[1], astreum_node, contact, block_hash), 0, 0))
-            elif len(int_nodes) == 4:
-                statistics.append((get_expr_value(int_nodes[0], astreum_node, contact, block_hash), get_expr_value(int_nodes[1], astreum_node, contact, block_hash), get_expr_value(int_nodes[2], astreum_node, contact, block_hash), get_expr_value(int_nodes[3], astreum_node, contact, block_hash)))
+            if j == 0 and len(int_nodes) == 3:
+                fee, stake, claims = (get_expr_value(n, astreum_node, contact, block_hash) for n in int_nodes)
+                statistics.append((fee, stake, claims, 0, 0, 0))
+            elif j > 0 and len(int_nodes) == 6:
+                statistics.append(tuple(get_expr_value(n, astreum_node, contact, block_hash) for n in int_nodes))
             else:
                 raise ValueError(
                     f"invalid statistics entry {j} length (got={len(int_nodes)})"
@@ -185,7 +189,8 @@ def get_block_from_storage(
         total_storage_fee=get_expr_value(total_storage_fee_node, astreum_node, contact, block_hash),
         transactions_hash=get_expr_head_hash(transactions_link),
         receipts_hash=get_expr_head_hash(receipts_link),
-        difficulty=get_expr_value(difficulty_node, astreum_node, contact, block_hash),
+        validation_difficulty=get_expr_value(validation_difficulty_node, astreum_node, contact, block_hash),
+        storage_difficulty=get_expr_value(storage_difficulty_node, astreum_node, contact, block_hash),
         validator_public_key_bytes=get_expr_value(validator_node, astreum_node, contact, block_hash),
         nonce=get_expr_value(nonce_node, astreum_node, contact, block_hash),
         bloom_hash=get_expr_head_hash(bloom_link),
@@ -237,7 +242,7 @@ def get_previous_block_hash_local(astreum_node: Any, block_hash: bytes) -> bytes
         if missed or len(inner_nodes) != 2:
             return None
         body_nodes, missed = resolve_list_exprs(astreum_node, inner_nodes[0], local=True)
-        if missed or len(body_nodes) != 18:
+        if missed or len(body_nodes) != 19:
             return None
         # Position 9 of the body is the previous block link.
         return get_expr_head_hash(body_nodes[9])

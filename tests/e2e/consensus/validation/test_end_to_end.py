@@ -183,10 +183,10 @@ class Fixture:
             accounts_hash=root,
             total_transaction_fee=0,
             total_storage_fee=0,
-            statistics=[(1, STAKE, 0, 0)],
+            statistics=[(1, STAKE, 0, 0, 0, 0)],
             transactions_hash=ZERO32,
             receipts_hash=ZERO32,
-            difficulty=0,
+            validation_difficulty=0,
             validator_public_key_bytes=validator_public_key,
             nonce=0,
             signature=b"",
@@ -578,6 +578,32 @@ class TestEndToEnd(unittest.TestCase):
         for block in self.chain[1:-1]:
             ok, reason = verify_block_transactions(self.node, block)
             self.assertTrue(ok, f"height {block.height}: {reason}")
+
+    def test_every_block_keeps_storage_difficulty_zero(self) -> None:
+        for block in self.chain:
+            self.assertEqual(block.storage_difficulty, 0, f"height {block.height}")
+        self.assertEqual(self.chain[0].statistics[0][2], 0)
+        self.assertEqual(self.chain[-1].statistics[0][2], 1)
+
+    def test_a_block_with_a_wrong_storage_difficulty_is_rejected(self) -> None:
+        block = self.chain[2]
+        block.storage_difficulty = 1
+        try:
+            ok, reason = verify_block_transactions(self.node, block)
+        finally:
+            block.storage_difficulty = 0
+        self.assertFalse(ok)
+        self.assertEqual(reason, "storage difficulty mismatch")
+
+    def test_a_genesis_block_with_a_storage_difficulty_is_rejected(self) -> None:
+        genesis = self.chain[0]
+        genesis.storage_difficulty = 1
+        try:
+            ok, reason = verify_block_transactions(self.node, genesis)
+        finally:
+            genesis.storage_difficulty = 0
+        self.assertFalse(ok)
+        self.assertEqual(reason, "genesis storage difficulty mismatch")
 
     def test_a_node_holding_nothing_verifies_the_blocks_with_transactions(self) -> None:
         with Provider(self.node) as provider:

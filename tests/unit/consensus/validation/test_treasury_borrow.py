@@ -65,7 +65,7 @@ class TestTreasuryBorrow(unittest.TestCase):
         )
         # Seed statistics so range 8 (idx 3) is available.
         entries = self.prev_block.height.bit_length() or 1
-        self.prev_block.statistics = [(CTF, STAKE, 0, 0)] * max(entries, 5)
+        self.prev_block.statistics = [(CTF, STAKE, 0, 0, 0, 0)] * max(entries, 5)
         self.block = make_block(self.node, self.prev_block, height=1)
         seed_storage_account(self.block)
 

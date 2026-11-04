@@ -20,6 +20,11 @@ _THREAD_ATTRS: tuple[str, ...] = (
     "verify_thread",
     "consensus_validation_thread",
 )
+_CLAIM_STATE_ATTRS: tuple[str, ...] = (
+    "storage_claim_band",
+    "storage_claim_hash_rate",
+    "storage_claim_inclusion_delay",
+)
 
 
 def _set_event(node: "Node", attr_name: str) -> None:
@@ -54,13 +59,18 @@ def _close_socket(node: "Node", attr_name: str) -> None:
         node.logger.warning("Error closing %s: %s", attr_name, exc)
 
 
-def disconnect_node(node: "Node") -> None:
+def disconnect_node(node: "Node") -> dict:
     """Gracefully stop worker threads and close communication sockets.
 
     Args:
         node (Node): The node to disconnect.
 
-    Returns: None
+    Returns:
+        A dict with the claim worker values after the threads stop. The keys
+        are ``storage_claim_band``, ``storage_claim_hash_rate`` and
+        ``storage_claim_inclusion_delay``. A missing attribute gives ``None``.
+        The caller can save the dict and give it back as config at the next
+        start.
     """
     node.logger.info("Disconnecting Astreum Node")
 
@@ -79,3 +89,4 @@ def disconnect_node(node: "Node") -> None:
 
     node.is_connected = False
     node.logger.info("Node disconnected")
+    return {name: getattr(node, name, None) for name in _CLAIM_STATE_ATTRS}

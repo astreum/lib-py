@@ -85,7 +85,7 @@ def verify_block_head(node: Any, block: Any) -> bool:
         "body_hash",
         "signature",
         "validator_public_key_bytes",
-        "difficulty",
+        "validation_difficulty",
     ]
     try:
         required_fields(block, extra_required)
@@ -128,14 +128,14 @@ def verify_block_head(node: Any, block: Any) -> bool:
     expected_diff = calculate_block_difficulty(
         previous_timestamp=previous_block.timestamp,
         current_timestamp=timestamp,
-        previous_difficulty=previous_block.difficulty,
+        previous_difficulty=previous_block.validation_difficulty,
     )
-    difficulty = block.difficulty
+    difficulty = block.validation_difficulty
     if difficulty is None or difficulty != expected_diff:
         node.logger.debug("Block head verify failed difficulty block=%s diff=%s expected=%s", _hex(block_hash), difficulty, expected_diff)
         return False
 
-    required_work = max(1, previous_block.difficulty or 1)
+    required_work = max(1, previous_block.validation_difficulty or 1)
     if not block_hash:
         node.logger.debug("Block head verify failed missing hash block=%s", _hex(block_hash))
         return False

@@ -311,7 +311,8 @@ class TestWorkerBuildTime(unittest.TestCase):
             accounts_hash=_h(0x0A),
             expr_id=head,
             bloom_hash=ZERO32,
-            difficulty=1,
+            validation_difficulty=1,
+            storage_difficulty=0,
         )
         account = SimpleNamespace(
             data=SimpleNamespace(root_hash=_h(0x0B), root_block=_h(0x0C), nodes={}),
@@ -325,6 +326,8 @@ class TestWorkerBuildTime(unittest.TestCase):
             receipts_trie=None,
             nonce=0,
             bloom_hash=ZERO32,
+            storage_claim_count=0,
+            storage_votes=0,
             accounts=SimpleNamespace(
                 get_account=lambda *a, **k: account,
                 pending_exprs=[],

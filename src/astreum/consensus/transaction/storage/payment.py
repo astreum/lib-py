@@ -13,37 +13,24 @@ from astreum.storage.radix import get_from_radix_tree_with_block, put_in_radix_t
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.transaction.storage.initial import block_scope
 from astreum.consensus.constants import PROVIDERS_PER_RECORD
+from astreum.consensus.transaction.storage.difficulty import (
+    distance_delta,
+    fair_interval,
+    parent_storage_difficulty,
+    required_bits,
+    takeover_position,
+    takeover_vote,
+)
 from astreum.consensus.transaction.storage.model import (
     StorageRecord,
     storage_record_cells,
     storage_record_from_storage,
     storage_record_to_expr,
 )
-from astreum.crypto.bloom_search import ERA_SIZE
 from astreum.crypto.merkle import MerkleTree, verify_merkle_tree_proof
-
-# Fib(13) = 233, largest fib <= 256-bit hash size
-_N = 13
 
 # A proof has one sibling per tree level; 64 levels cover 2**64 slots.
 MAX_PROOF_LEN = 64
-
-
-def _fib(n: int) -> int:
-    """Return the nth Fibonacci number (fib(0)=0, fib(1)=1, fib(2)=1, ...).
-
-    Args:
-        n: The index.
-
-    Returns:
-        The Fibonacci number.
-    """
-    if n < 0:
-        return 0
-    a, b = 0, 1
-    for _ in range(n):
-        a, b = b, a + b
-    return a
 
 
 def _leading_zero_bits(buf: bytes) -> int:
@@ -63,16 +50,6 @@ def _leading_zero_bits(buf: bytes) -> int:
         zeros += 8 - byte.bit_length()
         break
     return zeros
-
-
-def _required_bits(*, sender: bytes, last_payment_winner: bytes,
-                   block_height: int, last_payment_height: int,
-                   base_bits: int) -> int:
-    if sender == last_payment_winner:
-        return base_bits
-    eras_elapsed = (block_height - last_payment_height) // ERA_SIZE
-    penalty = _fib(_N - min(eras_elapsed, _N))
-    return base_bits + penalty
 
 
 # A claim: (storage_id, slot_expr_bytes, proof, nonce, lane).
@@ -240,14 +217,14 @@ def _check_claim(
         + _encode_int(nonce)
         + bytes([lane_number])
     ).digest()
-    required_bits = _required_bits(
+    needed_bits = required_bits(
         sender=sender_bytes,
-        last_payment_winner=lane.winner,
-        block_height=block.height,
-        last_payment_height=lane.height,
-        base_bits=0,  # storage payment uses pure PoW; no XOR-distance base
+        winner=lane.winner,
+        storage_id=storage_id,
+        elapsed=block.height - lane.height,
+        storage_difficulty=parent_storage_difficulty(block),
     )
-    if _leading_zero_bits(work_hash) < required_bits:
+    if _leading_zero_bits(work_hash) < needed_bits:
         return None
 
     # 4. Payout
@@ -308,6 +285,8 @@ def handle_storage_payment_contract(
             sender_account.balance += payout
 
             lane_number = claim[4]
+            previous_winner = record.lanes[lane_number].winner
+            elapsed = block.height - record.lanes[lane_number].height
             claimed = replace(
                 record.lanes[lane_number],
                 block_hash=block.previous_block_hash,
@@ -330,6 +309,14 @@ def handle_storage_payment_contract(
             )
             storage_account.data_hash = storage_account.data.root_hash
             block.pending_exprs.extend(storage_record_cells(updated))
+            block.storage_claim_count += 1
+            if transaction.sender != previous_winner:
+                delta = distance_delta(
+                    sender=transaction.sender, winner=previous_winner, storage_id=storage_id
+                )
+                block.storage_votes += takeover_vote(
+                    takeover_position(elapsed, delta), fair_interval(block.previous_block)
+                )
             any_valid = True
 
         return any_valid

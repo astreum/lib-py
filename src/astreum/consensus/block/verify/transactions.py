@@ -20,6 +20,7 @@ from astreum.consensus.block.create import create_block
 from astreum.consensus.block.encoding.expr import get_block_expr
 from astreum.consensus.transaction import apply_transaction_obj
 from astreum.consensus.transaction.from_storage import get_transaction_from_storage
+from astreum.consensus.transaction.storage.difficulty import next_storage_difficulty
 from astreum.consensus.transaction.storage.initial import (
     UnresolvedRecordExpr,
     generate_initial_storage_record,
@@ -211,7 +212,13 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
                 _hex(block.expr_id),
             )
             return False, "genesis missing storage account"
-        expected_stats = [(1, treasury_account.balance or 0, 0, 0)]
+        if block.storage_difficulty != 0:
+            node.logger.debug(
+                "Block verify genesis storage difficulty mismatch block=%s",
+                _hex(block.expr_id),
+            )
+            return False, "genesis storage difficulty mismatch"
+        expected_stats = [(1, treasury_account.balance or 0, 0, 0, 0, 0)]
         if getattr(block, "statistics", None) != expected_stats:
             node.logger.debug(
                 "Block verify genesis statistics mismatch block=%s",
@@ -293,7 +300,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         total_storage_fee=0,
         transactions_hash=None,
         receipts_hash=None,
-        difficulty=block.difficulty,
+        validation_difficulty=block.validation_difficulty,
         validator_public_key_bytes=block.validator_public_key_bytes,
         nonce=0,
         signature=None,
@@ -595,6 +602,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         getattr(prev_block, "statistics", None),
         delta_fee,
         delta_stake,
+        work_block.storage_claim_count,
     )
     if getattr(block, "statistics", None) != expected_statistics:
         node.logger.debug(
@@ -602,6 +610,17 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
             _hex(block.expr_id),
         )
         return False, "statistics mismatch"
+
+    expected_storage_difficulty = next_storage_difficulty(
+        prev_block.storage_difficulty,
+        work_block.storage_votes,
+    )
+    if block.storage_difficulty != expected_storage_difficulty:
+        node.logger.debug(
+            "Block verify storage difficulty mismatch block=%s",
+            _hex(block.expr_id),
+        )
+        return False, "storage difficulty mismatch"
 
     node.logger.debug("Block verify success block=%s", _hex(block.expr_id))
     return True, None

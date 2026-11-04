@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from fractions import Fraction
+
 from astreum.consensus.block.rate_window import windowed_rate_fraction
 from astreum.consensus.constants import PROVIDERS_PER_RECORD
 
@@ -57,3 +59,55 @@ def calculate_storage_fee(block: object, total_bytes: int) -> int:
         raise ValueError("previous block cumulative total fees must be greater than zero")
 
     return ((numerator + denominator - 1) // denominator) * PROVIDERS_PER_RECORD
+
+
+def estimate_storage_rate(head: object, window: int) -> Fraction:
+    """Estimate the storage rate paid by a transaction included within *window* blocks.
+
+    Args:
+        head: The head block to estimate from.
+        window: Inclusion window in blocks. It is rounded down to a power of
+            two and limited to the largest window in ``head.statistics``.
+
+    Returns:
+        The current rate plus any growth of the rate over the window.
+
+    Raises:
+        ValueError: If the head cumulative total fee is not greater than zero.
+    """
+    cumulative_fee = int(head.cumulative_total_fee)
+    cumulative_stake = int(head.cumulative_stake)
+    if cumulative_fee <= 0:
+        raise ValueError("head cumulative total fees must be greater than zero")
+
+    rate_now = Fraction(cumulative_stake, cumulative_fee)
+    if len(head.statistics) < 2:
+        return rate_now
+
+    k = min(1 << (window.bit_length() - 1), 1 << (len(head.statistics) - 2))
+    prev_fee, prev_stake, curr_fee, curr_stake = head.statistics[k.bit_length()][:4]
+    remaining = k - 1 - head.height % k
+    win_fee = curr_fee + prev_fee * remaining // k
+    win_stake = curr_stake + prev_stake * remaining // k
+
+    then_fee = cumulative_fee - win_fee
+    if then_fee <= 0:
+        return rate_now
+
+    rate_then = Fraction(cumulative_stake - win_stake, then_fee)
+    return rate_now + max(Fraction(0), rate_now - rate_then)
+
+
+def storage_fee_at_rate(rate: Fraction, walk_size: int) -> int:
+    """Calculate the storage fee for *walk_size* bytes at *rate*.
+
+    Args:
+        rate: The storage rate as stake per fee.
+        walk_size: Total bytes to store.
+
+    Returns:
+        The storage fee in units. The fee covers ``PROVIDERS_PER_RECORD``
+        copies of the data.
+    """
+    numerator = walk_size * rate.numerator
+    return ((numerator + rate.denominator - 1) // rate.denominator) * PROVIDERS_PER_RECORD

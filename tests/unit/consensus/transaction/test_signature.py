@@ -169,7 +169,7 @@ class TestBlockVerify(unittest.TestCase):
             chain_id=0,
             height=4,
             timestamp=0,
-            difficulty=1,
+            validation_difficulty=1,
             contact=None,
         )
         # A list read from storage ends in None, not in NIL.

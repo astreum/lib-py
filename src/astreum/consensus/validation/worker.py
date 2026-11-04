@@ -20,6 +20,7 @@ from astreum.consensus.block.encoding.decode import (
 from astreum.consensus.transaction import Transaction, apply_transaction_obj
 from astreum.consensus.account.model import ACCOUNT_SHAPE
 from astreum.consensus.block.verify.transactions import _fetch_new_nodes
+from astreum.consensus.transaction.storage.difficulty import next_storage_difficulty
 from astreum.consensus.transaction.storage.model import (
     STORAGE_RECORD_SHAPE,
     storage_record_to_expr,
@@ -336,7 +337,7 @@ def make_validation_worker(
                 total_storage_fee=0,
                 transactions_hash=None,
                 receipts_hash=None,
-                difficulty=None,
+                validation_difficulty=None,
                 validator_public_key_bytes=validation_public_key,
                 nonce=0,
                 signature=None,
@@ -482,6 +483,7 @@ def make_validation_worker(
                 getattr(previous_block, "statistics", None),
                 delta_fee,
                 delta_stake,
+                new_block.storage_claim_count,
             )
 
             reward_amount = total_fee if total_fee > 0 else 1
@@ -562,17 +564,21 @@ def make_validation_worker(
             # The timestamp is the time the scheduled validator was drawn for.
             new_block.timestamp = block_time
 
-            new_block.difficulty = calculate_block_difficulty(
+            new_block.validation_difficulty = calculate_block_difficulty(
                 previous_timestamp=previous_block.timestamp,
                 current_timestamp=new_block.timestamp,
-                previous_difficulty=previous_block.difficulty,
+                previous_difficulty=previous_block.validation_difficulty,
             )
-            
+            new_block.storage_difficulty = next_storage_difficulty(
+                previous_block.storage_difficulty,
+                new_block.storage_votes,
+            )
+
             try:
                 nonce_started = time.perf_counter()
                 generate_block_nonce(
                     block=new_block,
-                    difficulty=previous_block.difficulty,
+                    difficulty=previous_block.validation_difficulty,
                     sign=node.config.validation_secret_key.sign,
                 )
                 nonce_done = time.perf_counter()
@@ -582,7 +588,7 @@ def make_validation_worker(
                     "Found nonce %s for block #%s at difficulty %s",
                     new_block.nonce,
                     new_block.height,
-                    new_block.difficulty,
+                    new_block.validation_difficulty,
                 )
             except Exception:
                 node.logger.exception("Failed while searching for block nonce")

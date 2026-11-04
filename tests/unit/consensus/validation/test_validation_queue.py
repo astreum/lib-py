@@ -69,7 +69,7 @@ class TestValidationQueue(unittest.TestCase):
 
             # Inflate range-0 cumulative fee so the storage-fee
             # denominator keeps storage fees near zero.
-            genesis.statistics[0] = (10_000_000, genesis.statistics[0][1], 0, 0)
+            genesis.statistics[0] = (10_000_000, genesis.statistics[0][1], 0, 0, 0, 0)
             genesis.accounts_hash = (
                 genesis.accounts.update_trie(node) or ZERO32
             )

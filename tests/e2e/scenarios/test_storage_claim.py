@@ -1,9 +1,10 @@
-"""A storage provider claims its reward when an era has passed.
+"""A storage provider claims its reward when the payout covers the cost.
 
-Real history needs 1024 blocks (about 50 minutes) per era. The test starts
-the chain at height 2040 instead. Genesis holds one storage record whose lane
-was last paid at height 1000, so one full era has passed. The claim worker
-sees that on its first pass and sends the claim.
+The test starts the chain at height 2040. Genesis holds one storage record
+whose lane was last paid at height 1000, so a large payout is waiting. The
+node starts with ``storage_claim_min_profit=0``. The record reaches the claim
+worker through the cold records table, and the worker sends the claim as soon
+as the payout covers the estimated cost.
 
 One stand-in keeps the test on the claim path: the validator and the provider
 are one node. The claim goes through the real ``send_transaction``, which puts
@@ -95,6 +96,7 @@ class TestStorageClaim(unittest.TestCase):
                 genesis=genesis,
                 is_storage_provider=True,
                 storage_secret_key=p_key,
+                storage_claim_min_profit=0,
             )
             for slot in SLOTS:
                 put_expr_in_cold_storage(node, slot)

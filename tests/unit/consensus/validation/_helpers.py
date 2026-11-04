@@ -160,7 +160,7 @@ def make_previous_block(
     cumulative_fee: int = 1,
     cumulative_stake: int = 1,
     height: int = 0,
-    difficulty: int = 1,
+    validation_difficulty: int = 1,
 ) -> Block:
     """Block #0 with controllable cumulative fee and stake in statistics range 0."""
     return create_block(
@@ -174,9 +174,9 @@ def make_previous_block(
         total_storage_fee=0,
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
-        difficulty=difficulty,
+        validation_difficulty=validation_difficulty,
         validator_public_key_bytes=os.urandom(32),
-        statistics=[(cumulative_fee, cumulative_stake, 0, 0)],
+        statistics=[(cumulative_fee, cumulative_stake, 0, 0, 0, 0)],
     )
 
 
@@ -199,7 +199,7 @@ def make_block(
         total_storage_fee=0,
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
-        difficulty=1,
+        validation_difficulty=1,
         validator_public_key_bytes=os.urandom(32),
     )
     block.accounts = Accounts()

@@ -111,6 +111,65 @@ class TestFloatKeys(_ConfigCase):
                 self.assertIsInstance(getattr(result, key), float)
 
 
+class TestStorageClaimKeys(_ConfigCase):
+    NAMES = (
+        "storage_claim_band",
+        "storage_claim_hash_rate",
+        "storage_claim_inclusion_delay",
+    )
+
+    def test_storage_claim_keys_default_none(self):
+        result = self.build()
+        for name in self.NAMES:
+            self.assertIsNone(getattr(result, name))
+        result = self.build(**{name: None for name in self.NAMES})
+        for name in self.NAMES:
+            self.assertIsNone(getattr(result, name))
+
+    def test_storage_claim_keys_parsed(self):
+        result = self.build(
+            storage_claim_band="4",
+            storage_claim_hash_rate=1.5e6,
+            storage_claim_inclusion_delay=2,
+        )
+        self.assertEqual(result.storage_claim_band, 4)
+        self.assertIsInstance(result.storage_claim_band, int)
+        self.assertEqual(result.storage_claim_hash_rate, 1.5e6)
+        self.assertIsInstance(result.storage_claim_hash_rate, float)
+        self.assertEqual(result.storage_claim_inclusion_delay, 2)
+        self.assertIsInstance(result.storage_claim_inclusion_delay, int)
+
+    def test_storage_claim_keys_rejected(self):
+        for key in self.NAMES:
+            with self.subTest(key=key):
+                with self.assertRaises(ValueError):
+                    self.build(**{key: 0})
+                with self.assertRaises(ValueError):
+                    self.build(**{key: "soon"})
+
+    def test_storage_claim_hash_rate_rejects_non_finite(self):
+        for value in (float("nan"), float("inf"), "nan", "inf"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    self.build(storage_claim_hash_rate=value)
+
+    def test_storage_claim_fee_keys_default(self):
+        result = self.build()
+        self.assertEqual(result.storage_claim_fee_window, 65_536)
+        self.assertEqual(result.storage_claim_min_profit, 10**9)
+
+    def test_storage_claim_fee_keys_parsed(self):
+        result = self.build(storage_claim_fee_window="1000", storage_claim_min_profit=0)
+        self.assertEqual(result.storage_claim_fee_window, 1000)
+        self.assertEqual(result.storage_claim_min_profit, 0)
+
+    def test_storage_claim_fee_keys_rejected(self):
+        with self.assertRaises(ValueError):
+            self.build(storage_claim_fee_window=0)
+        with self.assertRaises(ValueError):
+            self.build(storage_claim_min_profit=-1)
+
+
 class TestBoolKeys(_ConfigCase):
     def test_bool_keys(self):
         for key, default in (("is_storage_provider", False), ("logging_enabled", True)):

@@ -24,7 +24,10 @@ class Block:
     total_storage_fee: Optional[int]
     transactions_hash: Optional[bytes]
     receipts_hash: Optional[bytes]
-    difficulty: Optional[int]
+    validation_difficulty: Optional[int]
+    storage_difficulty: int
+    storage_votes: int
+    storage_claim_count: int
     validator_public_key_bytes: Optional[bytes]
     nonce: Optional[int]
     bloom_hash: Optional[bytes]
@@ -60,8 +63,9 @@ class Block:
         total_storage_fee: Optional[int],
         transactions_hash: Optional[bytes],
         receipts_hash: Optional[bytes],
-        difficulty: Optional[int],
+        validation_difficulty: Optional[int],
         validator_public_key_bytes: Optional[bytes],
+        storage_difficulty: int = 0,
         nonce: Optional[int] = None,
         bloom_hash: Optional[bytes] = None,
         previous_era_hash: Optional[bytes] = None,
@@ -77,6 +81,8 @@ class Block:
         global_loaned: int = 0,
         global_defaulted: int = 0,
         global_loan_count: int = 0,
+        storage_votes: int = 0,
+        storage_claim_count: int = 0,
         contact: Optional["RelayEndpoint"] = None,
     ) -> None:
         # ``RelayEndpoint`` of the peer to fetch from while
@@ -95,7 +101,8 @@ class Block:
         self.total_storage_fee = total_storage_fee
         self.transactions_hash = transactions_hash
         self.receipts_hash = receipts_hash
-        self.difficulty = difficulty
+        self.validation_difficulty = validation_difficulty
+        self.storage_difficulty = storage_difficulty
         self.validator_public_key_bytes = validator_public_key_bytes
         self.nonce = nonce
         self.bloom_hash = bloom_hash
@@ -122,6 +129,8 @@ class Block:
         self.global_loaned = global_loaned
         self.global_defaulted = global_defaulted
         self.global_loan_count = global_loan_count
+        self.storage_votes = storage_votes
+        self.storage_claim_count = storage_claim_count
         self._expr = None
 
     def snapshot(self) -> tuple:
@@ -142,6 +151,8 @@ class Block:
         saved_global_loaned = self.global_loaned
         saved_global_defaulted = self.global_defaulted
         saved_global_loan_count = self.global_loan_count
+        saved_storage_votes = self.storage_votes
+        saved_storage_claim_count = self.storage_claim_count
         return (
             saved_cache,
             saved_pending_exprs,
@@ -149,6 +160,8 @@ class Block:
             saved_global_defaulted,
             saved_global_loan_count,
             saved_involved,
+            saved_storage_votes,
+            saved_storage_claim_count,
         )
 
     def restore(self, snapshot: tuple) -> None:
@@ -166,6 +179,8 @@ class Block:
             saved_global_defaulted,
             saved_global_loan_count,
             saved_involved,
+            saved_storage_votes,
+            saved_storage_claim_count,
         ) = snapshot
         self.accounts._cache = saved_cache
         self.accounts.involved = saved_involved
@@ -173,6 +188,8 @@ class Block:
         self.global_loaned = saved_global_loaned
         self.global_defaulted = saved_global_defaulted
         self.global_loan_count = saved_global_loan_count
+        self.storage_votes = saved_storage_votes
+        self.storage_claim_count = saved_storage_claim_count
 
     @property
     def total_fee(self) -> int:

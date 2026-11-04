@@ -20,6 +20,8 @@ def _block():
     block.global_loaned = 0
     block.global_defaulted = 0
     block.global_loan_count = 0
+    block.storage_votes = 0
+    block.storage_claim_count = 0
     return block
 
 

@@ -258,10 +258,10 @@ def _block(**overrides):
         accounts_hash=b"\x0a" * 32,
         total_transaction_fee=0,
         total_storage_fee=0,
-        statistics=[(1, 1, 0, 0)],
+        statistics=[(1, 1, 0, 0, 0, 0)],
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
-        difficulty=1,
+        validation_difficulty=1,
         validator_public_key_bytes=b"\x02" * 32,
         signature=b"\x03" * 64,
     )

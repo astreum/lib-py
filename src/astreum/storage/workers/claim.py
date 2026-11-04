@@ -1,29 +1,64 @@
 from __future__ import annotations
 
+import sys
 import time
-from typing import TYPE_CHECKING
+from fractions import Fraction
+from typing import TYPE_CHECKING, Callable
 
 from blake3 import blake3
 
-from astreum.consensus.block.rate import calculate_storage_fee
+from astreum.consensus.block.rate import (
+    calculate_discount_rate,
+    estimate_storage_rate,
+    storage_fee_at_rate,
+)
+from astreum.consensus.constants import STORAGE_ADDRESS
 from astreum.consensus.transaction import create_transaction
 from astreum.consensus.transaction.code import TransactionCode
 from astreum.consensus.transaction.storage.model import StorageRecord, storage_record_from_storage
 from astreum.consensus.transaction.storage.initial import _single_cell
+from astreum.consensus.transaction.storage.difficulty import fair_interval, shared_prefix_bits
 from astreum.consensus.transaction.storage.payment import (
     _leading_zero_bits,
-    _required_bits,
     challenge_index as _challenge_index,
 )
-from astreum.crypto.merkle import create_merkle_tree, generate_merkle_tree_proof
 from astreum.crypto.bloom_search import ERA_SIZE
+from astreum.crypto.merkle import create_merkle_tree, generate_merkle_tree_proof
 from astreum.expression import Expr, NIL, int_, bytes_, link, ZERO32
 from astreum.expression.helpers import bytes_list_to_expr
 from astreum.expression.encoding import encode_expr_to_bytes
 from astreum.expression.expr import _encode_int
-from astreum.storage.exprs import get_expr_from_local_storage
-from astreum.storage.records import iter_records_in_cold_storage, get_record_from_cold_storage
+from astreum.storage.cold import get_exprs_from_cold_storage
+from astreum.storage.exprs.hot import get_expr_from_hot_storage
+from astreum.consensus.validation.validator import SLOT_DURATION_SECONDS
+from astreum.storage.records import get_records_from_cold_storage, iter_records_in_cold_storage
 from astreum.storage.radix import get_from_radix_tree
+from astreum.storage.workers.claim_flow import (
+    CapacityLog,
+    InFlight,
+    band_after_inclusion,
+    band_after_loss,
+    capacity_min,
+    capacity_record,
+    in_flight_status,
+    lane_value,
+    lanes_to_release,
+    need,
+)
+from astreum.storage.workers.claim_schedule import (
+    _BASE_TX_FEE,
+    _RECEIPT_OVERHEAD_BYTES,
+    ClaimQueue,
+    LaneChoice,
+    affordable_bits,
+    claim_cost,
+    min_elapsed,
+    plan_record,
+    pow_budget,
+    queue_add,
+    queue_pop_due,
+    queue_push,
+)
 
 if TYPE_CHECKING:
     from astreum.node import Node
@@ -32,121 +67,173 @@ if TYPE_CHECKING:
 # A claim: (storage_id, slot_expr_bytes, proof, nonce, lane).
 Claim = tuple[bytes, bytes, list[bytes], int, int]
 
+# A claim with its payout: (storage_id, slot_expr_bytes, proof, nonce, lane, payout).
+Entry = tuple[bytes, bytes, list[bytes], int, int, int]
+
 # A claim tx is cut at about this many bytes, well under one STORAGE_FOUND page
 # (PAGE_ENTRY_BUDGET), so a peer can fetch it in one response.
 MAX_CLAIM_TX_BYTES = 60_000
 
 
-def _compute_pow_and_challenge(
-    node: Node,
-    storage_id: bytes,
-    record: StorageRecord,
-    lane: int,
-) -> Claim | None:
-    """Compute a PoW claim for one lane of the given record.
+def measure_hash_rate() -> float:
+    """Measure the blake3 hash rate of this machine.
 
-    The challenged slot's id is read from the record's slot list in the records
-    table (byte offset = index * 32). The tree over that list is built in
-    memory and gives the slot's proof against ``record.slots_root``. Returns
-    ``(storage_id, slot_expr_bytes, proof, nonce, lane)`` or None if unavailable.
-
-    Args:
-        node: A Node instance for storage and network access.
-        storage_id: The 32-byte storage ID (block hash).
-        record: The StorageRecord to claim for.
-        lane: The lane number to claim.
+    Hashes ``bytes(160)`` for ``sys.getswitchinterval()`` seconds.
 
     Returns:
-        A Claim tuple, or None if the record cannot be claimed.
+        Hashes per second.
     """
-    if not 0 <= lane < len(record.lanes):
-        return None
-    lane_state = record.lanes[lane]
-    last_payment_block_hash = lane_state.block_hash
-    if len(last_payment_block_hash) != 32:
-        return None
-    if record.new_count <= 0:
-        return None
+    data = bytes(160)
+    interval = sys.getswitchinterval()
+    count = 0
+    start = time.perf_counter()
+    now = start
+    while now - start < interval:
+        blake3(data).digest()
+        count += 1
+        now = time.perf_counter()
+    return count / max(now - start, 1e-9)
 
-    challenge_index = _challenge_index(last_payment_block_hash, storage_id, record.new_count, lane)
 
-    # The slot list from the records table
-    value = get_record_from_cold_storage(node, storage_id)
-    if value is None or len(value) != record.new_count * 32:
-        return None
-    slot_ids = [value[i : i + 32] for i in range(0, len(value), 32)]
-    tree = create_merkle_tree(slot_ids)
-    if tree.root != record.slots_root:
-        return None
-    slot_id = slot_ids[challenge_index]
-    proof = generate_merkle_tree_proof(tree, challenge_index)
+def _find_nonce(
+    node: Node,
+    prefix: bytes,
+    lane: int,
+    bits: int,
+    max_nonces: int,
+    should_stop: Callable[[], bool],
+) -> int | None:
+    """Search for a PoW nonce in chunks, pausing between them.
 
-    # The slot's data, as the single cell the record walk slotted
-    data_expr = get_expr_from_local_storage(node, slot_id)
-    if data_expr is None:
-        return None
-    fetched_data_bytes = encode_expr_to_bytes(_single_cell(data_expr, node, None))
-    sender_bytes = node.storage_public_key_bytes
+    The work hash is ``blake3(prefix + nonce + lane)``. A chunk is
+    ``node.storage_claim_hash_rate × sys.getswitchinterval()`` nonces, at least
+    one. After each chunk the hash rate is updated from the chunk's speed, the
+    stop check runs and the thread yields.
 
-    # Compute required bits
-    required_bits = _required_bits(
-        sender=sender_bytes,
-        last_payment_winner=lane_state.winner,
-        block_height=node.latest_block.height,
-        last_payment_height=lane_state.height,
-        base_bits=0,
-    )
+    Args:
+        node: A Node instance holding ``storage_claim_hash_rate``.
+        prefix: The work-hash input before the nonce.
+        lane: The lane number being claimed.
+        bits: The leading zero bits the work hash needs.
+        max_nonces: The most nonces to try.
+        should_stop: Returns True to give up.
 
-    # Brute-force PoW
+    Returns:
+        The nonce, or None if the budget ran out or the search was stopped.
+    """
+    lane_byte = bytes([lane])
     nonce = 0
-    max_nonce = 1 << 30
-    while nonce < max_nonce:
-        nonce_encoded = _encode_int(nonce)
-        work_hash = blake3(
-            last_payment_block_hash
-            + sender_bytes
-            + storage_id
-            + slot_id
-            + fetched_data_bytes
-            + nonce_encoded
-            + bytes([lane])
-        ).digest()
-        if _leading_zero_bits(work_hash) >= required_bits:
-            return storage_id, fetched_data_bytes, proof, nonce, lane
-        nonce += 1
-
+    while nonce < max_nonces:
+        chunk = max(1, int(node.storage_claim_hash_rate * sys.getswitchinterval()))
+        end = min(nonce + chunk, max_nonces)
+        tried = end - nonce
+        start = time.perf_counter()
+        while nonce < end:
+            work_hash = blake3(prefix + _encode_int(nonce) + lane_byte).digest()
+            if _leading_zero_bits(work_hash) >= bits:
+                return nonce
+            nonce += 1
+        node.storage_claim_hash_rate = tried / max(time.perf_counter() - start, 1e-9)
+        if should_stop():
+            return None
+        time.sleep(0)
     return None
 
 
-def _next_claim_counter(node: Node) -> int:
-    """Resolve the counter for the next claim tx.
+def _build_claims(
+    node: Node,
+    head,
+    plans: list[tuple[bytes, StorageRecord, LaneChoice]],
+    max_nonces: int,
+    should_stop: Callable[[], bool],
+) -> list[Entry]:
+    """Build the claims for the planned records, reading storage in batches.
 
-    Uses the greater of the on-chain sender-account counter and the
-    node-local ``next_claim_counter`` (bumped after each successful send so
-    consecutive eras don't wait for on-chain confirmation). A missing
-    account, no latest block, or a fetch failure all mean 0.
+    The slot lists come from one records-table read and the missing slots from
+    one exprs read. For each record this builds the proof and runs the PoW,
+    then pauses. A record that fails a step gives no entry.
+
+    Args:
+        node: A Node instance for storage access.
+        head: The latest block.
+        plans: ``(storage_id, record, choice)`` for each record to claim.
+        max_nonces: The most PoW nonces to try for each record.
+        should_stop: Returns True to stop the PoW.
+
+    Returns:
+        ``(storage_id, slot_bytes, proof, nonce, lane, payout)`` entries.
+    """
+    blobs = get_records_from_cold_storage(node, [plan[0] for plan in plans]) if plans else {}
+
+    ready = []
+    for storage_id, record, choice in plans:
+        if not 0 <= choice.lane < len(record.lanes) or record.new_count <= 0:
+            continue
+        lane_state = record.lanes[choice.lane]
+        if len(lane_state.block_hash) != 32:
+            continue
+        blob = blobs.get(storage_id)
+        if blob is None or len(blob) != record.new_count * 32:
+            continue
+        slot_ids = [blob[i : i + 32] for i in range(0, len(blob), 32)]
+        tree = create_merkle_tree(slot_ids)
+        if tree.root != record.slots_root:
+            continue
+        index = _challenge_index(lane_state.block_hash, storage_id, record.new_count, choice.lane)
+        ready.append((storage_id, record, choice, tree, index, slot_ids[index]))
+
+    slots: dict[bytes, Expr] = {}
+    missing = []
+    for item in ready:
+        slot_id = item[5]
+        expr = get_expr_from_hot_storage(node, slot_id)
+        if expr is None:
+            missing.append(slot_id)
+        else:
+            slots[slot_id] = expr
+    if missing:
+        slots.update(get_exprs_from_cold_storage(node, missing))
+
+    me = node.storage_public_key_bytes
+    entries: list[Entry] = []
+    for storage_id, record, choice, tree, index, slot_id in ready:
+        data_expr = slots.get(slot_id)
+        if data_expr is None:
+            continue
+        slot_bytes = encode_expr_to_bytes(_single_cell(data_expr, node, None))
+        proof = generate_merkle_tree_proof(tree, index)
+        lane_state = record.lanes[choice.lane]
+        prefix = lane_state.block_hash + me + storage_id + slot_id + slot_bytes
+        nonce = _find_nonce(node, prefix, choice.lane, choice.bits, max_nonces, should_stop)
+        if nonce is not None:
+            payout = record.new_size * (head.height - lane_state.height)
+            entries.append((storage_id, slot_bytes, proof, nonce, choice.lane, payout))
+        time.sleep(0)
+    return entries
+
+
+def _chain_counter(node: Node, block=None) -> int:
+    """Read the chain counter of the storage account at a block.
+
+    A missing block, a missing account or a failed read all mean 0.
 
     Args:
         node: A Node instance with account access.
+        block: The block to read. Defaults to ``node.latest_block``.
 
     Returns:
-        The next transaction counter.
+        The account counter at the block.
     """
-    if not hasattr(node, "next_claim_counter"):
-        node.next_claim_counter = 0
-
-    latest_block = getattr(node, "latest_block", None)
-    on_chain = 0
-    if latest_block is not None:
-        try:
-            account = latest_block.accounts.get_account(
-                address=node.storage_public_key_bytes, node=node
-            )
-            if account is not None:
-                on_chain = account.counter
-        except Exception:
-            pass
-    return max(node.next_claim_counter, on_chain)
+    latest_block = block if block is not None else getattr(node, "latest_block", None)
+    if latest_block is None:
+        return 0
+    try:
+        account = latest_block.accounts.get_account(
+            address=node.storage_public_key_bytes, node=node
+        )
+        return account.counter if account is not None else 0
+    except Exception:
+        return 0
 
 
 def _claim_expr(claim: Claim) -> Expr:
@@ -260,219 +347,294 @@ def _build_multi_claim_tx(
     )
 
 
-def _build_claims_for_records(
+def _send_batch(
     node: Node,
-    latest_block,
-    spacing_eras: dict[bytes, int],
-) -> list[tuple[bytes, bytes, list[bytes], int, int, int]]:
-    """Evaluate every record in the records table and build eligible claims.
+    head,
+    entries: list[Entry],
+    counter: int | None,
+    rate: Fraction,
+) -> InFlight | None:
+    """Build one claim transaction and send it when it pays.
 
-    Returns ``(storage_id, slot_expr_bytes, proof, nonce, lane, payout)`` tuples,
-    where ``payout = new_size × (block_height − lane height)``
-    mirrors the reward calculation in ``storage/payment.py`` so the submit
-    gate can check the bundle's aggregate economics.
-
-    Args:
-        node: A Node instance for storage access.
-        latest_block: The latest block.
-        spacing_eras: Dict tracking spacing backoff per storage ID.
-
-    Returns:
-        List of claim tuples with payouts.
-    """
-    from astreum.consensus.constants import STORAGE_ADDRESS
-
-    claims_to_make: list[tuple[bytes, bytes, list[bytes], int, int, int]] = []
-    seen: set[bytes] = set()
-
-    storage_account = None
-    if hasattr(latest_block, "accounts"):
-        storage_account = latest_block.accounts.get_account(STORAGE_ADDRESS, node)
-
-    for storage_id in iter_records_in_cold_storage(node):
-        if storage_id in seen:
-            continue
-        seen.add(storage_id)
-
-        contract_head = None
-        try:
-            if storage_account is not None:
-                contract_head = get_from_radix_tree(storage_account.data, node, storage_id)
-        except Exception:
-            continue
-        if not contract_head:
-            continue
-
-        record = storage_record_from_storage(node, contract_head.hash())
-        if record is None:
-            continue
-
-        current_spacing = spacing_eras.get(storage_id, 1)
-
-        def eras_elapsed(lane: int) -> int:
-            return (latest_block.height - record.lanes[lane].height) // ERA_SIZE
-
-        mine = next(
-            (i for i, lane in enumerate(record.lanes) if lane.winner == node.storage_public_key_bytes),
-            None,
-        )
-        if mine is not None:
-            # We hold a lane: claim it with the same spacing back-off as before.
-            # A holder never takes the other lane.
-            if eras_elapsed(mine) >= current_spacing:
-                claim = _compute_pow_and_challenge(node, storage_id, record, mine)
-                if claim is not None:
-                    payout = record.new_size * (latest_block.height - record.lanes[mine].height)
-                    claims_to_make.append((*claim, payout))
-                    spacing_eras[storage_id] = min(current_spacing + 1, 4)
-        else:
-            # Takeover: only after 5 eras (fib(8)=21, ~2Mx harder), on the lane
-            # that waited longest. Lane 0 wins a tie.
-            spacing_eras[storage_id] = 1  # reset
-            open_lanes = [i for i in range(len(record.lanes)) if eras_elapsed(i) >= 5]
-            if open_lanes:
-                lane = max(open_lanes, key=lambda i: (eras_elapsed(i), -i))
-                claim = _compute_pow_and_challenge(node, storage_id, record, lane)
-                if claim is not None:
-                    payout = record.new_size * (latest_block.height - record.lanes[lane].height)
-                    claims_to_make.append((*claim, payout))
-    return claims_to_make
-
-
-_BASE_TX_FEE = 1  # apply.py:77 — protocol-derived base transaction fee
-# Walk size of a 7-field receipt (models/receipt.py): 17 cells, 717 bytes with
-# one-byte ints, the size the block record counts for it.
-_RECEIPT_OVERHEAD_BYTES = 720
-
-
-def _submit_claims(node: Node, entries: list[tuple]) -> None:
-    """Send the given claims as STORAGE_PAYMENT transactions.
-
-    Each claim is a ``(*claim, payout)`` entry. Transactions are about
-    ``MAX_CLAIM_TX_BYTES`` each, sent only if the payout covers protocol cost.
+    The batch goes out only when its payouts, less the cost at ``rate``, reach
+    ``node.config.storage_claim_min_profit``. The send height, and the counter
+    when ``counter`` is None, come from ``node.latest_block`` at the send, not
+    from ``head``, because the PoW can take many blocks.
 
     Args:
         node: A Node instance for sending transactions.
-        entries: List of claim tuples with payouts.
-
-    Returns: None
-    """
-    if not entries:
-        return
-    latest_block = getattr(node, "latest_block", None)
-    if latest_block is None:
-        return
-    for group in _split_claims(entries):
-        if not _submit_claim_group(node, latest_block, group):
-            return
-
-
-def _submit_claim_group(node: Node, latest_block, entries: list[tuple]) -> bool:
-    """Build and send one claim transaction.
-
-    Returns False to stop submitting (the cost cannot be computed yet).
-    An unprofitable or failed group is dropped and the next one still goes.
-
-    Args:
-        node: A Node instance for sending transactions.
-        latest_block: The latest block for fee calculation.
-        entries: List of claim tuples with payouts.
+        head: The latest block when the pass began, used for the payout.
+        entries: The claim entries with their payouts.
+        counter: The transaction counter, or None to read it at the send height.
+        rate: The storage rate used for the cost.
 
     Returns:
-        True to continue, False to stop submitting.
+        The in-flight record, or None if the batch is not worth sending or the send failed.
     """
     try:
-        claims = [entry[:5] for entry in entries]
-        counter = _next_claim_counter(node)
-        tx = _build_multi_claim_tx(node, claims, node.storage_secret_key, counter)
-        try:
-            cost = (
-                _BASE_TX_FEE
-                + calculate_storage_fee(latest_block, _tree_bytes(tx.expr()))
-                + calculate_storage_fee(latest_block, _RECEIPT_OVERHEAD_BYTES)
-            )
-        except ValueError:
-            # cumulative_total_fee <= 0 (young/odd block, rate.py:36-37)
-            return False  # pass skipped; retried next era
+        sent = getattr(node, "latest_block", None) or head
+        if counter is None:
+            counter = _chain_counter(node, sent)
+        tx = _build_multi_claim_tx(node, [entry[:5] for entry in entries], node.storage_secret_key, counter)
+        tx_bytes = _tree_bytes(tx.expr())
+        cost = (
+            _BASE_TX_FEE
+            + storage_fee_at_rate(rate, tx_bytes)
+            + storage_fee_at_rate(rate, _RECEIPT_OVERHEAD_BYTES)
+        )
         total_payout = sum(entry[5] for entry in entries)
-        if total_payout < cost:
+        if total_payout - cost < node.config.storage_claim_min_profit:
             node.logger.info(
-                "Claim worker: bundle unprofitable (%d payouts < %d cost); dropped",
+                "Claim worker: batch unprofitable (%d payouts, %d cost); dropped",
                 total_payout,
                 cost,
             )
-            return True  # drop, retry next era
+            return None
         from astreum.consensus.transaction.send import send_transaction
         send_transaction(node, tx)
-        node.next_claim_counter = counter + 1
         node.logger.info(
             "Claim worker: submitted %d claim(s) in tx %s (payout %d, cost %d)",
-            len(claims),
+            len(entries),
             tx.hash.hex() if tx.hash else "unknown",
             total_payout,
             cost,
         )
+        return InFlight(counter, sent.height, entries, tx_bytes=tx_bytes)
     except Exception as exc:
         node.logger.exception("Claim worker: failed to submit claims: %s", exc)
-    return True
+        return None
+
+
+def _claim_step(
+    node: Node,
+    head,
+    storage_tree,
+    ids: list[bytes],
+    queue: ClaimQueue,
+    held: dict[bytes, tuple[int, int]],
+    rate: Fraction,
+    bytes_per_claim: int,
+    should_stop: Callable[[], bool],
+) -> list[Entry]:
+    """Plan and build the claims for the given records.
+
+    Each record is read from the storage tree and planned. A record with no
+    claim now goes back on the queue at its due height. The records with a
+    lane choice are built in one batch. A record that gave an entry is not
+    queued, because the loop queues it when its transaction is resolved.
+
+    Args:
+        node: A Node instance for storage access.
+        head: The latest block.
+        storage_tree: The radix tree of storage records.
+        ids: The storage ids to look at.
+        queue: The claim queue.
+        held: ``storage_id -> (new_size, shared prefix bits)`` for each held lane.
+        rate: The storage rate used for the cost.
+        bytes_per_claim: The bytes one claim adds to a transaction.
+        should_stop: Returns True to stop the PoW.
+
+    Returns:
+        The claim entries built.
+    """
+    me = node.storage_public_key_bytes
+    band = node.storage_claim_band
+    interval = fair_interval(head)
+    retry = head.height + (interval or 1)
+    cost = claim_cost(rate, bytes_per_claim, band)
+    records: list[tuple[bytes, StorageRecord]] = []
+    for storage_id in ids:
+        record = None
+        try:
+            record_head = get_from_radix_tree(storage_tree, node, storage_id)
+            if record_head is not None:
+                record = storage_record_from_storage(node, record_head.hash())
+        except Exception as exc:
+            node.logger.exception("Claim worker: failed to read record %s: %s", storage_id.hex(), exc)
+        if record is None:
+            held.pop(storage_id, None)
+            queue_push(queue, storage_id, retry)
+            continue
+        if record.new_size <= 0:
+            queue_push(queue, storage_id, retry)
+            continue
+        if any(lane.winner == me for lane in record.lanes):
+            held[storage_id] = (record.new_size, shared_prefix_bits(me, storage_id))
+        else:
+            held.pop(storage_id, None)
+        records.append((storage_id, record))
+
+    budget = pow_budget(node.storage_claim_hash_rate, interval, len(held))
+    affordable = affordable_bits(budget)
+    plans: list[tuple[bytes, StorageRecord, LaneChoice]] = []
+    for storage_id, record in records:
+        choice, due = plan_record(
+            record,
+            me,
+            storage_id,
+            head.height,
+            head.storage_difficulty,
+            interval,
+            node.storage_claim_inclusion_delay,
+            affordable,
+            min_elapsed(record.new_size, cost, node.config.storage_claim_min_profit, band),
+        )
+        if choice is None:
+            queue_push(queue, storage_id, due)
+        else:
+            plans.append((storage_id, record, choice))
+
+    if not plans:
+        return []
+    entries = _build_claims(node, head, plans, budget, should_stop)
+    built = {entry[0] for entry in entries}
+    for storage_id, _, _ in plans:
+        if storage_id not in built:
+            queue_push(queue, storage_id, retry)
+    return entries
 
 
 def claim_storage(node: Node) -> None:
-    """Submit storage reward claims on era boundaries.
+    """Run the claim worker as a stream of batched claim transactions.
 
-    Runs as a daemon thread.  Returns at once when ``node.is_storage_provider``
-    is false.  On each era boundary (every ``ERA_SIZE``
-    blocks) it iterates the records table on disk, and for each record where
-    this node is a provider, computes a proof-of-work challenge for the
-    challenged slot and submits a single ``STORAGE_PAYMENT`` transaction
-    bundling all claims.
-
-    The claim set is the records table itself — written incrementally by the
-    validator — so nothing is rebuilt at boot and there is no cold-expr scan.
-
-    Claim spacing uses a progressive back-off when incumbent
-    (``claim_spacing_eras``, 1→4 eras) and a wall-drop threshold of
-    5 eras for non-incumbent takeover attempts.
+    Returns at once when ``node.is_storage_provider`` is false. Otherwise it
+    loops until ``communication_stop_event`` is set. Each pass reads the head,
+    queues new and stored records, resolves the transaction in flight, releases
+    lanes the node cannot serve, then builds and sends the next batch. One
+    transaction is in flight at a time.
 
     Args:
-        node: A fully initialized Node instance with
-            ``storage_public_key_bytes``, ``storage_secret_key``, and a
-            connected P2P communication layer.
+        node: A Node instance with ``communication_stop_event``.
 
     Returns:
-        None.  Runs indefinitely until ``communication_stop_event`` fires.
+        None.
     """
     if not getattr(node, "is_storage_provider", False):
         return
 
     stop = node.communication_stop_event
-    last_checked_era = -1
+    if node.storage_claim_hash_rate is None:
+        node.storage_claim_hash_rate = measure_hash_rate()
 
-    if not hasattr(node, "claim_spacing_eras"):
-        node.claim_spacing_eras = {}
+    queue = ClaimQueue()
+    held: dict[bytes, tuple[int, int]] = {}
+    in_flight: InFlight | None = None
+    pending: list[Entry] = []
+    capacity = CapacityLog()
+    scan = iter_records_in_cold_storage(node, batch=node.storage_claim_band)
+    bytes_per_claim = 0
+    tree_head = None
+    storage_tree = None
+    storage_rate: Fraction | None = None
 
     while not stop.is_set():
-        latest_block = getattr(node, "latest_block", None)
-        if latest_block is None:
-            stop.wait(1.0)
-            continue
+        head = node.latest_block
+        popped: list[bytes] = []
+        fair = None
+        try:
+            if head is None:
+                stop.wait(SLOT_DURATION_SECONDS)
+                continue
+            if head is not tree_head:
+                account = head.accounts.get_account(STORAGE_ADDRESS, node)
+                try:
+                    head_rate = estimate_storage_rate(head, node.config.storage_claim_fee_window)
+                except ValueError:
+                    head_rate = None
+                storage_tree = account.data if account is not None else None
+                storage_rate = head_rate
+                tree_head = head
+            if storage_rate is None:
+                stop.wait(SLOT_DURATION_SECONDS)
+                continue
 
-        current_era = latest_block.height // ERA_SIZE
-        if current_era == last_checked_era:
-            # Wait until next era boundary
-            next_boundary = (current_era + 1) * ERA_SIZE
-            blocks_remaining = next_boundary - latest_block.height
-            wait_seconds = max(1.0, blocks_remaining * 0.5)
-            stop.wait(wait_seconds)
-            continue
+            band = node.storage_claim_band
+            while node.new_record_ids:
+                queue_add(queue, node.new_record_ids.popleft(), head.height)
+            if scan is not None:
+                try:
+                    for storage_id in scan:
+                        queue_add(queue, storage_id, head.height)
+                    scan = None
+                except Exception as exc:
+                    node.logger.exception("Claim worker: record scan failed: %s", exc)
+                    scan = iter_records_in_cold_storage(node, batch=band)
 
-        # Era changed — evaluate all records in the records table
-        claims_to_make = _build_claims_for_records(
-            node,
-            latest_block,
-            node.claim_spacing_eras,
-        )
-        _submit_claims(node, claims_to_make)
+            fair = fair_interval(head)
+            if fair is not None:
+                fair = max(1, fair)
+            if in_flight is not None:
+                status = in_flight_status(in_flight, _chain_counter(node), head.height)
+                if status == "pending":
+                    stop.wait(SLOT_DURATION_SECONDS)
+                    continue
+                if status == "included":
+                    delay = max(1, head.height - in_flight.sent_height)
+                    node.storage_claim_inclusion_delay = delay
+                    capacity_record(capacity, head.height, band / delay)
+                    band = band_after_inclusion(band, delay)
+                    node.storage_claim_band = band
+                    for entry in in_flight.entries:
+                        queue_push(queue, entry[0], head.height)
+                    in_flight = None
+                else:
+                    band = band_after_loss(band)
+                    node.storage_claim_band = band
+                    lost = in_flight
+                    in_flight = _send_batch(node, head, lost.entries, lost.counter, storage_rate)
+                    if in_flight is None:
+                        for entry in lost.entries:
+                            queue_push(queue, entry[0], head.height + (fair or 1))
+                    continue
 
-        last_checked_era = current_era
-        stop.wait(0.5)
+            if fair is not None and need(len(held), fair) > capacity_min(capacity, head.height, fair):
+                try:
+                    discount_rate = calculate_discount_rate(head, node, range_blocks=ERA_SIZE)
+                except ValueError:
+                    discount_rate = 0.0
+                cost = claim_cost(storage_rate, bytes_per_claim, band)
+                items = [
+                    (storage_id, lane_value(new_size, fair, discount_rate, cost), prefix_bits)
+                    for storage_id, (new_size, prefix_bits) in held.items()
+                ]
+                for storage_id in lanes_to_release(items, fair, capacity_min(capacity, head.height, fair)):
+                    queue.released.add(storage_id)
+                    held.pop(storage_id)
+
+            pending = [entry for entry in pending if entry[0] not in queue.released]
+            if not pending:
+                popped = queue_pop_due(queue, head.height, band)
+            entries = pending or _claim_step(
+                node,
+                head,
+                storage_tree,
+                popped,
+                queue,
+                held,
+                storage_rate,
+                bytes_per_claim,
+                stop.is_set,
+            )
+            if not entries:
+                stop.wait(SLOT_DURATION_SECONDS)
+                continue
+            groups = _split_claims(entries)
+            pending = [entry for group in groups[1:] for entry in group]
+            in_flight = _send_batch(node, head, groups[0], None, storage_rate)
+            if in_flight is None:
+                for entry in groups[0]:
+                    queue_push(queue, entry[0], head.height + (fair or 1))
+            else:
+                bytes_per_claim = in_flight.tx_bytes // len(in_flight.entries)
+            time.sleep(0)
+        except Exception as exc:
+            node.logger.exception("Claim worker: pass failed: %s", exc)
+            if popped:
+                kept = {storage_id for _, storage_id in queue.heap}
+                if in_flight is not None:
+                    kept.update(entry[0] for entry in in_flight.entries)
+                kept.update(entry[0] for entry in pending)
+                for storage_id in popped:
+                    if storage_id not in kept:
+                        queue_push(queue, storage_id, head.height + (fair or 1))
+            stop.wait(SLOT_DURATION_SECONDS)

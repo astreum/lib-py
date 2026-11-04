@@ -28,9 +28,11 @@ if str(HELPERS_DIR) not in sys.path:
     sys.path.insert(0, str(HELPERS_DIR))
 
 from dataclasses import replace
+from unittest.mock import patch
 
 from blake3 import blake3
 
+from astreum.consensus.transaction import apply as apply_module
 from astreum.consensus.transaction import apply_transaction
 from astreum.consensus.transaction.code import TransactionCode
 from astreum.consensus.transaction.model import Transaction
@@ -41,6 +43,7 @@ from astreum.consensus.transaction.storage.model import (
     storage_record_to_expr,
 )
 from astreum.consensus.transaction.storage.initial import generate_initial_storage_record
+from astreum.consensus.transaction.storage import payment
 from astreum.consensus.transaction.storage.payment import (
     _leading_zero_bits,
     challenge_index as _challenge_index,
@@ -112,6 +115,11 @@ def _claim_for(storage_id: bytes, slots: list[Expr], index: int, nonce: int = 0,
         nonce,
         lane,
     )
+
+
+def _same_distance_key(pk: bytes) -> bytes:
+    """A winner key with ``delta == 0`` against *pk*."""
+    return pk[:-1] + bytes([pk[-1] ^ 1])
 
 
 # ---------- test class ----------
@@ -488,7 +496,8 @@ class TestStoragePayment(unittest.TestCase):
         self.assertEqual(self._status(), STATUS_FAILED)
 
     def test_insufficient_pow_fails(self):
-        """Not-incumbent, era=0 → fib(13)=233 bits required → nonce=0 fails."""
+        """A takeover at the parent's storage_difficulty needs work: nonce=0 fails."""
+        self.prev_block.storage_difficulty = 40
         sender_pk, _ = seed_sender_account(self.block, balance=1_000_000)
         list_id = os.urandom(32)
         # last_payment_winner=ZERO32 → new sender is NOT incumbent
@@ -642,8 +651,9 @@ class TestStoragePayment(unittest.TestCase):
 
     def test_work_for_one_lane_fails_on_other(self):
         """A nonce found for lane 0 does not pay on lane 1."""
-        height = 7 * ERA_SIZE  # 7 eras old: the takeover needs fib(6) = 8 bits
+        height = 1 << 13  # elapsed 2**13: the takeover needs 20 - 12 = 8 bits
         self._reset(height)
+        self.prev_block.storage_difficulty = 20
         list_id, lbh = os.urandom(32), os.urandom(32)
         slots = _slots(1)  # one slot: both lanes challenge it, with the same proof
         pk, _ = seed_sender_account(self.block, balance=1_000_000)
@@ -665,7 +675,8 @@ class TestStoragePayment(unittest.TestCase):
             lane_state = lambda w: StorageLane(block_hash=lbh, height=0, winner=w)
             self._seed_storage_record(
                 list_id, slots=slots, last_payment_block_hash=lbh,
-                last_payment_winner=os.urandom(32), lane1=lane_state(os.urandom(32)),
+                last_payment_winner=_same_distance_key(pk),
+                lane1=lane_state(_same_distance_key(pk)),
             )
             self._submit_claims(pk, [_claim_for(list_id, slots, 0, nonce, lane)])
             return self._status()
@@ -695,18 +706,21 @@ class TestStoragePayment(unittest.TestCase):
         self.assertEqual(self._balance(pk_b), before_b - fee_b + 100 * (10 - 6))
 
     def test_takeover_penalty_per_lane(self):
-        """The penalty uses the claimed lane: a fresh lane 0 is hard, an old lane 1 is free."""
-        height = 14 * ERA_SIZE
+        """The bits use the claimed lane: a fresh lane 0 is hard, an old lane 1 is free."""
+        height = 1 << 40
         self._reset(height)
+        self.prev_block.storage_difficulty = 40
         pk, _ = seed_sender_account(self.block, balance=1_000_000)
         pk2, _ = seed_sender_account(self.block, balance=1_000_000)
         list_id, lbh = os.urandom(32), os.urandom(32)
         record, slots = self._seed_storage_record(
             list_id,
             last_payment_block_hash=lbh,
-            last_payment_height=height - 1,  # 0 eras old: 233 bits
-            last_payment_winner=os.urandom(32),
-            lane1=StorageLane(block_hash=lbh, height=0, winner=os.urandom(32)),  # 14 eras: 0 bits
+            last_payment_height=height - 1,  # elapsed 1: 40 bits
+            last_payment_winner=_same_distance_key(pk),
+            lane1=StorageLane(
+                block_hash=lbh, height=0, winner=_same_distance_key(pk2)
+            ),  # elapsed 2**40: 0 bits
         )
         self._submit_claims(pk, [self._valid_claim(record, slots, list_id, lane=0)])
         self.assertEqual(self._status(), STATUS_FAILED)
@@ -760,6 +774,104 @@ class TestStoragePayment(unittest.TestCase):
         )
         for name in ("slots_root", "new_count", "new_size", "creation_block_hash"):
             self.assertEqual(getattr(updated, name), getattr(record, name), name)
+
+    # --- claim count and vote ---
+
+    def _takeover(self, elapsed, *, interval=8, winner="other", bits=0, extra_patches=()):
+        """Submit a claim on lane 0 that is *elapsed* blocks old; return the sender key."""
+        self._reset(elapsed)
+        pk, _ = seed_sender_account(self.block, balance=1_000_000)
+        list_id = os.urandom(32)
+        winner_key = pk if winner == "self" else _same_distance_key(pk)
+        record, slots = self._seed_storage_record(list_id, last_payment_winner=winner_key)
+        claim = self._valid_claim(record, slots, list_id)
+        patches = [
+            patch.object(payment, "required_bits", return_value=bits),
+            patch.object(payment, "fair_interval", return_value=interval),
+            *extra_patches,
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        self._submit_claims(pk, [claim])
+        return pk
+
+    def test_takeover_early_votes_up(self):
+        self._takeover(4)
+        self.assertEqual(self._status(), STATUS_SUCCESS)
+        self.assertEqual(self.block.storage_votes, 1)
+        self.assertEqual(self.block.storage_claim_count, 1)
+
+    def test_takeover_at_interval_no_vote(self):
+        self._takeover(8)
+        self.assertEqual(self._status(), STATUS_SUCCESS)
+        self.assertEqual(self.block.storage_votes, 0)
+        self.assertEqual(self.block.storage_claim_count, 1)
+
+    def test_takeover_late_votes_down(self):
+        self._takeover(9)
+        self.assertEqual(self._status(), STATUS_SUCCESS)
+        self.assertEqual(self.block.storage_votes, -1)
+        self.assertEqual(self.block.storage_claim_count, 1)
+
+    def _takeover_with_delta(self, elapsed, delta):
+        self._takeover(
+            elapsed,
+            extra_patches=(patch.object(payment, "distance_delta", return_value=delta),),
+        )
+        self.assertEqual(self._status(), STATUS_SUCCESS)
+        self.assertEqual(self.block.storage_claim_count, 1)
+
+    def test_takeover_same_distance_before_interval_votes_up(self):
+        self._takeover_with_delta(5, 0)
+        self.assertEqual(self.block.storage_votes, 1)
+
+    def test_takeover_nearer_sender_crosses_interval_votes_down(self):
+        # elapsed 5 << 1 is 10, past the interval of 8
+        self._takeover_with_delta(5, 1)
+        self.assertEqual(self.block.storage_votes, -1)
+
+    def test_takeover_nearer_sender_lands_on_interval_no_vote(self):
+        # elapsed 4 << 1 is 8, the interval
+        self._takeover_with_delta(4, 1)
+        self.assertEqual(self.block.storage_votes, 0)
+
+    def test_takeover_farther_sender_crosses_interval_votes_up(self):
+        # elapsed 9 >> 1 is 4, before the interval; delta 0 would vote down
+        self._takeover_with_delta(9, -1)
+        self.assertEqual(self.block.storage_votes, 1)
+
+    def test_holder_claim_counts_no_vote(self):
+        self._takeover(4, winner="self")
+        self.assertEqual(self._status(), STATUS_SUCCESS)
+        self.assertEqual(self.block.storage_votes, 0)
+        self.assertEqual(self.block.storage_claim_count, 1)
+
+    def test_no_interval_no_vote(self):
+        self._takeover(4, interval=None)
+        self.assertEqual(self._status(), STATUS_SUCCESS)
+        self.assertEqual(self.block.storage_votes, 0)
+        self.assertEqual(self.block.storage_claim_count, 1)
+
+    def test_parent_difficulty_raises_bits(self):
+        self._reset(16)
+        self.prev_block.storage_difficulty = 40
+        pk, _ = seed_sender_account(self.block, balance=1_000_000)
+        list_id = os.urandom(32)
+        record, slots = self._seed_storage_record(
+            list_id, last_payment_winner=_same_distance_key(pk)
+        )
+        self._submit_claims(pk, [self._valid_claim(record, slots, list_id, nonce=0)])
+        self.assertEqual(self._status(), STATUS_FAILED)
+        self.assertEqual(self.block.storage_claim_count, 0)
+
+    def test_rolled_back_takeover_leaves_no_count(self):
+        self._takeover(
+            4, extra_patches=[patch.object(apply_module, "storage_walk_fee", return_value=10**12)]
+        )
+        self.assertEqual(self._status(), STATUS_FAILED)
+        self.assertEqual(self.block.storage_votes, 0)
+        self.assertEqual(self.block.storage_claim_count, 0)
 
 
 def _all_cells(expr):

@@ -109,10 +109,10 @@ def _make_previous_block() -> Block:
         accounts_hash=ZERO32,
         total_transaction_fee=0,
         total_storage_fee=0,
-        statistics=[(1, 1, 0, 0)],
+        statistics=[(1, 1, 0, 0, 0, 0)],
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
-        difficulty=1,
+        validation_difficulty=1,
         validator_public_key_bytes=os.urandom(32),
     )
 
@@ -131,7 +131,7 @@ def _make_block(
         total_storage_fee=0,
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
-        difficulty=1,
+        validation_difficulty=1,
         validator_public_key_bytes=os.urandom(32),
     )
     block.accounts = Accounts()

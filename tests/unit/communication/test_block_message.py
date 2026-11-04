@@ -73,10 +73,10 @@ def _mined_block(previous, key, *, sign=True, pow_ok=True, height=None):
         accounts_hash=b"\x0a" * 32,
         total_transaction_fee=0,
         total_storage_fee=0,
-        statistics=[(1, 1, 0, 0)],
+        statistics=[(1, 1, 0, 0, 0, 0)],
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
-        difficulty=calculate_block_difficulty(previous.timestamp, timestamp, previous.difficulty),
+        validation_difficulty=calculate_block_difficulty(previous.timestamp, timestamp, previous.validation_difficulty),
         validator_public_key_bytes=_pub(key),
     )
     signer = key.sign if sign else (lambda body_hash: b"\x00" * 64)
@@ -104,10 +104,10 @@ def _genesis_like(key):
         accounts_hash=b"\x0a" * 32,
         total_transaction_fee=0,
         total_storage_fee=0,
-        statistics=[(1, 1, 0, 0)],
+        statistics=[(1, 1, 0, 0, 0, 0)],
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
-        difficulty=1,
+        validation_difficulty=1,
         validator_public_key_bytes=_pub(key),
     )
     generate_block_nonce(block=block, difficulty=1, sign=key.sign)

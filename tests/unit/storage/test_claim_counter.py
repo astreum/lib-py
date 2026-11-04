@@ -1,7 +1,8 @@
 import sys
 import unittest
+from fractions import Fraction
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, "src")
 
@@ -12,12 +13,13 @@ from astreum.consensus.transaction.code import TransactionCode
 from astreum.consensus.transaction.storage.model import StorageLane, StorageRecord
 from astreum.expression import ZERO32
 from astreum.storage.workers import claim as claim_mod
+from astreum.storage.workers.claim_flow import InFlight
+from astreum.storage.workers.claim_schedule import ClaimQueue, LaneChoice, pow_budget
 from astreum.storage.workers.claim import (
-    _BASE_TX_FEE,
-    _build_claims_for_records,
     _build_multi_claim_tx,
-    _next_claim_counter,
-    _submit_claims,
+    _chain_counter,
+    _claim_step,
+    _send_batch,
 )
 from astreum.utils.config import NodeConfig
 
@@ -51,51 +53,38 @@ def _make_node(storage_public_key_bytes, accounts, chain_id=1):
         config=NodeConfig(chain_id=chain_id),
         storage_public_key_bytes=storage_public_key_bytes,
         storage_secret_key=None,
-        latest_block=SimpleNamespace(accounts=accounts),
+        latest_block=SimpleNamespace(accounts=accounts, height=40),
         logger=SimpleNamespace(info=lambda *a, **k: None, exception=lambda *a, **k: None),
     )
     return node
 
 
-class TestNextClaimCounter(unittest.TestCase):
+class TestChainCounter(unittest.TestCase):
     def setUp(self):
         self.secret, self.public = _make_keys()
         self.pk = _public_bytes(self.public)
 
-    def test_on_chain_counter_used(self):
-        account = SimpleNamespace(counter=7)
-        node = _make_node(self.pk, _AccountsStub(account=account))
-        self.assertEqual(_next_claim_counter(node), 7)
-
-    def test_local_wins_when_ahead(self):
-        account = SimpleNamespace(counter=3)
-        node = _make_node(self.pk, _AccountsStub(account=account))
-        node.next_claim_counter = 4
-        self.assertEqual(_next_claim_counter(node), 4)
-
-    def test_on_chain_wins_when_ahead(self):
-        account = SimpleNamespace(counter=9)
-        node = _make_node(self.pk, _AccountsStub(account=account))
-        node.next_claim_counter = 2
-        self.assertEqual(_next_claim_counter(node), 9)
+    def test_chain_counter(self):
+        node = _make_node(self.pk, _AccountsStub(account=SimpleNamespace(counter=7)))
+        self.assertEqual(_chain_counter(node), 7)
 
     def test_missing_account_is_zero(self):
         node = _make_node(self.pk, _AccountsStub(account=None))
-        self.assertEqual(_next_claim_counter(node), 0)
+        self.assertEqual(_chain_counter(node), 0)
 
-    def test_fetch_failure_falls_back_to_local(self):
+    def test_fetch_failure_is_zero(self):
         node = _make_node(self.pk, _AccountsStub(raises=True))
-        node.next_claim_counter = 5
-        self.assertEqual(_next_claim_counter(node), 5)
+        self.assertEqual(_chain_counter(node), 0)
 
-    def test_fetch_failure_without_local_is_zero(self):
-        node = _make_node(self.pk, _AccountsStub(raises=True))
-        self.assertEqual(_next_claim_counter(node), 0)
+    def test_reads_the_given_block(self):
+        node = _make_node(self.pk, _AccountsStub(account=SimpleNamespace(counter=7)))
+        other = SimpleNamespace(accounts=_AccountsStub(account=SimpleNamespace(counter=9)))
+        self.assertEqual(_chain_counter(node, other), 9)
 
     def test_no_latest_block_is_zero(self):
         node = _make_node(self.pk, _AccountsStub(account=SimpleNamespace(counter=6)))
         node.latest_block = None
-        self.assertEqual(_next_claim_counter(node), 0)
+        self.assertEqual(_chain_counter(node), 0)
 
 
 def _claim(nonce, seed=0, slot_size=40, proof_len=3, lane=0):
@@ -134,100 +123,84 @@ class TestBuildMultiClaimTx(unittest.TestCase):
         self.assertNotEqual(tx1.expr().hash(), tx2.expr().hash())
 
 
-class TestSubmitClaimsGate(unittest.TestCase):
-    """Aggregate cost gate: send only if sum(payouts) covers the tx cost."""
+class TestSendBatch(unittest.TestCase):
+    """Send gate: send only if sum(payouts) - cost reaches the minimum profit."""
 
     def setUp(self):
         self.secret, self.public = _make_keys()
         self.pk = _public_bytes(self.public)
         self.node = _make_node(self.pk, _AccountsStub())
         self.node.storage_secret_key = self.secret
-        self.node.next_claim_counter = 5
+        self.head = SimpleNamespace(height=40)
 
     def _entries(self, payout, count=1):
         return [(*_claim(i, seed=i), payout) for i in range(count)]
 
-    def test_profitable_bundle_sent(self):
+    def _send(self, entries, min_profit=0, fee=10):
+        self.node.config.storage_claim_min_profit = min_profit
+        with patch.object(claim_mod, "storage_fee_at_rate", return_value=fee), patch(
+            "astreum.consensus.transaction.send.send_transaction"
+        ) as mock_send:
+            result = _send_batch(self.node, self.head, entries, 5, Fraction(1))
+        return result, mock_send
+
+    def test_send_batch_profitable(self):
         entries = self._entries(payout=1000)
-        with patch.object(claim_mod, "calculate_storage_fee", return_value=10), patch(
-            "astreum.consensus.transaction.send.send_transaction"
-        ) as mock_send:
-            _submit_claims(self.node, entries)
+        result, mock_send = self._send(entries)
+        self.assertEqual(result, InFlight(5, 40, entries, tx_bytes=result.tx_bytes))
+        self.assertGreater(result.tx_bytes, 0)
         mock_send.assert_called_once()
-        args, _ = mock_send.call_args
-        self.assertEqual(args[1].code, TransactionCode.STORAGE_PAYMENT)
-        self.assertEqual(self.node.next_claim_counter, 6)
+        tx = mock_send.call_args.args[1]
+        self.assertEqual(tx.code, TransactionCode.STORAGE_PAYMENT)
+        self.assertEqual(tx.counter, 5)
 
-    def test_unprofitable_bundle_dropped(self):
-        entries = self._entries(payout=1)
-        with patch.object(claim_mod, "calculate_storage_fee", return_value=10), patch(
-            "astreum.consensus.transaction.send.send_transaction"
-        ) as mock_send:
-            _submit_claims(self.node, entries)
-        mock_send.assert_not_called()
-        self.assertEqual(self.node.next_claim_counter, 5)
-
-    def test_fee_error_skips_pass(self):
+    def test_send_batch_sent_height_is_the_head_at_the_send(self):
+        self.node.latest_block.height = 43
         entries = self._entries(payout=1000)
-        with patch.object(
-            claim_mod, "calculate_storage_fee", side_effect=ValueError("no fees")
-        ), patch(
-            "astreum.consensus.transaction.send.send_transaction"
-        ) as mock_send:
-            _submit_claims(self.node, entries)
-        mock_send.assert_not_called()
-        self.assertEqual(self.node.next_claim_counter, 5)
+        result, _ = self._send(entries)
+        self.assertEqual(result.sent_height, 43)
 
-    def test_no_latest_block_noop(self):
-        self.node.latest_block = None
-        with patch.object(claim_mod, "calculate_storage_fee", return_value=10), patch(
+    def test_send_batch_reads_the_counter_at_the_send_block(self):
+        self.node.latest_block.accounts = _AccountsStub(account=SimpleNamespace(counter=7))
+        self.node.config.storage_claim_min_profit = 0
+        with patch.object(claim_mod, "storage_fee_at_rate", return_value=10), patch(
             "astreum.consensus.transaction.send.send_transaction"
         ) as mock_send:
-            _submit_claims(self.node, self._entries(payout=1000))
-        mock_send.assert_not_called()
+            result = _send_batch(self.node, self.head, self._entries(payout=1000), None, Fraction(1))
+        self.assertEqual(result.counter, 7)
+        self.assertEqual(mock_send.call_args.args[1].counter, 7)
 
-    def test_empty_entries_noop(self):
-        with patch.object(claim_mod, "calculate_storage_fee", return_value=10), patch(
-            "astreum.consensus.transaction.send.send_transaction"
-        ) as mock_send:
-            _submit_claims(self.node, [])
+    def test_send_batch_unprofitable(self):
+        result, mock_send = self._send(self._entries(payout=1))
+        self.assertIsNone(result)
         mock_send.assert_not_called()
 
-    def test_each_tx_of_a_split_bundle_is_gated_and_sent_on_its_own(self):
-        entries = [(*_claim(i, seed=i, slot_size=30_000), 1000) for i in range(4)]
-        with patch.object(claim_mod, "calculate_storage_fee", return_value=10), patch(
-            "astreum.consensus.transaction.send.send_transaction"
-        ) as mock_send:
-            _submit_claims(self.node, entries)
-        self.assertGreater(mock_send.call_count, 1)
-        counters = [c.args[1].counter for c in mock_send.call_args_list]
-        self.assertEqual(counters, list(range(5, 5 + len(counters))))
-        self.assertEqual(self.node.next_claim_counter, 5 + len(counters))
-
-    def test_an_unprofitable_tx_does_not_stop_the_next_one(self):
-        entries = [(*_claim(0, seed=0, slot_size=30_000), 1)] + [
-            (*_claim(i, seed=i, slot_size=30_000), 100_000) for i in (1, 2)
-        ]
-        with patch.object(claim_mod, "calculate_storage_fee", return_value=10), patch(
-            "astreum.consensus.transaction.send.send_transaction"
-        ) as mock_send:
-            _submit_claims(self.node, entries)
-        self.assertGreaterEqual(mock_send.call_count, 1)
-
-    def test_multi_claim_bundle_aggregates_payouts(self):
-        entries = self._entries(payout=100, count=3)  # 300 total
-        with patch.object(claim_mod, "calculate_storage_fee", return_value=10), patch(
-            "astreum.consensus.transaction.send.send_transaction"
-        ) as mock_send:
-            _submit_claims(self.node, entries)
+    def test_send_batch_below_min_profit(self):
+        cost = 1 + 10 + 10
+        entries = self._entries(payout=cost + 5)
+        result, mock_send = self._send(entries, min_profit=10)
+        self.assertIsNone(result)
+        mock_send.assert_not_called()
+        result, mock_send = self._send(entries, min_profit=5)
+        self.assertIsInstance(result, InFlight)
         mock_send.assert_called_once()
-        args, _ = mock_send.call_args
-        self.assertEqual(args[1].code, TransactionCode.STORAGE_PAYMENT)
-        self.assertEqual(self.node.next_claim_counter, 6)
+
+    def test_send_batch_aggregates_payouts(self):
+        result, mock_send = self._send(self._entries(payout=100, count=3))
+        self.assertIsNotNone(result)
+        mock_send.assert_called_once()
+
+    def test_send_batch_send_failure(self):
+        self.node.config.storage_claim_min_profit = 0
+        with patch.object(claim_mod, "storage_fee_at_rate", return_value=10), patch(
+            "astreum.consensus.transaction.send.send_transaction", side_effect=RuntimeError("down")
+        ):
+            result = _send_batch(self.node, self.head, self._entries(payout=1000), 5, Fraction(1))
+        self.assertIsNone(result)
 
 
 class TestComputeClaim(unittest.TestCase):
-    """_compute_pow_and_challenge: the slot, its proof and a PoW nonce, from the records table."""
+    """_build_claims: the slot, its proof and a PoW nonce, from the records table."""
 
     def setUp(self):
         from astreum.expression import bytes_
@@ -240,7 +213,8 @@ class TestComputeClaim(unittest.TestCase):
         self.root = create_merkle_tree(self.ids).root
         self.node = SimpleNamespace(
             storage_public_key_bytes=self.pk,
-            latest_block=SimpleNamespace(height=5),
+            storage_claim_hash_rate=1000.0,
+            latest_block=SimpleNamespace(height=5, storage_difficulty=0),
         )
 
     def _record(self, **kw):
@@ -257,13 +231,23 @@ class TestComputeClaim(unittest.TestCase):
         fields.update(kw)
         return StorageRecord(**fields)
 
-    def _run(self, record, blob=None, local=True, lane=0):
+    def _run(self, record, blob=None, local=True, lane=0, bits=0):
         blob = b"".join(self.ids) if blob is None else blob
         by_id = {s.hash(): s for s in self.slots}
-        with patch.object(claim_mod, "get_record_from_cold_storage", return_value=blob), patch.object(
-            claim_mod, "get_expr_from_local_storage", side_effect=lambda n, h: by_id.get(h) if local else None
+        with patch.object(
+            claim_mod, "get_records_from_cold_storage", return_value={self.storage_id: blob}
+        ), patch.object(claim_mod, "get_expr_from_hot_storage", return_value=None), patch.object(
+            claim_mod,
+            "get_exprs_from_cold_storage",
+            side_effect=lambda n, ids: {i: by_id[i] for i in ids if local and i in by_id},
         ):
-            return claim_mod._compute_pow_and_challenge(self.node, self.storage_id, record, lane)
+            return claim_mod._build_claims(
+                self.node,
+                self.node.latest_block,
+                [(self.storage_id, record, LaneChoice(lane, bits))],
+                1 << 20,
+                lambda: False,
+            )
 
     def test_claim_verifies_against_the_records_root(self):
         from astreum.crypto.merkle import MerkleTree, verify_merkle_tree_proof
@@ -271,9 +255,12 @@ class TestComputeClaim(unittest.TestCase):
         from astreum.consensus.transaction.storage.payment import challenge_index
 
         record = self._record()
-        storage_id, slot_bytes, proof, nonce, lane = self._run(record)
+        entries = self._run(record)
+        self.assertEqual(len(entries), 1)
+        storage_id, slot_bytes, proof, nonce, lane, payout = entries[0]
         self.assertEqual(storage_id, self.storage_id)
         self.assertEqual(lane, 0)
+        self.assertEqual(payout, 100 * 5)
         index = challenge_index(record.lanes[0].block_hash, self.storage_id, record.new_count, 0)
         self.assertEqual(decode_expr_from_bytes(slot_bytes).hash(), self.ids[index])
         self.assertTrue(
@@ -282,24 +269,104 @@ class TestComputeClaim(unittest.TestCase):
             )
         )
 
+    def test_nonce_meets_the_bits(self):
+        from astreum.consensus.transaction.storage.payment import _leading_zero_bits
+        from astreum.expression.expr import _encode_int
+        from blake3 import blake3
+
+        record = self._record()
+        (storage_id, slot_bytes, _proof, nonce, lane, _payout), = self._run(record, bits=8)
+        slot_id = self.ids[
+            claim_mod._challenge_index(record.lanes[0].block_hash, storage_id, record.new_count, 0)
+        ]
+        work = blake3(
+            record.lanes[0].block_hash + self.pk + storage_id + slot_id + slot_bytes
+            + _encode_int(nonce) + bytes([lane])
+        ).digest()
+        self.assertGreaterEqual(_leading_zero_bits(work), 8)
+
     def test_no_slot_list_no_claim(self):
-        with patch.object(claim_mod, "get_record_from_cold_storage", return_value=None):
-            self.assertIsNone(
-                claim_mod._compute_pow_and_challenge(self.node, self.storage_id, self._record(), 0)
+        with patch.object(claim_mod, "get_records_from_cold_storage", return_value={}), patch.object(
+            claim_mod, "get_expr_from_hot_storage", return_value=None
+        ), patch.object(claim_mod, "get_exprs_from_cold_storage", return_value={}):
+            self.assertEqual(
+                claim_mod._build_claims(
+                    self.node,
+                    self.node.latest_block,
+                    [(self.storage_id, self._record(), LaneChoice(0, 0))],
+                    10,
+                    lambda: False,
+                ),
+                [],
             )
 
     def test_a_slot_list_that_does_not_give_the_root_is_not_claimed(self):
         blob = b"".join(reversed(self.ids))
-        self.assertIsNone(self._run(self._record(), blob=blob))
+        self.assertEqual(self._run(self._record(), blob=blob), [])
 
     def test_a_list_of_the_wrong_length_is_not_claimed(self):
-        self.assertIsNone(self._run(self._record(), blob=b"".join(self.ids[:-1])))
+        self.assertEqual(self._run(self._record(), blob=b"".join(self.ids[:-1])), [])
 
     def test_slot_data_not_held_no_claim(self):
-        self.assertIsNone(self._run(self._record(), local=False))
+        self.assertEqual(self._run(self._record(), local=False), [])
 
     def test_empty_record_no_claim(self):
-        self.assertIsNone(self._run(self._record(new_count=0)))
+        self.assertEqual(self._run(self._record(new_count=0)), [])
+
+    def test_build_two_records_one_get_each(self):
+        other_id = b"\x22" * 32
+        blob = b"".join(self.ids)
+        by_id = {s.hash(): s for s in self.slots}
+        plans = [
+            (self.storage_id, self._record(), LaneChoice(0, 0)),
+            (other_id, self._record(), LaneChoice(0, 0)),
+        ]
+        with patch.object(
+            claim_mod,
+            "get_records_from_cold_storage",
+            return_value={self.storage_id: blob, other_id: blob},
+        ) as get_records, patch.object(
+            claim_mod, "get_expr_from_hot_storage", return_value=None
+        ), patch.object(
+            claim_mod,
+            "get_exprs_from_cold_storage",
+            side_effect=lambda n, ids: {i: by_id[i] for i in ids},
+        ) as get_exprs:
+            entries = claim_mod._build_claims(
+                self.node, self.node.latest_block, plans, 10, lambda: False
+            )
+        self.assertEqual([e[0] for e in entries], [self.storage_id, other_id])
+        get_records.assert_called_once()
+        get_exprs.assert_called_once()
+
+    def test_find_nonce_stops_on_stop_event(self):
+        with patch.object(claim_mod.time, "sleep") as sleep:
+            result = claim_mod._find_nonce(self.node, b"p", 0, 256, 1 << 20, lambda: True)
+        self.assertIsNone(result)
+        sleep.assert_not_called()
+
+    def test_find_nonce_updates_hash_rate(self):
+        self.node.storage_claim_hash_rate = 1.0  # one nonce a chunk
+        stops = iter([False, True])
+        result = claim_mod._find_nonce(self.node, b"p", 0, 256, 1 << 20, lambda: next(stops))
+        self.assertIsNone(result)
+        self.assertGreater(self.node.storage_claim_hash_rate, 1.0)
+
+    def test_find_nonce_budget(self):
+        with patch.object(claim_mod, "blake3") as hasher:
+            hasher.return_value.digest.return_value = b"\xff" * 32
+            result = claim_mod._find_nonce(self.node, b"p", 0, 256, 10, lambda: False)
+        self.assertIsNone(result)
+        self.assertEqual(hasher.call_count, 10)
+
+    def test_find_nonce_yields_after_each_chunk(self):
+        stops = iter([False, False, True])
+        with patch.object(claim_mod.time, "sleep") as sleep:
+            claim_mod._find_nonce(self.node, b"p", 0, 256, 1 << 30, lambda: next(stops))
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_measure_hash_rate_positive(self):
+        self.assertGreater(claim_mod.measure_hash_rate(), 0)
 
 
 class TestSplitClaims(unittest.TestCase):
@@ -337,75 +404,167 @@ class TestSplitClaims(unittest.TestCase):
         self.assertEqual(claim_mod._split_claims([]), [])
 
 
-class TestBuildClaimsCollectsPayouts(unittest.TestCase):
-    """_build_claims_for_records returns (claim, payout) tuples."""
-
-    ERA_SIZE = 1024
-
+class TestClaimStep(unittest.TestCase):
     def setUp(self):
-        self.secret, self.public = _make_keys()
-        self.pk = _public_bytes(self.public)
-        self.other_pk = _public_bytes(ed25519.Ed25519PrivateKey.generate().public_key())
+        self.pk = _public_bytes(_make_keys()[1])
+        self.other_a = b"\x02" * 32
+        self.other_b = b"\x03" * 32
         self.storage_id = b"\x0c" * 32
-        self.slot_id = b"\x0d" * 32
-        self.contract_head = SimpleNamespace(hash=lambda: b"\x0e" * 32)
-
-    def _node(self, winner):
-        node = SimpleNamespace(
-            config=NodeConfig(chain_id=1),
-            storage_public_key_bytes=winner,
+        self.node = SimpleNamespace(
+            config=NodeConfig(chain_id=1, storage_claim_min_profit=0),
+            storage_public_key_bytes=self.pk,
+            storage_claim_band=1,
+            storage_claim_hash_rate=1000.0,
+            storage_claim_inclusion_delay=1,
             logger=SimpleNamespace(info=lambda *a, **k: None, exception=lambda *a, **k: None),
         )
-        return node
+        self.head = SimpleNamespace(height=60, storage_difficulty=0)
+        self.queue = ClaimQueue()
+        self.held = {}
 
-    def _record(self, winner):
+    def _record(self, winner0, winner1, height0=0, height1=0):
         return StorageRecord(
             new_size=100,
             lanes=(
-                StorageLane(block_hash=b"\x11" * 32, height=0, winner=winner),
-                StorageLane(block_hash=b"\x12" * 32, height=0, winner=winner),
+                StorageLane(block_hash=b"\x11" * 32, height=height0, winner=winner0),
+                StorageLane(block_hash=b"\x12" * 32, height=height1, winner=winner1),
             ),
             new_count=1,
         )
 
-    def _run(self, node, winner, height):
-        latest_block = SimpleNamespace(
-            height=height,
-            accounts=_AccountsStub(account=SimpleNamespace(data=None)),
-        )
-        with patch.object(
-            claim_mod, "iter_records_in_cold_storage", return_value=iter([self.storage_id])
-        ), patch.object(claim_mod, "get_from_radix_tree", return_value=self.contract_head), patch.object(
-            claim_mod, "storage_record_from_storage", return_value=self._record(winner)
-        ), patch.object(
-            claim_mod,
-            "_compute_pow_and_challenge",
-            side_effect=lambda n, sid, rec, lane: (
-                self.storage_id, self.slot_id, [b"\x01" * 32], 7, lane
-            ),
+    def _step(self, record, build=None, interval=50, radix=True):
+        head_expr = SimpleNamespace(hash=lambda: b"\x0e" * 32) if radix else None
+        build = build or MagicMock(return_value=[])
+        with patch.object(claim_mod, "get_from_radix_tree", return_value=head_expr), patch.object(
+            claim_mod, "storage_record_from_storage", return_value=record
+        ), patch.object(claim_mod, "fair_interval", return_value=interval), patch.object(
+            claim_mod, "_build_claims", build
         ):
-            return _build_claims_for_records(node, latest_block, {})
+            entries = _claim_step(
+                self.node,
+                self.head,
+                object(),
+                [self.storage_id],
+                self.queue,
+                self.held,
+                Fraction(0),
+                100,
+                lambda: False,
+            )
+        return entries, build
 
-    def test_wall_drop_branch_payout(self):
-        # Non-incumbent takeover: needs 5+ eras elapsed.
-        node = self._node(self.pk)
-        entries = self._run(node, self.other_pk, 6 * self.ERA_SIZE)
-        self.assertEqual(
-            entries, [(self.storage_id, self.slot_id, [b"\x01" * 32], 7, 0, 100 * 6 * self.ERA_SIZE)]
-        )
-
-    def test_incumbent_branch_payout(self):
-        node = self._node(self.pk)
-        entries = self._run(node, self.pk, 2 * self.ERA_SIZE)
-        self.assertEqual(
-            entries, [(self.storage_id, self.slot_id, [b"\x01" * 32], 7, 0, 100 * 2 * self.ERA_SIZE)]
-        )
-
-    def test_young_record_skipped(self):
-        # Non-incumbent with < 5 eras elapsed: no claim.
-        node = self._node(self.pk)
-        entries = self._run(node, self.other_pk, 2 * self.ERA_SIZE)
+    def test_step_holder_not_due_pushed(self):
+        record = self._record(self.pk, self.other_a, height0=30)
+        entries, build = self._step(record)
         self.assertEqual(entries, [])
+        self.assertEqual(self.queue.heap, [(79, self.storage_id)])
+        build.assert_not_called()
+
+    def test_step_builds_due_claim(self):
+        record = self._record(self.pk, self.other_a)
+        entry = (self.storage_id, b"s", [b"p"], 3, 0, 6000)
+        entries, build = self._step(record, build=MagicMock(return_value=[entry]))
+        self.assertEqual(entries, [entry])
+        self.assertEqual(self.queue.heap, [])
+        self.assertIn(self.storage_id, self.held)
+        plans = build.call_args.args[2]
+        self.assertEqual(plans, [(self.storage_id, record, LaneChoice(0, 0))])
+
+    def test_step_waits_for_profit(self):
+        self.node.config.storage_claim_min_profit = 10_000
+        record = self._record(self.pk, self.other_a)
+        entries, _ = self._step(record)
+        self.assertEqual(entries, [])
+        self.assertEqual(self.queue.heap, [(101, self.storage_id)])
+
+    def test_step_drops_held_when_lane_lost(self):
+        self.held[self.storage_id] = (100, 3)
+        entries, _ = self._step(self._record(self.other_a, self.other_b, height0=59, height1=59))
+        self.assertEqual(entries, [])
+        self.assertNotIn(self.storage_id, self.held)
+
+    def test_step_records_held_lane(self):
+        from astreum.consensus.transaction.storage.difficulty import shared_prefix_bits
+
+        self._step(self._record(self.pk, self.other_a, height0=30))
+        self.assertEqual(self.held[self.storage_id], (100, shared_prefix_bits(self.pk, self.storage_id)))
+
+    def test_step_missing_record_pushed_back(self):
+        entries, build = self._step(None, radix=False)
+        self.assertEqual(entries, [])
+        self.assertEqual(self.queue.heap, [(110, self.storage_id)])
+        build.assert_not_called()
+
+    def test_step_missing_record_drops_held(self):
+        self.held[self.storage_id] = (100, 3)
+        self._step(None, radix=False)
+        self.assertNotIn(self.storage_id, self.held)
+
+    def test_step_read_failure_pushed_back_and_others_handled(self):
+        failing = b"\x0d" * 32
+        record = self._record(self.pk, self.other_a, height0=30)
+        self.held[failing] = (100, 3)
+
+        def radix(tree, node, storage_id):
+            if storage_id == failing:
+                raise RuntimeError("read failed")
+            return SimpleNamespace(hash=lambda: b"\x0e" * 32)
+
+        with patch.object(claim_mod, "get_from_radix_tree", side_effect=radix), patch.object(
+            claim_mod, "storage_record_from_storage", return_value=record
+        ), patch.object(claim_mod, "fair_interval", return_value=50), patch.object(
+            claim_mod, "_build_claims", MagicMock(return_value=[])
+        ):
+            entries = _claim_step(
+                self.node,
+                self.head,
+                object(),
+                [failing, self.storage_id],
+                self.queue,
+                self.held,
+                Fraction(0),
+                100,
+                lambda: False,
+            )
+        self.assertEqual(entries, [])
+        self.assertEqual(sorted(self.queue.heap), [(79, self.storage_id), (110, failing)])
+        self.assertNotIn(failing, self.held)
+        self.assertIn(self.storage_id, self.held)
+
+    def test_step_one_budget_for_the_whole_step(self):
+        other_id = b"\x0d" * 32
+        record = self._record(self.pk, self.other_a)
+        entry_a = (self.storage_id, b"s", [b"p"], 3, 0, 6000)
+        entry_b = (other_id, b"s", [b"p"], 4, 0, 6000)
+        build = MagicMock(return_value=[entry_a, entry_b])
+        with patch.object(
+            claim_mod, "get_from_radix_tree", return_value=SimpleNamespace(hash=lambda: b"\x0e" * 32)
+        ), patch.object(claim_mod, "storage_record_from_storage", return_value=record), patch.object(
+            claim_mod, "fair_interval", return_value=50
+        ), patch.object(claim_mod, "_build_claims", build):
+            entries = _claim_step(
+                self.node,
+                self.head,
+                object(),
+                [self.storage_id, other_id],
+                self.queue,
+                self.held,
+                Fraction(0),
+                100,
+                lambda: False,
+            )
+        self.assertEqual(entries, [entry_a, entry_b])
+        build.assert_called_once()
+        budget = pow_budget(self.node.storage_claim_hash_rate, 50, 2)
+        self.assertEqual(build.call_args.args[3], budget)
+        self.assertEqual(self.queue.heap, [])
+
+    def test_step_unbuilt_claim_pushed_back(self):
+        record = self._record(self.pk, self.other_a)
+        entries, build = self._step(record)
+        self.assertEqual(entries, [])
+        build.assert_called_once()
+        self.assertEqual(self.queue.heap, [(110, self.storage_id)])
 
 
 if __name__ == "__main__":

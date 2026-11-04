@@ -154,7 +154,7 @@ class TestStorageIndexing(unittest.TestCase):
                 total_storage_fee=0,
                 transactions_hash=ZERO32,
                 receipts_hash=ZERO32,
-                difficulty=1,
+                validation_difficulty=1,
                 validator_public_key_bytes=os.urandom(32),
                 expr_id=os.urandom(32),
                 accounts=Accounts(),

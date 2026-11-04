@@ -1,4 +1,5 @@
 
+import math
 from pathlib import Path
 from typing import Dict, List, Optional
 from cryptography.hazmat.primitives import serialization
@@ -44,6 +45,8 @@ DEFAULT_STORAGE_RADIX_KEY_MAX_BYTES = 32
 DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS = 0.25
 # Most pages one STORAGE_FOUND reply may span (about 4 MiB at ~65 KB a page).
 DEFAULT_STORAGE_FOUND_MAX_PAGES = 64
+DEFAULT_STORAGE_CLAIM_FEE_WINDOW = 65_536  # blocks
+DEFAULT_STORAGE_CLAIM_MIN_PROFIT = 10**9  # astre
 
 
 class NodeConfig:
@@ -92,6 +95,11 @@ class NodeConfig:
         storage_radix_key_max_bytes: int = DEFAULT_STORAGE_RADIX_KEY_MAX_BYTES,
         storage_request_flush_interval: float = DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS,
         storage_found_max_pages: int = DEFAULT_STORAGE_FOUND_MAX_PAGES,
+        storage_claim_band: Optional[int] = None,
+        storage_claim_hash_rate: Optional[float] = None,
+        storage_claim_inclusion_delay: Optional[int] = None,
+        storage_claim_fee_window: int = DEFAULT_STORAGE_CLAIM_FEE_WINDOW,
+        storage_claim_min_profit: int = DEFAULT_STORAGE_CLAIM_MIN_PROFIT,
         fair_use_limit: int = DEFAULT_FAIR_USE_LIMIT_BYTES,
         fair_use_ratio: float = DEFAULT_FAIR_USE_RATIO,
         verification_max_stale_seconds: int = DEFAULT_VERIFICATION_MAX_STALE_SECONDS,
@@ -157,6 +165,11 @@ class NodeConfig:
         self.storage_radix_key_max_bytes = storage_radix_key_max_bytes
         self.storage_request_flush_interval = storage_request_flush_interval
         self.storage_found_max_pages = storage_found_max_pages
+        self.storage_claim_band = storage_claim_band
+        self.storage_claim_hash_rate = storage_claim_hash_rate
+        self.storage_claim_inclusion_delay = storage_claim_inclusion_delay
+        self.storage_claim_fee_window = storage_claim_fee_window
+        self.storage_claim_min_profit = storage_claim_min_profit
         self.fair_use_limit = fair_use_limit
         self.fair_use_ratio = fair_use_ratio
         self.verification_max_stale_seconds = verification_max_stale_seconds
@@ -521,6 +534,43 @@ def _setup_storage_requests(config: Dict) -> None:
     config["storage_found_max_pages"] = found_pages_raw
 
 
+def _setup_storage_claim(config: Dict) -> None:
+    """Normalize the claim worker start values and the claim fee keys.
+
+    A start value of ``None`` or a missing key gives ``None``.
+    """
+    if config.get("storage_claim_band") is None:
+        config["storage_claim_band"] = None
+    else:
+        config["storage_claim_band"] = _parse_int(
+            "storage_claim_band", config["storage_claim_band"], 1
+        )
+    if config.get("storage_claim_hash_rate") is None:
+        config["storage_claim_hash_rate"] = None
+    else:
+        config["storage_claim_hash_rate"] = _parse_float(
+            "storage_claim_hash_rate", config["storage_claim_hash_rate"], False
+        )
+        if not math.isfinite(config["storage_claim_hash_rate"]):
+            raise ValueError("storage_claim_hash_rate must be a finite number")
+    if config.get("storage_claim_inclusion_delay") is None:
+        config["storage_claim_inclusion_delay"] = None
+    else:
+        config["storage_claim_inclusion_delay"] = _parse_int(
+            "storage_claim_inclusion_delay", config["storage_claim_inclusion_delay"], 1
+        )
+    config["storage_claim_fee_window"] = _parse_int(
+        "storage_claim_fee_window",
+        config.get("storage_claim_fee_window", DEFAULT_STORAGE_CLAIM_FEE_WINDOW),
+        1,
+    )
+    config["storage_claim_min_profit"] = _parse_int(
+        "storage_claim_min_profit",
+        config.get("storage_claim_min_profit", DEFAULT_STORAGE_CLAIM_MIN_PROFIT),
+        0,
+    )
+
+
 def _setup_verification(config: Dict) -> None:
     """Normalize fair use, verification and message timestamp keys."""
     config["fair_use_limit"] = _parse_int(
@@ -728,6 +778,7 @@ def config_setup(config: Optional[Dict] = None) -> NodeConfig:
     values = dict(config) if config is not None else {}
     _setup_chain(values)
     _setup_storage_limits(values)
+    _setup_storage_claim(values)
     _setup_logging(values)
     _setup_network(values)
     _setup_storage_requests(values)

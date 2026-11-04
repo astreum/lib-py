@@ -102,7 +102,7 @@ class TestGenesisChain(unittest.TestCase):
             )
 
             # Verify genesis statistics range 0
-            self.assertEqual(block.statistics, [(1, 1, 0, 0)])
+            self.assertEqual(block.statistics, [(1, 1, 0, 0, 0, 0)])
             self.assertEqual(block.cumulative_total_fee, 1)
             self.assertEqual(block.cumulative_stake, 1)
 
@@ -115,7 +115,7 @@ class TestGenesisChain(unittest.TestCase):
             # (create_block coerces signature=b"" to ZERO32)
             self.assertEqual(block.signature, ZERO32)
             self.assertEqual(block.nonce, 0)
-            self.assertEqual(block.difficulty, 0)
+            self.assertEqual(block.validation_difficulty, 0)
 
             # Log how many blocks were produced
             gh = genesis_hash
