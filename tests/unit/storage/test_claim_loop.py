@@ -63,7 +63,7 @@ class TestClaimLoop(unittest.TestCase):
 
     def _send(self, node, head, entries, counter, rate):
         counter = self.counter if counter is None else counter
-        return InFlight(counter, node.latest_block.height, entries, tx_bytes=100)
+        return InFlight(counter, node.latest_block.height, entries, tx_bytes=100), 100
 
     def _head(self, height):
         tree = object()
@@ -182,10 +182,20 @@ class TestClaimLoop(unittest.TestCase):
     def test_bytes_per_claim_from_last_send(self):
         entries = [_entry(A), _entry(B), _entry(C)]
         self.step.return_value = entries
-        self.send.side_effect = lambda node, head, e, counter, rate: InFlight(
-            self.counter if counter is None else counter, head.height, e, tx_bytes=900
+        self.send.side_effect = lambda node, head, e, counter, rate: (
+            InFlight(self.counter if counter is None else counter, head.height, e, tx_bytes=900),
+            900,
         )
         self._run([self._at(10), self._at(11, counter=1)])
+        self.assertEqual(self.step.call_count, 2)
+        self.assertEqual(self.step.call_args_list[0].args[7], 0)
+        self.assertEqual(self.step.call_args_list[1].args[7], 300)
+
+    def test_bytes_per_claim_from_a_dropped_batch(self):
+        entries = [_entry(A), _entry(B), _entry(C)]
+        self.step.return_value = entries
+        self.send.side_effect = lambda node, head, e, counter, rate: (None, 900)
+        self._run([self._at(10), self._at(11)])
         self.assertEqual(self.step.call_count, 2)
         self.assertEqual(self.step.call_args_list[0].args[7], 0)
         self.assertEqual(self.step.call_args_list[1].args[7], 300)

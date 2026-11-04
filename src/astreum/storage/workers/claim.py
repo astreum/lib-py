@@ -353,7 +353,7 @@ def _send_batch(
     entries: list[Entry],
     counter: int | None,
     rate: Fraction,
-) -> InFlight | None:
+) -> tuple[InFlight | None, int]:
     """Build one claim transaction and send it when it pays.
 
     The batch goes out only when its payouts, less the cost at ``rate``, reach
@@ -369,8 +369,12 @@ def _send_batch(
         rate: The storage rate used for the cost.
 
     Returns:
-        The in-flight record, or None if the batch is not worth sending or the send failed.
+        The in-flight record, or None if the batch is not worth sending or the
+        send failed, and the size of the built transaction in bytes, or 0 if
+        the build failed. The size is given for a dropped batch too, so the
+        caller can plan the next batch with the real cost.
     """
+    tx_bytes = 0
     try:
         sent = getattr(node, "latest_block", None) or head
         if counter is None:
@@ -389,7 +393,7 @@ def _send_batch(
                 total_payout,
                 cost,
             )
-            return None
+            return None, tx_bytes
         from astreum.consensus.transaction.send import send_transaction
         send_transaction(node, tx)
         node.logger.info(
@@ -399,10 +403,10 @@ def _send_batch(
             total_payout,
             cost,
         )
-        return InFlight(counter, sent.height, entries, tx_bytes=tx_bytes)
+        return InFlight(counter, sent.height, entries, tx_bytes=tx_bytes), tx_bytes
     except Exception as exc:
         node.logger.exception("Claim worker: failed to submit claims: %s", exc)
-        return None
+        return None, tx_bytes
 
 
 def _claim_step(
@@ -581,7 +585,11 @@ def claim_storage(node: Node) -> None:
                     band = band_after_loss(band)
                     node.storage_claim_band = band
                     lost = in_flight
-                    in_flight = _send_batch(node, head, lost.entries, lost.counter, storage_rate)
+                    in_flight, tx_bytes = _send_batch(
+                        node, head, lost.entries, lost.counter, storage_rate
+                    )
+                    if tx_bytes:
+                        bytes_per_claim = tx_bytes // len(lost.entries)
                     if in_flight is None:
                         for entry in lost.entries:
                             queue_push(queue, entry[0], head.height + (fair or 1))
@@ -620,12 +628,12 @@ def claim_storage(node: Node) -> None:
                 continue
             groups = _split_claims(entries)
             pending = [entry for group in groups[1:] for entry in group]
-            in_flight = _send_batch(node, head, groups[0], None, storage_rate)
+            in_flight, tx_bytes = _send_batch(node, head, groups[0], None, storage_rate)
+            if tx_bytes:
+                bytes_per_claim = tx_bytes // len(groups[0])
             if in_flight is None:
                 for entry in groups[0]:
                     queue_push(queue, entry[0], head.height + (fair or 1))
-            else:
-                bytes_per_claim = in_flight.tx_bytes // len(in_flight.entries)
             time.sleep(0)
         except Exception as exc:
             node.logger.exception("Claim worker: pass failed: %s", exc)

@@ -141,7 +141,7 @@ class TestSendBatch(unittest.TestCase):
         with patch.object(claim_mod, "storage_fee_at_rate", return_value=fee), patch(
             "astreum.consensus.transaction.send.send_transaction"
         ) as mock_send:
-            result = _send_batch(self.node, self.head, entries, 5, Fraction(1))
+            result, self.tx_bytes = _send_batch(self.node, self.head, entries, 5, Fraction(1))
         return result, mock_send
 
     def test_send_batch_profitable(self):
@@ -149,6 +149,7 @@ class TestSendBatch(unittest.TestCase):
         result, mock_send = self._send(entries)
         self.assertEqual(result, InFlight(5, 40, entries, tx_bytes=result.tx_bytes))
         self.assertGreater(result.tx_bytes, 0)
+        self.assertEqual(self.tx_bytes, result.tx_bytes)
         mock_send.assert_called_once()
         tx = mock_send.call_args.args[1]
         self.assertEqual(tx.code, TransactionCode.STORAGE_PAYMENT)
@@ -166,7 +167,7 @@ class TestSendBatch(unittest.TestCase):
         with patch.object(claim_mod, "storage_fee_at_rate", return_value=10), patch(
             "astreum.consensus.transaction.send.send_transaction"
         ) as mock_send:
-            result = _send_batch(self.node, self.head, self._entries(payout=1000), None, Fraction(1))
+            result, _ = _send_batch(self.node, self.head, self._entries(payout=1000), None, Fraction(1))
         self.assertEqual(result.counter, 7)
         self.assertEqual(mock_send.call_args.args[1].counter, 7)
 
@@ -174,6 +175,14 @@ class TestSendBatch(unittest.TestCase):
         result, mock_send = self._send(self._entries(payout=1))
         self.assertIsNone(result)
         mock_send.assert_not_called()
+
+    def test_an_unprofitable_batch_still_gives_its_size(self):
+        self._send(self._entries(payout=1000))
+        sent_bytes = self.tx_bytes
+        result, _ = self._send(self._entries(payout=1))
+        self.assertIsNone(result)
+        self.assertGreater(sent_bytes, 0)
+        self.assertEqual(self.tx_bytes, sent_bytes)
 
     def test_send_batch_below_min_profit(self):
         cost = 1 + 10 + 10
@@ -195,7 +204,7 @@ class TestSendBatch(unittest.TestCase):
         with patch.object(claim_mod, "storage_fee_at_rate", return_value=10), patch(
             "astreum.consensus.transaction.send.send_transaction", side_effect=RuntimeError("down")
         ):
-            result = _send_batch(self.node, self.head, self._entries(payout=1000), 5, Fraction(1))
+            result, _ = _send_batch(self.node, self.head, self._entries(payout=1000), 5, Fraction(1))
         self.assertIsNone(result)
 
 
