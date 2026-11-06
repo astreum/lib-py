@@ -244,7 +244,7 @@ def handle_storage_payment_contract(
     sender_account: Any,
     storage_account: Any,
     payload: Expr,
-) -> bool:
+) -> int:
     """Handle a storage-payment contract transaction.
 
     ``payload`` is the transaction's ``data`` field, which is an Expr
@@ -255,7 +255,8 @@ def handle_storage_payment_contract(
     A valid claim pays the sender and rewrites its record at once, so a second
     claim on the same record in the same transaction no longer pays.
 
-    Returns True if at least one claim was valid.
+    Returns the sum of the payouts of the valid claims. 0 means that no claim
+    was valid.
     """
     try:
         # Resolve the link list of claims
@@ -263,7 +264,7 @@ def handle_storage_payment_contract(
             node, payload, contact=block.contact, block_hash=block_scope(block)
         )
         if missed:
-            return False
+            return 0
 
         parsed_claims: list[Claim] = []
         for claim_node in claims_nodes:
@@ -272,9 +273,9 @@ def handle_storage_payment_contract(
                 parsed_claims.append(parsed)
 
         if not parsed_claims:
-            return False
+            return 0
 
-        any_valid = False
+        minted = 0
         for claim in parsed_claims:
             checked = _check_claim(node, block, transaction, storage_account, claim)
             if checked is None:
@@ -283,6 +284,7 @@ def handle_storage_payment_contract(
             storage_id = claim[0]
 
             sender_account.balance += payout
+            minted += payout
 
             lane_number = claim[4]
             previous_winner = record.lanes[lane_number].winner
@@ -317,8 +319,7 @@ def handle_storage_payment_contract(
                 block.storage_votes += takeover_vote(
                     takeover_position(elapsed, delta), fair_interval(block.previous_block)
                 )
-            any_valid = True
 
-        return any_valid
+        return minted
     except Exception:
-        return False
+        return 0

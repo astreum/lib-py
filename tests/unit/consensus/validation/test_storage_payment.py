@@ -363,6 +363,97 @@ class TestStoragePayment(unittest.TestCase):
         for list_id in ids:
             self.assertEqual(self._record_in_trie(list_id).lanes[0].height, 1)
 
+    def test_successful_claim_receipt_mint_is_the_payout(self):
+        sender_pk, _ = seed_sender_account(self.block, balance=1_000_000)
+        list_id = os.urandom(32)
+        record, slots = self._seed_storage_record(
+            list_id, last_payment_winner=sender_pk, new_size=100
+        )
+        self._submit_claims(sender_pk, [self._valid_claim(record, slots, list_id)])
+        receipt = self.block.receipts[-1]
+        self.assertEqual(receipt.status, STATUS_SUCCESS)
+        self.assertEqual(receipt.mint, 100)
+
+    def test_two_records_in_one_tx_mint_is_the_sum(self):
+        sender_pk, _ = seed_sender_account(self.block, balance=1_000_000)
+        claims = []
+        for size in (100, 300):
+            list_id = os.urandom(32)
+            record, slots = self._seed_storage_record(
+                list_id, last_payment_winner=sender_pk, new_size=size
+            )
+            claims.append(self._valid_claim(record, slots, list_id))
+        self._submit_claims(sender_pk, claims)
+        receipt = self.block.receipts[-1]
+        self.assertEqual(receipt.status, STATUS_SUCCESS)
+        self.assertEqual(receipt.mint, 400)
+
+    def test_repeated_claim_mint_counts_once(self):
+        sender_pk, _ = seed_sender_account(self.block, balance=1_000_000)
+        list_id = os.urandom(32)
+        record, slots = self._seed_storage_record(
+            list_id, last_payment_winner=sender_pk, new_size=100
+        )
+        claim = self._valid_claim(record, slots, list_id)
+        self._submit_claims(sender_pk, [claim, claim, claim])
+        receipt = self.block.receipts[-1]
+        self.assertEqual(receipt.status, STATUS_SUCCESS)
+        self.assertEqual(receipt.mint, 100)
+
+    def test_invalid_claim_receipt_mint_is_zero(self):
+        sender_pk, _ = seed_sender_account(self.block, balance=1_000_000)
+        bad = link(int_(42), NIL)
+        self._submit_tx(sender_pk, link(bad, NIL))
+        receipt = self.block.receipts[-1]
+        self.assertEqual(receipt.status, STATUS_FAILED)
+        self.assertEqual(receipt.mint, 0)
+
+    def test_wrong_recipient_receipt_mint_is_zero(self):
+        sender_pk, _ = seed_sender_account(self.block, balance=1_000_000)
+        self._submit_tx(sender_pk, NIL, recipient=os.urandom(32))
+        receipt = self.block.receipts[-1]
+        self.assertEqual(receipt.status, STATUS_SUCCESS)
+        self.assertEqual(receipt.mint, 0)
+
+    def test_late_failure_receipt_mint_is_zero(self):
+        """A valid claim whose sender cannot pay the final fees mints nothing.
+
+        This test patches ``settle_fees`` to force a branch that the real
+        ``settle_fees`` cannot reach. The test of the real late-failure
+        path is ``test_unaffordable_fees_receipt_mint_is_zero``.
+        """
+        sender_pk, _ = seed_sender_account(self.block, balance=1_000_000)
+        list_id = os.urandom(32)
+        record, slots = self._seed_storage_record(
+            list_id, last_payment_winner=sender_pk, new_size=100
+        )
+        before = self.block.accounts.get_account(sender_pk, self.node).balance
+        real = apply_module.settle_fees
+
+        def unaffordable(*args, **kwargs):
+            return replace(real(*args, **kwargs), affordable=False)
+
+        with patch.object(apply_module, "settle_fees", unaffordable):
+            self._submit_claims(sender_pk, [self._valid_claim(record, slots, list_id)])
+        receipt = self.block.receipts[-1]
+        self.assertEqual(receipt.status, STATUS_FAILED)
+        self.assertEqual(receipt.mint, 0)
+        after = self.block.accounts.get_account(sender_pk, self.node).balance
+        self.assertEqual(after, before - receipt.total_fee)
+
+    def test_unaffordable_fees_receipt_mint_is_zero(self):
+        """The payout cannot cover the fees: the failure comes after the handler."""
+        sender_pk, _ = seed_sender_account(self.block, balance=0)
+        list_id = os.urandom(32)
+        record, slots = self._seed_storage_record(
+            list_id, last_payment_winner=sender_pk, new_size=1
+        )
+        self._submit_claims(sender_pk, [self._valid_claim(record, slots, list_id)])
+        receipt = self.block.receipts[-1]
+        self.assertEqual(receipt.status, STATUS_FAILED)
+        self.assertEqual(receipt.mint, 0)
+        self.assertEqual(self._record_in_trie(list_id).lanes[0].height, 0)
+
     # --- failure paths ---
 
     def test_empty_claim_list_fails(self):

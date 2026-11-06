@@ -264,6 +264,20 @@ class TestApplyTransaction(unittest.TestCase):
 
         self.assertEqual(self.block.receipts[0].status, STATUS_SUCCESS)
 
+    def test_transfer_receipt_mint_is_zero(self):
+        sender_pk, sender_key = _seed_sender_account(self.block, balance=1_000_000)
+        tx = _make_tx(
+            chain_id=1,
+            sender_pk=sender_pk,
+            recipient=os.urandom(32),
+            amount=100,
+            secret_key=sender_key,
+        )
+        apply_transaction(self.node, self.block, _store_tx(self.node, tx))
+
+        self.assertEqual(self.block.receipts[0].status, STATUS_SUCCESS)
+        self.assertEqual(self.block.receipts[0].mint, 0)
+
     def test_chain_id_mismatch_raises(self):
         """A transaction with different chain_id than the block raises."""
         sender_pk, sender_key = _seed_sender_account(self.block, balance=1_000_000)

@@ -98,6 +98,8 @@ def _apply_tx_effects(
     storage_account = block.accounts.get_account(address=STORAGE_ADDRESS, node=node)
 
     receipt_status = STATUS_SUCCESS
+    # The sum of the claim payouts. The receipt shows it only for a success.
+    minted = 0
     # The base fee, plus the evaluation fee once a call has run: tx_fee already
     # holds the execution, so it is charged once and counted once.
     tx_fee = 1 if not nested else 0
@@ -432,7 +434,7 @@ def _apply_tx_effects(
                 pass
             else:
                 if receipt_status == STATUS_SUCCESS:
-                    payment_contract_success = handle_storage_payment_contract(
+                    minted = handle_storage_payment_contract(
                         node=node,
                         block=block,
                         transaction=transaction,
@@ -440,7 +442,7 @@ def _apply_tx_effects(
                         storage_account=storage_account,
                         payload=transaction.data,
                     )
-                    if not payment_contract_success:
+                    if minted == 0:
                         receipt_status = STATUS_FAILED
                 if transfer_amount > 0:
                     recipient_account.balance += transfer_amount
@@ -609,6 +611,7 @@ def _apply_tx_effects(
                 execution_fee=current_evaluation_fee,
                 status=receipt_status,
                 logs_hash=logs_expr.hash(),
+                mint=minted if receipt_status == STATUS_SUCCESS else 0,
             )
 
         # The transaction and its logs are charged above; the receipt only
@@ -645,6 +648,16 @@ def _apply_tx_effects(
         if not settlement.affordable:
             receipt_status = STATUS_FAILED
             transfer_amount = 0
+            if not rolled_back:
+                # The handler writes (a claim payout) do not stay.
+                _rollback()
+                settlement = settle_fees(
+                    sender_account.balance,
+                    tx_fee,
+                    current_data_fee,
+                    current_storage_fee,
+                    transfer_amount,
+                )
         if (
             receipt.status != receipt_status
             or settlement.transaction_fee != tx_fee

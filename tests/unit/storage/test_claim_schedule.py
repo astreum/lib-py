@@ -56,7 +56,7 @@ class TestScheduleMath(unittest.TestCase):
         self.assertEqual(affordable_bits(1), 0)
 
     def test_claim_cost(self):
-        self.assertEqual(claim_cost(Fraction(1), 100, 2), 200 + 721)
+        self.assertEqual(claim_cost(Fraction(1), 100, 2), 200 + 731)
 
     def test_min_elapsed(self):
         self.assertEqual(min_elapsed(100, 921, 1000, 2), 15)

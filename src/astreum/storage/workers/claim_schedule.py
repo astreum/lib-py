@@ -9,9 +9,10 @@ from astreum.consensus.transaction.storage.difficulty import distance_delta, req
 from astreum.consensus.validation.validator import SLOT_DURATION_SECONDS
 
 _BASE_TX_FEE = 1  # apply.py:77 — protocol-derived base transaction fee
-# Walk size of a 7-field receipt (models/receipt.py): 17 cells, 717 bytes with
-# one-byte ints, the size the block record counts for it.
-_RECEIPT_OVERHEAD_BYTES = 720
+# Walk size of an 8-field claim receipt (models/receipt.py) with mint=10**12,
+# storage_fee=70_000, data_fee=500: 725 bytes, rounded up to the next multiple
+# of 10 so the claim cost estimate is not low for real claims.
+_RECEIPT_OVERHEAD_BYTES = 730
 
 
 def pow_budget(hash_rate: float, fair_interval: int | None, held: int) -> int:

@@ -125,7 +125,8 @@ class TestStorageClaim(unittest.TestCase):
                 nodes=nodes,
             )
             self.assertGreaterEqual(block.height, START_HEIGHT + 1)
-            self.assertEqual(receipt(validator, block, tx.hash).status, STATUS_SUCCESS)
+            claim_receipt = receipt(validator, block, tx.hash)
+            self.assertEqual(claim_receipt.status, STATUS_SUCCESS)
 
             storage = account(validator, STORAGE_ADDRESS, block)
             head = get_from_radix_tree(storage.data, validator, RECORD_ID)
@@ -135,6 +136,7 @@ class TestStorageClaim(unittest.TestCase):
             self.assertEqual(paid.lanes[1], record.lanes[1], "the other lane is untouched")
 
             payout = RECORD_SIZE * (block.height - LANE_HEIGHT)
+            self.assertEqual(claim_receipt.mint, payout)
             gained = account(validator, provider, block).balance - PROVIDER_FUNDS
             self.assertGreater(gained, 0)
             self.assertLessEqual(gained, payout)

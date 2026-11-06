@@ -568,6 +568,12 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
                 _hex(block.expr_id),
             )
             return False, f"receipt logs hash mismatch tx={_hex(expected.transaction_hash)}"
+        if stored.mint != expected.mint:
+            node.logger.debug(
+                "Block verify receipt mint mismatch block=%s",
+                _hex(block.expr_id),
+            )
+            return False, f"receipt mint mismatch tx={_hex(expected.transaction_hash)}"
 
     try:
         accounts_snapshot.update_trie(node)

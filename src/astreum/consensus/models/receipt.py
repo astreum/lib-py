@@ -11,7 +11,7 @@ STATUS_FAILED = 1
 
 
 def _read_body(node, body, contact, scope):
-    """The body's six values and the transaction hash its last cell names.
+    """The body's seven values and the transaction hash its last cell names.
 
     The last cell holds the transaction by hash and is never fetched: the
     receipt names the transaction, it does not need its body.
@@ -67,6 +67,7 @@ class Receipt:
         execution_fee: int,
         status: int,
         logs_hash: bytes = ZERO32,
+        mint: int = 0,
     ) -> None:
         self.transaction_hash = transaction_hash
         self.transaction_fee = transaction_fee
@@ -75,6 +76,7 @@ class Receipt:
         self.execution_fee = execution_fee
         self.logs_hash = logs_hash
         self.status = status
+        self.mint = mint
         self.expr_id = ZERO32
         self._expr: Optional["Expr"] = None
 
@@ -105,6 +107,7 @@ class Receipt:
         body = link(int_(self.transaction_fee), body)
         body = link(int_(self.storage_fee), body)
         body = link(int_(self.status), body)
+        body = link(int_(self.mint), body)
         body = link(Expr("link", head_hash=self.logs_hash), body)
         body = link(int_(self.execution_fee), body)
         body = link(int_(self.data_fee), body)
@@ -170,15 +173,17 @@ class Receipt:
             raise ValueError(
                 f"unable to resolve receipt body (missed={[h.hex()[:8] for h in missed]})"
             )
-        if tx_hash is None or len(body_nodes) != 6:
+        if tx_hash is None or len(body_nodes) != 7:
+            cells = len(body_nodes) + (0 if tx_hash is None else 1)
             raise ValueError(
-                f"malformed receipt body length (got={len(body_nodes)}, expected=7)"
+                f"malformed receipt body length (got={cells}, expected=8)"
             )
 
         (
             data_fee_node,
             execution_fee_node,
             logs_node,
+            mint_node,
             status_node,
             storage_fee_node,
             transaction_fee_node,
@@ -197,6 +202,11 @@ class Receipt:
             logs_hash = ZERO32
         else:
             logs_hash = logs_node.head.hash()
+        if not get_expr_tag(mint_node, node, contact, block_hash) == "int":
+            raise ValueError("expected Int for mint")
+        mint_value = get_expr_value(mint_node, node, contact, block_hash)
+        if mint_value < 0:
+            raise ValueError("mint must not be negative")
         if not get_expr_tag(status_node, node, contact, block_hash) == "int":
             raise ValueError("expected Int for status")
         if not get_expr_tag(storage_fee_node, node, contact, block_hash) == "int":
@@ -216,6 +226,7 @@ class Receipt:
             execution_fee=get_expr_value(execution_fee_node, node, contact, block_hash),
             logs_hash=logs_hash,
             status=status_value,
+            mint=mint_value,
         )
         receipt._expr = header
         receipt.expr_id = receipt_id
