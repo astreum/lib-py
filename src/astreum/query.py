@@ -14,6 +14,7 @@ from typing import List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from astreum.consensus.models.block import Block
+    from astreum.consensus.models.receipt import Receipt
     from astreum.consensus.transaction.model import Transaction
 
 
@@ -102,4 +103,51 @@ def find_transactions(
         starting_block=start_block,
         end_block_height=end_height,
         limit=limit,
+    )
+
+
+def get_receipt(node, block_hash: bytes, tx_hash: bytes) -> Optional["Receipt"]:
+    """Fetch the receipt of a transaction in a block.
+
+    ``None`` means "not available now". It does not tell whether the
+    receipt will ever exist. It is returned when the block has no
+    receipts, when the transaction is not in the receipts trie of the
+    block, or when a trie node could not be fetched. A caller can try
+    again later.
+
+    Args:
+        node: Node instance to query.
+        block_hash: Hash of the block that holds the transaction.
+        tx_hash: Hash of the transaction.
+
+    Returns:
+        Optional['Receipt']: The receipt, or ``None`` as described above.
+
+    Raises:
+        ValueError: If the block cannot be loaded, if the receipt is
+            malformed, or if a receipt cell cannot be fetched (raised by
+            ``Receipt.from_storage``). A fetch failure is temporary, as
+            in the ``None`` case: a caller can try again later.
+    """
+    from astreum.consensus.block.encoding.decode import get_block_from_storage
+    from astreum.consensus.block.holders import block_holder
+    from astreum.consensus.models.receipt import Receipt
+    from astreum.expression import ZERO32
+    from astreum.storage.radix import RadixTree, get_from_radix_tree
+
+    block = get_block_from_storage(
+        node, block_hash, contact=block_holder(node, block_hash)
+    )
+    if block.receipts_hash is None or block.receipts_hash == ZERO32:
+        return None
+
+    tree = RadixTree(
+        root_hash=block.receipts_hash, contact=block.contact, root_block=block.expr_id
+    )
+    expr = get_from_radix_tree(tree, node, tx_hash)
+    if expr is None:
+        return None
+
+    return Receipt.from_storage(
+        node, expr.hash(), contact=block.contact, block_hash=block.expr_id
     )

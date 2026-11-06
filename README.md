@@ -238,7 +238,7 @@ where `gc`/`gd`/`gl` are the block's running `global_loan_count`/`global_default
 Query functions let you fetch blocks and search transactions by height or attribute from the chain tip.
 
 ```python
-from astreum import get_block, find_transactions
+from astreum import get_block, find_transactions, get_receipt
 ```
 
 ### `get_block(node, *, height)`
@@ -293,6 +293,43 @@ txs = find_transactions(
 Each returned `Transaction` has its `block_hash` field set to the expr hash of the block that included it, so you can locate the containing block.
 
 Internally uses the bloom tree index to skip eras that can't contain a match, then walks individual blocks inside candidate eras.
+
+
+### `get_receipt(node, block_hash, tx_hash)`
+
+Fetch the receipt of a transaction in a block. Returns the `Receipt`, or `None` when the receipt is not available now: the block has no receipts, the transaction is not in the receipts trie of the block, or a trie node could not be fetched. `None` does not tell whether the receipt will ever exist, so try again later.
+
+Raises `ValueError` when the block cannot be loaded, when a receipt is malformed, or when a receipt cell could not be fetched. A fetch failure is temporary, as in the `None` case.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `node` | `Node` | An initialised, connected Astreum node. |
+| `block_hash` | `bytes` | Hash of the block that holds the transaction. |
+| `tx_hash` | `bytes` | Hash of the transaction. |
+
+A `Receipt` has these fields:
+
+| Field | Description |
+|-------|-------------|
+| `transaction_hash` | Hash of the transaction. |
+| `status` | Result status of the transaction. |
+| `transaction_fee` | Transaction fee charged. |
+| `data_fee` | Data fee charged. |
+| `storage_fee` | Storage fee charged. |
+| `execution_fee` | Execution fee charged. |
+| `logs_hash` | Hash of the transaction logs. |
+| `mint` | New coin the transaction gave its sender: the sum of the valid storage claim payouts. It is `0` for failed transactions and for transactions that are not claims. |
+
+```python
+# Find a transaction, then read its receipt from the block that included it
+txs = find_transactions(node, tx_hash=tx_hash, limit=1)
+if txs:
+    receipt = get_receipt(node, txs[0].block_hash, tx_hash)
+    if receipt is None:
+        ...  # not available now, try again later
+    else:
+        print(f"status: {receipt.status}, mint: {receipt.mint}")
+```
 
 
 ## Language Syntax

@@ -9,7 +9,7 @@ from astreum.utils.config import NodeConfig
 from astreum.utils.currency import format_astre_amount, parse_astre_amount
 
 
-from astreum.query import get_block, find_transactions
+from astreum.query import get_block, find_transactions, get_receipt
 
 __all__: list[str] = [
     "Node",
@@ -31,6 +31,7 @@ __all__: list[str] = [
     "tokenize",
     "get_block",
     "find_transactions",
+    "get_receipt",
     "parse_astre_amount",
     "format_astre_amount",
 ]
