@@ -129,6 +129,27 @@ class TestNodeConfig(unittest.TestCase):
         with self.assertRaises(AttributeError):
             config.prot
 
+    def test_sent_transactions_path_defaults_to_none(self):
+        self.assertIsNone(NodeConfig().sent_transactions_path)
+        self.assertIsNone(config_setup({"default_seed": None}).sent_transactions_path)
+
+    def test_sent_transactions_path_empty_is_none(self):
+        for value in (None, ""):
+            with self.subTest(value=value):
+                result = config_setup(
+                    {"default_seed": None, "sent_transactions_path": value}
+                )
+                self.assertIsNone(result.sent_transactions_path)
+
+    def test_sent_transactions_path_is_kept_as_str(self):
+        path = Path(self._tmp.name) / "log" / "sent.csv"
+        result = config_setup(
+            {"default_seed": None, "sent_transactions_path": path}
+        )
+        self.assertEqual(result.sent_transactions_path, str(path))
+        self.assertIsInstance(result.sent_transactions_path, str)
+        self.assertFalse(path.parent.exists())
+
     def test_runtime_writes(self):
         config = NodeConfig()
         for name, value in (

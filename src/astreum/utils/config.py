@@ -67,6 +67,7 @@ class NodeConfig:
         cold_storage_scale: str = DEFAULT_COLD_STORAGE_SCALE,
         cold_storage_base_size: int = 1_000_000,
         cold_storage_path: Optional[str] = None,
+        sent_transactions_path: Optional[str] = None,
         logging_retention_days: int = DEFAULT_LOGGING_RETENTION_DAYS,
         logging_enabled: bool = DEFAULT_LOGGING_ENABLED,
         logger_name: Optional[str] = None,
@@ -137,6 +138,7 @@ class NodeConfig:
         self.cold_storage_scale = cold_storage_scale
         self.cold_storage_base_size = cold_storage_base_size
         self.cold_storage_path = cold_storage_path
+        self.sent_transactions_path = sent_transactions_path
         self.logging_retention_days = logging_retention_days
         self.logging_enabled = logging_enabled
         self.logger_name = logger_name
@@ -315,6 +317,11 @@ def _setup_storage_limits(config: Dict) -> None:
             config["cold_storage_path"] = None
     else:
         config["cold_storage_path"] = None
+
+    sent_path_raw = config.get("sent_transactions_path")
+    config["sent_transactions_path"] = (
+        str(Path(sent_path_raw)) if sent_path_raw else None
+    )
 
 
 def _setup_logging(config: Dict) -> None:

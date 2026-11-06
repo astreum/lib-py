@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from astreum.communication.models.message import Message, MessageTopic
 from astreum.communication.outgoing_queue import enqueue_outgoing
+from astreum.consensus.transaction.sent_log import append_sent_transaction
 from astreum.consensus.validation.peers import validator_peers
 from astreum.expression import resolve_inner_exprs
 from astreum.storage.exprs import put_expr_in_hot_storage
@@ -134,5 +135,8 @@ def send_transaction(
             message=tx_message,
             difficulty=peer.difficulty,
         )
+
+    if getattr(node.config, "sent_transactions_path", None):
+        append_sent_transaction(node, transaction, tx_hash, latest_block.height)
 
     return tx_hash

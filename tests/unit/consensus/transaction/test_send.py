@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import queue
 import sys
+import tempfile
 import threading
 import unittest
 from pathlib import Path
@@ -46,7 +47,7 @@ def _signed() -> Transaction:
 def _node(*, validator: bool):
     return SimpleNamespace(
         is_connected=True,
-        latest_block=object(),
+        latest_block=SimpleNamespace(height=7),
         logger=mock.Mock(),
         storage_public_key_bytes=OWN_KEY,
         use_ipv6=False,
@@ -57,6 +58,7 @@ def _node(*, validator: bool):
         config=SimpleNamespace(
             validation_secret_key=Ed25519PrivateKey.generate() if validator else None,
             peer_timeout_interval=0.2,
+            sent_transactions_path=None,
         ),
         _validation_transaction_queue=queue.Queue(),
     )
@@ -170,6 +172,57 @@ class TestSendTransaction(unittest.TestCase):
         node.is_connected = False
         with self.assertRaisesRegex(RuntimeError, "not connected"):
             send_transaction(node, _signed())
+
+    def _log_path(self) -> Path:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        return Path(tmp.name) / "sent.csv"
+
+    def test_send_appends_one_line_when_path_set(self) -> None:
+        node = _node(validator=True)
+        path = self._log_path()
+        node.config.sent_transactions_path = str(path)
+        tx = _signed()
+        tx_hash = send_transaction(node, tx)
+        lines = path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 2)
+        fields = lines[1].split(",")
+        self.assertEqual(fields[0], tx_hash.hex())
+        self.assertEqual(fields[1], tx.sender.hex())
+        self.assertEqual(fields[2], tx.recipient.hex())
+        self.assertEqual(fields[3], str(int(tx.code)))
+        self.assertEqual(fields[4], "7")
+
+    def test_send_writes_nothing_when_path_not_set(self) -> None:
+        node = _node(validator=True)
+        path = self._log_path()
+        send_transaction(node, _signed())
+        self.assertFalse(path.exists())
+
+    def test_failed_send_writes_nothing(self) -> None:
+        node = _node(validator=False)
+        node.is_connected = False
+        path = self._log_path()
+        node.config.sent_transactions_path = str(path)
+        with self.assertRaises(RuntimeError):
+            send_transaction(node, _signed())
+        self.assertFalse(path.exists())
+
+    def test_send_returns_hash_when_log_write_fails(self) -> None:
+        node = _node(validator=True)
+        path = self._log_path()
+        path.mkdir()
+        node.config.sent_transactions_path = str(path)
+        tx_hash = send_transaction(node, _signed())
+        self.assertEqual(len(tx_hash), 32)
+        node.logger.warning.assert_called_once()
+
+    def test_send_returns_hash_when_log_path_has_nul_byte(self) -> None:
+        node = _node(validator=True)
+        node.config.sent_transactions_path = str(self._log_path()) + "\x00"
+        tx_hash = send_transaction(node, _signed())
+        self.assertEqual(len(tx_hash), 32)
+        node.logger.warning.assert_called_once()
 
 
 if __name__ == "__main__":
