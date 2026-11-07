@@ -31,6 +31,8 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from blake3 import blake3
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from astreum.consensus.transaction import apply as apply_module
 from astreum.consensus.transaction import apply_transaction
@@ -122,6 +124,13 @@ def _same_distance_key(pk: bytes) -> bytes:
     return pk[:-1] + bytes([pk[-1] ^ 1])
 
 
+def _new_key() -> bytes:
+    """The public key of a new key pair that has no account."""
+    return Ed25519PrivateKey.generate().public_key().public_bytes(
+        Encoding.Raw, PublicFormat.Raw
+    )
+
+
 # ---------- test class ----------
 
 class TestStoragePayment(unittest.TestCase):
@@ -198,12 +207,13 @@ class TestStoragePayment(unittest.TestCase):
         payload: Expr,
         recipient: bytes = STORAGE_ADDRESS,
         amount: int = 0,
+        counter: int = 0,
     ) -> bytes:
         tx = Transaction(
             chain_id=1,
             amount=amount,
             code=TransactionCode.STORAGE_PAYMENT,
-            counter=0,
+            counter=counter,
             cost_limit=0,
             data=payload,
             recipient=recipient,
@@ -963,6 +973,136 @@ class TestStoragePayment(unittest.TestCase):
         self.assertEqual(self._status(), STATUS_FAILED)
         self.assertEqual(self.block.storage_votes, 0)
         self.assertEqual(self.block.storage_claim_count, 0)
+
+    # --- a sender with no account ---
+
+    def _state(self) -> tuple:
+        return (
+            len(self.block.receipts or []),
+            len(self.block.transactions or []),
+            list(self.block.pending_exprs),
+            self.block.storage_claim_count,
+            self.block.storage_votes,
+            [e.hash() for e in self.block.bloom_tree.new_exprs()],
+        )
+
+    def _incumbent_claim(self, pk: bytes, new_size: int = 20000):
+        list_id = os.urandom(32)
+        record, slots = self._seed_storage_record(
+            list_id, last_payment_winner=pk, new_size=new_size
+        )
+        return list_id, self._valid_claim(record, slots, list_id)
+
+    def test_new_sender_valid_claim_creates_account(self):
+        pk = _new_key()
+        _, claim = self._incumbent_claim(pk)
+        self._submit_claims(pk, [claim])
+
+        receipt = self.block.receipts[-1]
+        self.assertEqual(receipt.status, STATUS_SUCCESS)
+        account = self.block.accounts.get_account(pk, self.node)
+        self.assertIsNotNone(account)
+        fees = receipt.transaction_fee + receipt.storage_fee
+        self.assertEqual(account.balance, 20000 * 1 - fees)
+        self.assertEqual(account.counter, 1)
+        self.assertTrue(self.block.bloom_tree.new_exprs())
+
+    def test_new_sender_pays_for_its_cell(self):
+        pk = _new_key()
+        _, claim = self._incumbent_claim(pk)
+        self._submit_claims(pk, [claim])
+        new_receipt = self.block.receipts[-1]
+        self.assertEqual(new_receipt.status, STATUS_SUCCESS)
+
+        self._reset()
+        zero_pk, _ = seed_sender_account(self.block, balance=0)
+        _, claim = self._incumbent_claim(zero_pk)
+        self._submit_claims(zero_pk, [claim])
+        zero_receipt = self.block.receipts[-1]
+        self.assertEqual(zero_receipt.status, STATUS_SUCCESS)
+
+        self.assertGreater(new_receipt.storage_fee, zero_receipt.storage_fee)
+
+    def test_new_sender_invalid_claim_is_rejected(self):
+        pk = _new_key()
+        claim = (os.urandom(32), encode_expr_to_bytes(int_(1)), [], 0, 0)
+        before = self._state()
+        with self.assertRaisesRegex(ValueError, "new sender claim failed"):
+            self._submit_claims(pk, [claim])
+        self.assertIsNone(self.block.accounts.get_account(pk, self.node))
+        self.assertEqual(self._state(), before)
+
+    def test_new_sender_payout_below_fees_is_rejected(self):
+        pk = _new_key()
+        list_id, claim = self._incumbent_claim(pk, new_size=1)
+        before = self._state()
+        with self.assertRaisesRegex(ValueError, "new sender claim failed"):
+            self._submit_claims(pk, [claim])
+        self.assertIsNone(self.block.accounts.get_account(pk, self.node))
+        self.assertEqual(self._state(), before)
+        record = self._record_in_trie(list_id)
+        self.assertEqual(record.lanes[0].winner, pk)
+        self.assertEqual(record.lanes[0].height, 0)
+
+    def test_new_sender_counter_mismatch_is_rejected(self):
+        pk = _new_key()
+        _, claim = self._incumbent_claim(pk)
+        before = self._state()
+        with self.assertRaisesRegex(ValueError, "new sender claim failed"):
+            self._submit_claims(pk, [claim], counter=1)
+        self.assertIsNone(self.block.accounts.get_account(pk, self.node))
+        self.assertEqual(self._state(), before)
+
+    def test_new_sender_missing_cell_fee_is_rejected(self):
+        pk = _new_key()
+        _, claim = self._incumbent_claim(pk)
+        before = self._state()
+        real_fee = apply_module.storage_walk_fee
+        # At the fee step the new sender holds the payout: 20000 * 1.
+        sender_cell = create_account(balance=20000).to_expr().hash()
+
+        def no_fee_for_sender(node, block, expr):
+            if expr.hash() == sender_cell:
+                return None
+            return real_fee(node, block, expr)
+
+        with patch.object(apply_module, "storage_walk_fee", side_effect=no_fee_for_sender) as fee:
+            with self.assertRaisesRegex(ValueError, "new sender claim failed"):
+                self._submit_claims(pk, [claim])
+        self.assertIn(sender_cell, [c.args[2].hash() for c in fee.call_args_list])
+        self.assertIsNone(self.block.accounts.get_account(pk, self.node))
+        self.assertEqual(self._state(), before)
+
+    def test_new_sender_payment_to_other_recipient_not_found(self):
+        pk = _new_key()
+        with self.assertRaisesRegex(ValueError, "sender account not found"):
+            self._submit_tx(pk, NIL, recipient=os.urandom(32))
+
+    def test_new_sender_transfer_not_found(self):
+        pk = _new_key()
+        tx = Transaction(
+            chain_id=1,
+            amount=0,
+            code=TransactionCode.TRANSFER,
+            counter=0,
+            cost_limit=0,
+            data=NIL,
+            recipient=os.urandom(32),
+            sender=pk,
+        )
+        tx_hash = store_tx(self.node, tx)
+        with self.assertRaisesRegex(ValueError, "sender account not found"):
+            apply_transaction(self.node, self.block, tx_hash)
+
+    def test_new_sender_second_claim_in_block_uses_counter_one(self):
+        pk = _new_key()
+        _, first = self._incumbent_claim(pk)
+        _, second = self._incumbent_claim(pk)
+        self._submit_claims(pk, [first])
+        self.assertEqual(self._status(), STATUS_SUCCESS)
+        self._submit_claims(pk, [second], counter=1)
+        self.assertEqual(self._status(), STATUS_SUCCESS)
+        self.assertEqual(self.block.accounts.get_account(pk, self.node).counter, 2)
 
 
 def _all_cells(expr):

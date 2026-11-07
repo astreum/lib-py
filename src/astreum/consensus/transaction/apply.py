@@ -83,6 +83,10 @@ def _apply_tx_effects(
     sender (the contract). Return execution and storage fees for the
     caller to charge to the parent meter. No consensus recording.
 
+    A top-level storage claim from a sender with no account starts from an
+    empty account, which pays for its own cell. If that claim fails, the
+    block is restored and ValueError is raised, so no account is created.
+
     Returns (receipt_status, execution_fee, storage_fee, collected_logs).
     """
     if transaction.chain_id != block.chain_id:
@@ -93,8 +97,16 @@ def _apply_tx_effects(
         block.accounts.involved.clear()
 
     sender_account = block.accounts.get_account(address=transaction.sender, node=node)
+    sender_is_new = False
     if sender_account is None:
-        raise ValueError("sender account not found")
+        if (
+            nested
+            or transaction.code != TransactionCode.STORAGE_PAYMENT
+            or transaction.recipient != STORAGE_ADDRESS
+        ):
+            raise ValueError("sender account not found")
+        sender_account = create_account()
+        sender_is_new = True
     storage_account = block.accounts.get_account(address=STORAGE_ADDRESS, node=node)
 
     receipt_status = STATUS_SUCCESS
@@ -206,6 +218,18 @@ def _apply_tx_effects(
         is_recipient_new = False
         transfer_amount = 0
         rolled_back = True
+
+    def _reject_new_sender() -> None:
+        """Restore the block and reject a failed claim from a new sender.
+
+        Args:
+            None.
+
+        Raises:
+            ValueError: Always. The new sender account is not created.
+        """
+        block.restore(snapshot)
+        raise ValueError("new sender claim failed")
 
     # data fee is sender + receiptient sizes
     current_data_fee = 0
@@ -500,6 +524,8 @@ def _apply_tx_effects(
 
     # Point 1: the handler failed. Its writes do not stay.
     if not nested and receipt_status != STATUS_SUCCESS:
+        if sender_is_new:
+            _reject_new_sender()
         _rollback()
 
     # Bloom Filter — top-level only.
@@ -514,7 +540,10 @@ def _apply_tx_effects(
         )
 
         block_offset = block.height % 1024
-        block.bloom_tree.insert(block_offset, bloom_inserts)
+        # The snapshot does not hold the bloom tree. A new sender can still be
+        # rejected below, so its elements go in after the final checks.
+        if not sender_is_new:
+            block.bloom_tree.insert(block_offset, bloom_inserts)
 
         bloom_storage_fee = calculate_storage_fee(block, 2 * len(bloom_inserts))
         current_storage_fee += bloom_storage_fee
@@ -590,6 +619,14 @@ def _apply_tx_effects(
         else:
             current_storage_fee += new_account_fee
 
+    # New sender: it pays for its own cell, as for a new recipient.
+    if sender_is_new:
+        new_sender_fee = storage_walk_fee(node, block, sender_account.to_expr())
+        if new_sender_fee is None:
+            receipt_status = STATUS_FAILED
+        else:
+            current_storage_fee += new_sender_fee
+
     # Receipt — top-level only. Its own fee is part of its storage_fee, which
     # changes its size, so the fee is a fixed point.
     receipt = None
@@ -635,6 +672,8 @@ def _apply_tx_effects(
             + current_storage_fee
         ):
             receipt_status = STATUS_FAILED
+        if sender_is_new and receipt_status != STATUS_SUCCESS:
+            _reject_new_sender()
         # Point 2: a late check failed. The handler writes do not stay.
         if receipt_status != STATUS_SUCCESS and not rolled_back:
             _rollback()
@@ -646,6 +685,8 @@ def _apply_tx_effects(
             transfer_amount,
         )
         if not settlement.affordable:
+            if sender_is_new:
+                _reject_new_sender()
             receipt_status = STATUS_FAILED
             transfer_amount = 0
             if not rolled_back:
@@ -673,6 +714,8 @@ def _apply_tx_effects(
 
     # Operator bloom inserts and logs — top-level, with the final status.
     if not nested:
+        if sender_is_new:
+            block.bloom_tree.insert(block_offset, bloom_inserts)
         finalize_pending_bloom_inserts(node, block, transaction, receipt_status)
         if collected_logs:
             block.pending_exprs.append(logs_expr)
