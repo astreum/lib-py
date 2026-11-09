@@ -31,6 +31,32 @@ def _level_0_size(table_dir: str | Path | None) -> int:
     return total
 
 
+def _cold_storage_size(cold_path: str | Path | None) -> int:
+    """Sum the sizes of all files in every level of the cold store tables.
+
+    Args:
+        cold_path: The cold store root, or None.
+
+    Returns:
+        Total size in bytes of the ``exprs`` and ``records`` tables, or 0
+        if cold storage is disabled.
+    """
+    if not cold_path:
+        return 0
+    total = 0
+    for table in ("exprs", "records"):
+        for level_path in (Path(cold_path) / table).glob("level_*"):
+            if not level_path.is_dir():
+                continue
+            for entry in level_path.iterdir():
+                try:
+                    if entry.is_file():
+                        total += entry.stat().st_size
+                except OSError:
+                    continue
+    return total
+
+
 def setup_storage(node: Any, config: NodeConfig) -> None:
     """Initialize hot and cold storage infrastructure on a Node.
 
@@ -71,7 +97,6 @@ def setup_storage(node: Any, config: NodeConfig) -> None:
     node.cold_storage_lock = threading.RLock()
     node.hot_storage_lock = threading.RLock()
     node.hot_storage_size = 0
-    node.cold_storage_size = 0
     node.storage_fetch_interval = config.storage_fetch_interval
     node.storage_fetch_retries = config.storage_fetch_retries
 
@@ -92,6 +117,7 @@ def setup_storage(node: Any, config: NodeConfig) -> None:
     node.records_level_0_size = _level_0_size(
         Path(config.cold_storage_path) / "records" if config.cold_storage_path else None
     )
+    node.cold_storage_size = _cold_storage_size(config.cold_storage_path)
 
     node.is_storage_provider = bool(config.is_storage_provider)
     if node.is_storage_provider and not config.cold_storage_path:

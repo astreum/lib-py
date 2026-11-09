@@ -110,6 +110,8 @@ def put_expr_in_cold_storage(
         except OSError:
             return False
 
+        node.cold_storage_size += len(expr_bytes)
+
         size = getattr(node, size_attr, 0)
         size += len(expr_bytes)
         setattr(node, size_attr, size)
