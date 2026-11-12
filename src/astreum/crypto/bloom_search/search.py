@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Iterator, Optional
 
-from astreum.expression import Expr, RESOLUTION_FULL, ZERO32
+from astreum.expression import RESOLUTION_FULL, ZERO32
 from astreum.storage.exprs import get_expr_list, prefetch_exprs_from_network
 from astreum.crypto.bloom_filter import bloom_test
+from astreum.crypto.bloom_search.variants import make_search_variants
 from astreum.crypto.bloom_tree.tree import bloom_search_leaves
 from astreum.expression.helpers import get_expr_builtin_tag
 from astreum.consensus.block.previous import get_previous_block
@@ -15,52 +16,71 @@ if TYPE_CHECKING:
 ERA_SIZE = 1024
 
 
-def bloom_search_tx(astreum_node: Any, *,
-                    tx_hash: bytes = ZERO32,
-                    sender: bytes = ZERO32,
-                    receiver: bytes = ZERO32,
-                    key: bytes = ZERO32,
-                    involved: bytes = ZERO32,
-                    starting_block=None,
-                    end_block_height: int = 0,
-                    limit: int = 1) -> list["Transaction"]:
+def _matched_keys(tx, leaf, keys):
+    """Return the subset of keys that the transaction matches.
+
+    Base keys (fifth column zero) match by exact membership in the
+    transaction's own indexed variants. Involved keys (fifth column non-zero)
+    are matched with a bloom test, because a transaction does not list the
+    accounts it changed.
+
+    Args:
+        tx: Transaction to check.
+        leaf: Bloom leaf whose filter holds the involved elements.
+        keys: Candidate 160-byte keys.
+
+    Returns:
+        list[bytes]: The matching keys, in the order of ``keys``.
     """
-    Search for transactions matching filter args.
+    z = ZERO32
+    base = set(make_search_variants(tx.hash, tx.sender, tx.recipient))
+    matched = []
+    for k in keys:
+        if k[128:160] == z:
+            # base key: exact membership in the tx's own 7 indexed variants
+            if k in base:
+                matched.append(k)
+        else:
+            # involved key: account is the fifth column. The tx does not list
+            # its involved accounts, so this is a bloom test (probabilistic).
+            account = k[128:160]
+            th = k[0:32] if k[0:32] != z else tx.hash
+            if bloom_test(leaf.filter, th + z + z + z + account):
+                matched.append(k)
+    return matched
+
+
+def iter_matching_transactions(astreum_node: Any, *,
+                               keys: list[bytes],
+                               starting_block,
+                               end_block_height: int = 0,
+                               limit: int = 1) -> Iterator[tuple["Transaction", list[bytes]]]:
+    """Yield transactions that match any of ``keys``, newest first.
+
+    Each key has its own result budget. ``limit == 0`` makes every key
+    unlimited. A key stops matching once its budget reaches zero.
 
     Args:
         astreum_node: Astreum node.
-        tx_hash: Transaction hash filter.
-        sender: Sender address filter.
-        receiver: Receiver address filter.
-        key: Data key filter.
-        involved (bytes): Address of an account that a transaction changed
-            without being its sender or recipient. Cannot combine with other
-            filters.
+        keys: Candidate 160-byte search keys.
         starting_block: Block to start search from.
         end_block_height: Minimum block height.
-        limit: Maximum results.
+        limit: Maximum results per key (0 means unlimited).
 
-    Returns:
-        list["Transaction"]: List of matching transactions.
-
-    Raises:
-        ValueError: If involved is set together with another filter.
+    Yields:
+        tuple["Transaction", list[bytes]]: A matching transaction and the
+        subset of ``keys`` it matched.
     """
-    from astreum.consensus.transaction.from_storage import get_transaction_from_storage
     from astreum.consensus.block.encoding.decode import get_block_from_storage
 
-    if involved != ZERO32 and any(
-        f != ZERO32 for f in (tx_hash, sender, receiver, key)
-    ):
-        raise ValueError("involved cannot combine with tx_hash, sender, receiver or key")
+    keys = list(dict.fromkeys(keys))
+    if not keys or starting_block is None:
+        return
 
-    if starting_block is None:
-        return []
+    budget: dict[bytes, Optional[int]] = {
+        k: (None if limit == 0 else limit) for k in keys
+    }
 
-    element = _build_element(tx_hash=tx_hash, sender=sender,
-                             receiver=receiver, key=key, involved=involved)
-
-    results: list["Transaction"] = []
     searched_eras: set[int] = set()
     current_block = starting_block
 
@@ -75,44 +95,47 @@ def bloom_search_tx(astreum_node: Any, *,
                 current_block = get_previous_block(astreum_node, current_block)
                 continue
 
-            era_results = bloom_search_leaves(
-                bloom_hash, element, astreum_node, block_hash=current_block.expr_id
-            )
-            for leaf in era_results:
+            leaves: dict[Optional[bytes], Any] = {}
+            for key in keys:
+                for leaf in bloom_search_leaves(
+                    bloom_hash, key, astreum_node,
+                    block_hash=current_block.expr_id,
+                ):
+                    leaves[leaf.start_hash] = leaf
+
+            for leaf in leaves.values():
                 leaf_hit = leaf.start_hash
                 if leaf_hit is not None:
                     try:
-                        block = get_block_from_storage(astreum_node=astreum_node, block_hash=leaf_hit)
+                        block = get_block_from_storage(
+                            astreum_node=astreum_node, block_hash=leaf_hit
+                        )
                     except Exception:
                         continue
                     txs = _load_block_txs(astreum_node, block)
                     block_hash = block.expr_id
                 else:
-                    # start_hash = None → txs are in the block that owns this bloom tree
                     txs = _load_block_txs(astreum_node, current_block)
                     block_hash = current_block.expr_id
 
                 for tx in txs:
                     tx.block_hash = block_hash
-                    if involved != ZERO32:
-                        # A transaction does not list the accounts it changed.
-                        # The leaf filter holds one element per involved tx.
-                        tx_element = _build_element(tx_hash=tx.hash, involved=involved)
-                        if not bloom_test(leaf.filter, tx_element):
-                            continue
-                        results.append(tx)
-                        if len(results) >= limit:
-                            return results
+                    matched = _matched_keys(tx, leaf, keys)
+                    active = [k for k in matched if budget[k] != 0]
+                    if not active:
                         continue
-                    if _tx_matches(tx, tx_hash=tx_hash, sender=sender,
-                                   receiver=receiver, key=key):
-                        results.append(tx)
-                        if len(results) >= limit:
-                            return results
+                    yield tx, active
+                    for k in active:
+                        if budget[k] is not None:
+                            budget[k] -= 1
+
+                    # Stop as soon as every key's budget is exhausted. A
+                    # ``None`` budget (unlimited) never equals 0, so it keeps
+                    # the search going, which is correct.
+                    if all(b == 0 for b in budget.values()):
+                        return
 
         current_block = get_previous_block(astreum_node, current_block)
-
-    return results
 
 
 def _load_block_txs(node: Any, block) -> list["Transaction"]:
@@ -157,42 +180,3 @@ def _load_block_txs(node: Any, block) -> list["Transaction"]:
             continue
 
     return txs
-
-
-def _tx_matches(tx: "Transaction", *,
-                tx_hash: bytes = ZERO32,
-                sender: bytes = ZERO32,
-                receiver: bytes = ZERO32,
-                key: bytes = ZERO32) -> bool:
-    """
-    Check if a Transaction matches the given search params.
-
-    Args:
-        tx: Transaction to check.
-        tx_hash: Transaction hash filter.
-        sender: Sender address filter.
-        receiver: Receiver address filter.
-        key: Data key filter.
-
-    Returns:
-        bool: True if the transaction matches the filters, False otherwise.
-    """
-    if tx_hash != ZERO32 and tx.hash != tx_hash:
-        return False
-    if sender != ZERO32 and tx.sender != sender:
-        return False
-    if receiver != ZERO32 and tx.recipient != receiver:
-        return False
-    tx_data_bytes = tx.data.value if get_expr_builtin_tag(tx.data) == "bytes" else b""
-    if key != ZERO32 and tx_data_bytes != key:
-        return False
-    return True
-
-
-def _build_element(*, tx_hash=ZERO32, sender=ZERO32,
-                   receiver=ZERO32, key=ZERO32, involved=ZERO32) -> bytes:
-    return (tx_hash or ZERO32).ljust(32, b"\x00")[:32] + \
-           (sender or ZERO32).ljust(32, b"\x00")[:32] + \
-           (receiver or ZERO32).ljust(32, b"\x00")[:32] + \
-           (key or ZERO32).ljust(32, b"\x00")[:32] + \
-           (involved or ZERO32).ljust(32, b"\x00")[:32]

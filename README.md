@@ -235,10 +235,11 @@ where `gc`/`gd`/`gl` are the block's running `global_loan_count`/`global_default
 
 ## Query API
 
-Query functions let you fetch blocks and search transactions by height or attribute from the chain tip.
+Query functions let you fetch blocks and search transactions by height or search key from the chain tip.
 
 ```python
 from astreum import get_block, find_transactions, get_receipt
+from astreum.crypto.bloom_search import make_search_variants, make_involved_variants
 ```
 
 ### `get_block(node, *, height)`
@@ -259,41 +260,53 @@ if block:
 
 Internally walks the `previous_block` chain to the target era, then binary-descents the bloom tree by offset — approximately 11 storage fetches (O(log N)) plus the chain walk.
 
-### `find_transactions(node, *, sender, receiver, …)`
+### `find_transactions(node, keys, *, start_height=None, end_height=0, limit=1)`
 
-Search for transactions matching the given filters. All filter parameters are optional — leave a filter at its default (32 zero bytes) to match anything.
+Search for transactions that match one or more search keys. Returns a generator that yields `(tx, matched_keys)` tuples, newest first. `matched_keys` is the subset of `keys` that the transaction matched. `matched_keys` lists the matched keys that were still under their per-key limit; a key already at its limit is not reported again.
 
-When multiple filters are set, only transactions matching **all** of them are returned (AND semantics).
+Build the keys with `make_search_variants` or `make_involved_variants`. Both functions return 160-byte keys:
+
+- `make_search_variants(tx_hash, sender, receiver)` returns the base keys for a transaction hash, a sender, or a receiver.
+- `make_involved_variants(tx_hash, account)` returns the keys for a transaction that `account` was involved in.
+
+Pass a field that must match anything as 32 zero bytes (`ZERO32`). A transaction that matches several keys is yielded once, and `matched_keys` lists every key that matched. `limit` applies to each key separately.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `node` | `Node` | — | An initialised, connected Astreum node. |
-| `tx_hash` | `bytes` | `ZERO32` | Match a specific transaction hash. |
-| `sender` | `bytes` | `ZERO32` | Filter by sender public key. |
-| `receiver` | `bytes` | `ZERO32` | Filter by recipient public key. |
-| `key` | `bytes` | `ZERO32` | Filter by contract bloom key (from `bloom.put`). |
-| `start_height` | `int` | `node.latest_block.height` | Search backward from this height. |
-| `end_height` | `int` | `0` | Stop when blocks drop below this height. |
-| `limit` | `int` | `1` | Max results; pass `0` for no limit. |
+| `keys` | `list[bytes]` | — | Candidate 160-byte search keys from `make_search_variants` or `make_involved_variants`. |
+| `start_height` | `int` | `None` | Search backward from this height. `None` starts at the node's latest block. If the height is not reachable, nothing is yielded. |
+| `end_height` | `int` | `0` | Stop when the block height drops below this value. `0` searches the whole chain. |
+| `limit` | `int` | `1` | Maximum results per key; pass `0` for no limit. |
 
 ```python
+from astreum.expression import ZERO32
+
 # Find up to 10 transactions from a specific sender
-txs = find_transactions(node, sender=addr, limit=10)
+keys = make_search_variants(ZERO32, addr, ZERO32)
+for tx, matched_keys in find_transactions(node, keys, limit=10):
+    print(f"{tx.hash.hex()}: {len(matched_keys)} key(s) matched")
 
 # Find transactions in a specific height range
-txs = find_transactions(
+keys = make_search_variants(ZERO32, ZERO32, addr)
+for tx, matched_keys in find_transactions(
     node,
-    receiver=addr,
+    keys,
     start_height=50_000,
     end_height=40_000,
     limit=5,
-)
+):
+    ...
+
+# Find transactions that an account was involved in
+keys = make_involved_variants(ZERO32, account)[:1]  # ZERO32 tx-hash makes both variants identical
+for tx, matched_keys in find_transactions(node, keys, limit=0):
+    ...
 ```
 
-Each returned `Transaction` has its `block_hash` field set to the expr hash of the block that included it, so you can locate the containing block.
+Each yielded `Transaction` has its `block_hash` field set to the expr hash of the block that included it, so you can locate the containing block.
 
 Internally uses the bloom tree index to skip eras that can't contain a match, then walks individual blocks inside candidate eras.
-
 
 ### `get_receipt(node, block_hash, tx_hash)`
 
@@ -322,9 +335,10 @@ A `Receipt` has these fields:
 
 ```python
 # Find a transaction, then read its receipt from the block that included it
-txs = find_transactions(node, tx_hash=tx_hash, limit=1)
+keys = [tx_hash + b"\x00" * 128]
+txs = list(find_transactions(node, keys, limit=1))
 if txs:
-    receipt = get_receipt(node, txs[0].block_hash, tx_hash)
+    receipt = get_receipt(node, txs[0][0].block_hash, tx_hash)
     if receipt is None:
         ...  # not available now, try again later
     else:

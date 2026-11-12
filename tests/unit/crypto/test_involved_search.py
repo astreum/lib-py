@@ -12,11 +12,11 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from astreum.crypto.bloom_search import (
-    bloom_search_tx,
     make_involved_variants,
     make_search_variants,
 )
 from astreum.crypto.bloom_search import search as search_module
+from astreum.crypto.bloom_search.search import iter_matching_transactions
 from astreum.crypto.bloom_tree import BloomTree
 from astreum.crypto.bloom_tree.tree import bloom_search_leaves, bloom_search_storage
 from astreum.expression import NIL
@@ -123,7 +123,7 @@ class TestSearchLeaves(unittest.TestCase):
 
 class TestSearchByInvolved(unittest.TestCase):
 
-    def _search(self, trees_stored, starting_block, txs_by_block, **kw):
+    def _search(self, trees_stored, starting_block, txs_by_block, keys):
         def fake_get_expr(astreum_node, expr_id, contact=None, **kwargs):
             return trees_stored.get(expr_id)
 
@@ -132,7 +132,9 @@ class TestSearchByInvolved(unittest.TestCase):
 
         with mock.patch("astreum.crypto.bloom_tree.tree.get_expr", side_effect=fake_get_expr), \
                 mock.patch.object(search_module, "_load_block_txs", side_effect=fake_load):
-            return bloom_search_tx(object(), starting_block=starting_block, limit=10, **kw)
+            return list(iter_matching_transactions(
+                object(), keys=keys, starting_block=starting_block, limit=10
+            ))
 
     def test_search_tx_by_involved_finds_tx(self):
         tree = BloomTree()
@@ -142,8 +144,10 @@ class TestSearchByInvolved(unittest.TestCase):
         _insert_tx(tree, 0, txs[1], involved=[(involved, True)])
         _insert_tx(tree, 0, txs[2])
         block = _block(tree, 1)
-        found = self._search(_store_tree(tree), block, {block.expr_id: txs}, involved=involved)
-        self.assertEqual([t.hash for t in found], [txs[1].hash])
+        key = Z + Z + Z + Z + involved
+        found = self._search(_store_tree(tree), block, {block.expr_id: txs}, [key])
+        self.assertEqual([t.hash for t, _ in found], [txs[1].hash])
+        self.assertEqual(found[0][1], [key])
 
     def test_search_tx_by_involved_two_txs_in_one_block(self):
         tree = BloomTree()
@@ -153,8 +157,11 @@ class TestSearchByInvolved(unittest.TestCase):
         _insert_tx(tree, 0, txs[1])
         _insert_tx(tree, 0, txs[2], involved=[(involved, False)])
         block = _block(tree, 1)
-        found = self._search(_store_tree(tree), block, {block.expr_id: txs}, involved=involved)
-        self.assertEqual({t.hash for t in found}, {txs[0].hash, txs[2].hash})
+        key = Z + Z + Z + Z + involved
+        found = self._search(_store_tree(tree), block, {block.expr_id: txs}, [key])
+        self.assertEqual({t.hash for t, _ in found}, {txs[0].hash, txs[2].hash})
+        for _, matched in found:
+            self.assertEqual(matched, [key])
 
     def test_search_tx_by_involved_across_era_boundary(self):
         involved = _addr("involved")
@@ -168,14 +175,16 @@ class TestSearchByInvolved(unittest.TestCase):
         _insert_tx(new_tree, 3, new_tx)
         new_block = _block(new_tree, 1024 + 3, previous=old_block)
 
+        key = Z + Z + Z + Z + involved
         stored = {**_store_tree(old_tree), **_store_tree(new_tree)}
         found = self._search(
             stored, new_block,
             {old_block.expr_id: [old_tx], new_block.expr_id: [new_tx]},
-            involved=involved,
+            [key],
         )
-        self.assertEqual([t.hash for t in found], [old_tx.hash])
-        self.assertEqual(found[0].block_hash, old_block.expr_id)
+        self.assertEqual([t.hash for t, _ in found], [old_tx.hash])
+        self.assertEqual(found[0][0].block_hash, old_block.expr_id)
+        self.assertEqual(found[0][1], [key])
 
     def test_search_tx_by_involved_no_match(self):
         tree = BloomTree()
@@ -183,20 +192,9 @@ class TestSearchByInvolved(unittest.TestCase):
         _insert_tx(tree, 0, txs[0], involved=[(_addr("other"), True)])
         _insert_tx(tree, 0, txs[1])
         block = _block(tree, 1)
-        found = self._search(
-            _store_tree(tree), block, {block.expr_id: txs}, involved=_addr("absent")
-        )
+        key = Z + Z + Z + Z + _addr("absent")
+        found = self._search(_store_tree(tree), block, {block.expr_id: txs}, [key])
         self.assertEqual(found, [])
-
-    def test_involved_with_other_filter_raises(self):
-        block = SimpleNamespace(height=1, bloom_hash=Z, expr_id=Z, previous_block=None)
-        involved = os.urandom(32)
-        for kw in ("tx_hash", "sender", "receiver", "key"):
-            with self.assertRaises(ValueError):
-                bloom_search_tx(
-                    object(), starting_block=block, involved=involved,
-                    **{kw: os.urandom(32)},
-                )
 
     def test_search_tx_still_finds_sender(self):
         tree = BloomTree()
@@ -204,10 +202,10 @@ class TestSearchByInvolved(unittest.TestCase):
         _insert_tx(tree, 0, txs[0], involved=[(_addr("other"), True)])
         _insert_tx(tree, 0, txs[1])
         block = _block(tree, 1)
-        found = self._search(
-            _store_tree(tree), block, {block.expr_id: txs}, sender=txs[1].sender
-        )
-        self.assertEqual([t.hash for t in found], [txs[1].hash])
+        sender_key = make_search_variants(txs[1].hash, txs[1].sender, txs[1].recipient)[1]
+        found = self._search(_store_tree(tree), block, {block.expr_id: txs}, [sender_key])
+        self.assertEqual([t.hash for t, _ in found], [txs[1].hash])
+        self.assertEqual(found[0][1], [sender_key])
 
 
 if __name__ == "__main__":

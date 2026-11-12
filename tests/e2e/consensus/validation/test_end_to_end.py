@@ -53,7 +53,7 @@ from astreum.consensus.transaction.storage.payment import challenge_index  # noq
 from astreum.consensus.transaction.treasury.record import TreasuryUserRecord  # noqa: E402
 from astreum.consensus.validation import node as validation_node  # noqa: E402
 from astreum.consensus.validation.node import validate_blockchain  # noqa: E402
-from astreum.crypto.bloom_search import bloom_search_tx  # noqa: E402
+from astreum.query import find_transactions  # noqa: E402
 from astreum.crypto.merkle import create_merkle_tree, generate_merkle_tree_proof  # noqa: E402
 from astreum.expression import NIL, ZERO32, bytes_, resolve_inner_exprs  # noqa: E402
 from astreum.expression.encoding import decode_expr_from_bytes, encode_expr_to_bytes  # noqa: E402
@@ -722,10 +722,13 @@ class TestEndToEnd(unittest.TestCase):
         with Provider(self.node) as provider:
             finder = provider.fresh_node()
             start = get_block_from_storage(finder, self.chain[-2].expr_id)
-            found = bloom_search_tx(finder, tx_hash=code_tx.hash, starting_block=start, limit=1)
+            finder.latest_block = start
+            key = code_tx.hash + b"\x00" * 128
+            found = list(find_transactions(finder, [key], start_height=start.height, limit=1))
         provider.assert_clean(self)
-        self.assertEqual([tx.hash for tx in found], [code_tx.hash])
-        self.assertEqual(found[0].block_hash, self.chain[1].expr_id)
+        self.assertEqual([tx.hash for tx, _ in found], [code_tx.hash])
+        self.assertEqual(found[0][0].block_hash, self.chain[1].expr_id)
+        self.assertEqual(found[0][1], [key])
         # The transaction came from the block that holds it.
         tx_gets = [b for h, b in provider.served if h == code_tx.hash]
         self.assertEqual(tx_gets, [self.chain[1].expr_id])
