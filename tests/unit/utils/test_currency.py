@@ -24,8 +24,28 @@ class TestParseAmount(unittest.TestCase):
     def test_unitless_number_is_base_units(self):
         self.assertEqual(parse_astre_amount("999"), 999)
 
-    def test_scientific_notation_rejected(self):
-        for text in ("1.0 e6", "1.0e6", "1E6", "1e+6", "1 e6", "1.5e3", "0.5e1"):
+    def test_scientific_notation(self):
+        self.assertEqual(parse_astre_amount("1e6"), 10**6)
+        self.assertEqual(parse_astre_amount("1e+6"), 10**6)
+        self.assertEqual(parse_astre_amount("1e0"), 1)
+        self.assertEqual(parse_astre_amount("0.5e1"), 5)
+        self.assertEqual(parse_astre_amount("1.5e3"), 1500)
+        self.assertEqual(parse_astre_amount("1e3 A"), 1000)
+        self.assertEqual(parse_astre_amount("1e6kA"), 10**9)
+        self.assertEqual(parse_astre_amount("1e-1 kA"), 100)
+        self.assertEqual(parse_astre_amount("5.0284e31"), 50284 * 10**27)
+        self.assertEqual(parse_astre_amount("5.0284e31 QA"), 50284 * 10**57)
+
+    def test_uppercase_e_is_exa_not_exponent(self):
+        self.assertEqual(parse_astre_amount("1 E"), 10**18)
+        self.assertEqual(parse_astre_amount("1E"), 10**18)
+        self.assertEqual(parse_astre_amount("1EA"), 10**18)
+        for text in ("1E6", "1E+6", "1.0E6", "1.5E3"):
+            with self.assertRaises(ValueError):
+                parse_astre_amount(text)
+
+    def test_lowercase_e_alone_rejected(self):
+        for text in ("1e", "1 e", "1ea", "1 ea", "1eA", "1 eA"):
             with self.assertRaises(ValueError):
                 parse_astre_amount(text)
 
@@ -44,6 +64,7 @@ class TestParseAmount(unittest.TestCase):
 
     def test_base_unit_forms(self):
         self.assertEqual(parse_astre_amount("1 a"), 1)
+        self.assertEqual(parse_astre_amount("1 A"), 1)
         self.assertEqual(parse_astre_amount("1A"), 1)
         self.assertEqual(parse_astre_amount("1 astre"), 1)
         self.assertEqual(parse_astre_amount("1 Astre"), 1)
@@ -53,20 +74,27 @@ class TestParseAmount(unittest.TestCase):
         self.assertEqual(parse_astre_amount("1k"), 1000)
         self.assertEqual(parse_astre_amount("1 k"), 1000)
         self.assertEqual(parse_astre_amount("1kA"), 1000)
+        self.assertEqual(parse_astre_amount("1 ka"), 1000)
         self.assertEqual(parse_astre_amount("1 kastre"), 1000)
         self.assertEqual(parse_astre_amount("1 kiloastre"), 1000)
         self.assertEqual(parse_astre_amount("1 KiloAstre"), 1000)
         self.assertEqual(parse_astre_amount("1.5k"), 1500)
+        for text in ("1K", "1 K", "1 KA"):
+            with self.assertRaises(ValueError):
+                parse_astre_amount(text)
 
     def test_mega(self):
         self.assertEqual(parse_astre_amount("1MA"), 1000000)
-        self.assertEqual(parse_astre_amount("1 ma"), 1000000)
         self.assertEqual(parse_astre_amount("1 M"), 1000000)
-        self.assertEqual(parse_astre_amount("1 mAstre"), 1000000)
+        self.assertEqual(parse_astre_amount("1 Ma"), 1000000)
         self.assertEqual(parse_astre_amount("1 MAstre"), 1000000)
+        self.assertEqual(parse_astre_amount("1 MASTRE"), 1000000)
         self.assertEqual(parse_astre_amount("1 megaastre"), 1000000)
         self.assertEqual(parse_astre_amount("1 MegaAstre"), 1000000)
         self.assertEqual(parse_astre_amount("1.5 MA"), 1500000)
+        for text in ("1 ma", "1 mA", "1 mAstre", "1 m"):
+            with self.assertRaises(ValueError):
+                parse_astre_amount(text)
 
     def test_giga_and_tera(self):
         self.assertEqual(parse_astre_amount("1G"), 10**9)
@@ -74,30 +102,36 @@ class TestParseAmount(unittest.TestCase):
         self.assertEqual(parse_astre_amount("1 GAstre"), 10**9)
         self.assertEqual(parse_astre_amount("1T"), 10**12)
         self.assertEqual(parse_astre_amount("1 teraAstre"), 10**12)
-        self.assertEqual(parse_astre_amount("2 t"), 2 * 10**12)
+        self.assertEqual(parse_astre_amount("2 T"), 2 * 10**12)
+        for text in ("1g", "1t", "2 t"):
+            with self.assertRaises(ValueError):
+                parse_astre_amount(text)
 
     def test_peta_through_quetta(self):
         self.assertEqual(parse_astre_amount("1P"), 10**15)
-        self.assertEqual(parse_astre_amount("1 p"), 10**15)
-        self.assertEqual(parse_astre_amount("1 Pa"), 10**15)
-        self.assertEqual(parse_astre_amount("1 pastre"), 10**15)
+        self.assertEqual(parse_astre_amount("1 PA"), 10**15)
+        self.assertEqual(parse_astre_amount("1 PAstre"), 10**15)
         self.assertEqual(parse_astre_amount("1 PetaAstre"), 10**15)
-        self.assertEqual(parse_astre_amount("1.5 Ea"), 10**18 + 5 * 10**17)
+        self.assertEqual(parse_astre_amount("1.5 Ea"), 15 * 10**17)
         self.assertEqual(parse_astre_amount("1Z"), 10**21)
         self.assertEqual(parse_astre_amount("1 zettaastre"), 10**21)
         self.assertEqual(parse_astre_amount("2.5 Y"), 25 * 10**23)
-        self.assertEqual(parse_astre_amount("1 r"), 10**27)
+        self.assertEqual(parse_astre_amount("1 R"), 10**27)
         self.assertEqual(parse_astre_amount("1 RonnaAstre"), 10**27)
         self.assertEqual(parse_astre_amount("1Q"), 10**30)
         self.assertEqual(parse_astre_amount("1 QuettaAstre"), 10**30)
+        for text in ("1p", "1 p", "1 z", "1 y", "1 r", "1 q", "1 e"):
+            with self.assertRaises(ValueError):
+                parse_astre_amount(text)
 
     def test_exa_unambiguous(self):
         self.assertEqual(parse_astre_amount("1 E"), 10**18)
         self.assertEqual(parse_astre_amount("1E"), 10**18)
         self.assertEqual(parse_astre_amount("1EA"), 10**18)
-        self.assertEqual(parse_astre_amount("1 ea"), 10**18)
-        self.assertEqual(parse_astre_amount("1.5 Ea"), 15 * 10**17)
         self.assertEqual(parse_astre_amount("1 exaastre"), 10**18)
+        self.assertEqual(parse_astre_amount("1 exaAstre"), 10**18)
+        self.assertEqual(parse_astre_amount("1exaAstre"), 10**18)
+        self.assertEqual(parse_astre_amount("1.5 Ea"), 15 * 10**17)
 
     def test_internal_whitespace(self):
         self.assertEqual(parse_astre_amount("  1   MAstre  "), 1000000)
@@ -109,9 +143,28 @@ class TestParseAmount(unittest.TestCase):
             parse_astre_amount("1e-1")
         with self.assertRaises(ValueError):
             parse_astre_amount("0.5 astre")
+        with self.assertRaises(ValueError):
+            parse_astre_amount("1e-3")
 
     def test_invalid_text_raises(self):
-        for text in ("", "abc", "1 x", "1 kastre+", "$5", "1..2", "1 astre astre"):
+        for text in (
+            "",
+            "abc",
+            "1 x",
+            "1 kastre+",
+            "$5",
+            "1..2",
+            "1 astre astre",
+            "1 K",
+            "1 m",
+            "1 p",
+            "1 z",
+            "1 y",
+            "1 r",
+            "1 q",
+            "1E6",
+            "1e",
+        ):
             with self.assertRaises(ValueError):
                 parse_astre_amount(text)
 
@@ -166,6 +219,27 @@ class TestFormatAmount(unittest.TestCase):
         self.assertEqual(format_astre_amount(1500000), "1.5 MA")
         self.assertEqual(format_astre_amount(1200000), "1.2 MA")
 
+    def test_huge_exact_round_trip(self):
+        for amount in (
+            50284 * 10**27,
+            7 * 10**30 + 3,
+            10**31 + 12345,
+            1234567890123456789012345678901234567890,
+            10**100 + 12345,
+        ):
+            for style in ("short", "full"):
+                self.assertEqual(
+                    parse_astre_amount(format_astre_amount(amount, style=style)),
+                    amount,
+                )
+
+    def test_quetta_decimal(self):
+        self.assertEqual(format_astre_amount(50284 * 10**27), "50.284 QA")
+
+    def test_float_rejected(self):
+        with self.assertRaises(ValueError):
+            format_astre_amount(5.0284e31)  # type: ignore[arg-type]
+
     def test_invalid_style_raises(self):
         with self.assertRaises(ValueError):
             format_astre_amount(1000, style="long")
@@ -196,6 +270,8 @@ class TestRoundTrip(unittest.TestCase):
             10**24,
             10**27,
             10**30,
+            50284 * 10**27,
+            10**31,
         ):
             self.assertEqual(parse_astre_amount(format_astre_amount(amount)), amount)
             self.assertEqual(
@@ -212,6 +288,9 @@ class TestRoundTrip(unittest.TestCase):
             12345678901234567,
             10**18 - 1,
             999999999999999999999999,
+            7 * 10**30 + 3,
+            10**31 + 12345,
+            1234567890123456789012345678901234567890,
         ):
             self.assertEqual(parse_astre_amount(format_astre_amount(amount)), amount)
             self.assertEqual(
