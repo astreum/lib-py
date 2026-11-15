@@ -13,13 +13,19 @@ def find_block_by_height(astreum_node: Any, *,
                          target_height: int) -> Optional[Block]:
     """Find a block by height using the bloom tree's binary structure.
 
+    The search crosses eras through the era heads. An era head names its
+    parent in ``previous_era_hash``, and that parent is the previous era's last
+    block, whose bloom tree covers the whole era. So a hop back one era costs
+    one parent fetch and one descent, not a walk over every block.
+
     Args:
         astreum_node: Astreum node.
         starting_block: Block to start search from.
         target_height: Target block height.
 
     Returns:
-        Optional[Block]: Description of the return value.
+        Optional[Block]: The block at ``target_height``, or None when the
+        block is not reachable from ``starting_block``.
     """
     if starting_block is None:
         return None
@@ -27,46 +33,100 @@ def find_block_by_height(astreum_node: Any, *,
         return None
 
     target_era = target_height // ERA_SIZE
-    target_offset = target_height % ERA_SIZE
-
-    # Walk backward via previous_block chain until we find a block in the
-    # target era.  The first hit is the highest block we have in that era
-    # (its bloom_tree is the most complete).
     current = starting_block
+
+    # Hop era by era: current becomes the previous era's last block, which is
+    # also its most complete bloom tree.
     while current is not None and current.height // ERA_SIZE > target_era:
-        current = get_previous_block(astreum_node, current)
+        head = _era_head(astreum_node, current)
+        if head is None:
+            return None
+        current = get_previous_block(astreum_node, head)
 
     if current is None or current.height // ERA_SIZE != target_era:
         return None  # target era not reachable from this starting block
 
-    # Fast path: current IS the target block (e.g. genesis, era head).
-    if current.height == target_height:
-        return current
+    return _block_in_era(astreum_node, current, target_height)
 
-    # Check whether the target offset has been mined.
-    if target_offset > current.height % ERA_SIZE:
-        return None
 
-    # No bloom tree — walk previous_block chain to find the target.
-    if not current.bloom_hash or current.bloom_hash == ZERO32:
-        target = current
-        while target is not None and target.height > target_height:
-            target = get_previous_block(astreum_node, target)
-        return target
+def _era_head(astreum_node: Any, block: Any) -> Optional[Any]:
+    """Return the first block of the era that holds *block*.
 
-    # Binary-descent by offset to locate the leaf's start_hash.
-    leaf_hash = _storage_find_leaf(
-        astreum_node, current.bloom_hash, target_offset, block_hash=current.expr_id
+    Args:
+        astreum_node: Astreum node.
+        block: A block in the era.
+
+    Returns:
+        The block at offset 0 of the era, or None when it cannot be read.
+    """
+    if block.height % ERA_SIZE == 0:
+        return block
+
+    if block.bloom_hash and block.bloom_hash != ZERO32:
+        leaf_hash = _storage_find_leaf(
+            astreum_node, block.bloom_hash, 0, block_hash=block.expr_id
+        )
+        if leaf_hash is not None:
+            head = get_block_from_storage(
+                astreum_node=astreum_node, block_hash=leaf_hash
+            )
+            if head is not None and head.height % ERA_SIZE == 0:
+                return head
+
+    # No tree, or a tree that does not reach offset 0: walk the parents.
+    return _walk_back(
+        astreum_node, block, lambda b: b.height % ERA_SIZE == 0
     )
-    if leaf_hash is not None:
-        return get_block_from_storage(astreum_node=astreum_node, block_hash=leaf_hash)
 
-    # Leaf found but start_hash deferred — target is the era head itself.
-    # Walk backward from current to find it.
-    target = current
-    while target is not None and target.height > target_height:
-        target = get_previous_block(astreum_node, target)
-    return target
+
+def _block_in_era(
+    astreum_node: Any, block: Any, target_height: int
+) -> Optional[Any]:
+    """Return the block at *target_height* within the era that holds *block*.
+
+    Args:
+        astreum_node: Astreum node.
+        block: A block in the target era.
+        target_height: Height to find.
+
+    Returns:
+        The block at the height, or None when it has not been mined.
+    """
+    if block.height == target_height:
+        return block
+
+    target_offset = target_height % ERA_SIZE
+    if target_offset > block.height % ERA_SIZE:
+        return None  # the target offset is not mined in this era
+
+    if block.bloom_hash and block.bloom_hash != ZERO32:
+        leaf_hash = _storage_find_leaf(
+            astreum_node, block.bloom_hash, target_offset, block_hash=block.expr_id
+        )
+        if leaf_hash is not None:
+            return get_block_from_storage(
+                astreum_node=astreum_node, block_hash=leaf_hash
+            )
+
+    # No tree, or no leaf on the path: walk the parents.
+    return _walk_back(astreum_node, block, lambda b: b.height <= target_height)
+
+
+def _walk_back(astreum_node: Any, block: Any, stop) -> Optional[Any]:
+    """Walk parents until *stop* holds for the current block.
+
+    Args:
+        astreum_node: Astreum node.
+        block: Block to start the walk from.
+        stop: Predicate that takes a block and returns True to stop.
+
+    Returns:
+        The first block that satisfies *stop*, or None when the chain ends.
+    """
+    current = block
+    while current is not None and not stop(current):
+        current = get_previous_block(astreum_node, current)
+    return current
 
 
 def _storage_find_leaf(astreum_node: Any, root_hash: bytes,
