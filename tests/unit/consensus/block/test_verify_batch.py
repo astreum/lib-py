@@ -18,7 +18,7 @@ from astreum.consensus.account.model import ACCOUNT_SHAPE  # noqa: E402
 from astreum.consensus.block.verify import transactions as verify_module  # noqa: E402
 from astreum.consensus.block.verify.transactions import verify_block_transactions  # noqa: E402
 from astreum.consensus.transaction.storage.model import STORAGE_RECORD_SHAPE  # noqa: E402
-from astreum.expression import link_list_to_expr  # noqa: E402
+from astreum.expression import ZERO32, link_list_to_expr  # noqa: E402
 
 CONTACT = object()
 
@@ -122,6 +122,41 @@ class TestVerifyBatch(unittest.TestCase):
         self.assertEqual(
             result,
             (False, "failed deriving scheduled validator: unable to load block header from storage"),
+        )
+
+
+class TestGenesisBidTotals(unittest.TestCase):
+    def _genesis(self, **overrides):
+        fields = dict(
+            expr_id=os.urandom(32),
+            previous_block_hash=ZERO32,
+            transactions_hash=ZERO32,
+            receipts_hash=ZERO32,
+            accounts_hash=os.urandom(32),
+            total_transaction_fee=0,
+            total_base_fee=0,
+            transaction_count=0,
+            total_storage_fee=0,
+            chain_id=0,
+            height=0,
+        )
+        fields.update(overrides)
+        return SimpleNamespace(**fields)
+
+    def test_genesis_with_a_nonzero_total_base_fee_is_rejected(self):
+        block = self._genesis(total_base_fee=5)
+        node = SimpleNamespace(logger=mock.Mock())
+        self.assertEqual(
+            verify_block_transactions(node, block),
+            (False, "genesis total base fee mismatch"),
+        )
+
+    def test_genesis_with_a_nonzero_transaction_count_is_rejected(self):
+        block = self._genesis(transaction_count=1)
+        node = SimpleNamespace(logger=mock.Mock())
+        self.assertEqual(
+            verify_block_transactions(node, block),
+            (False, "genesis transaction count mismatch"),
         )
 
 

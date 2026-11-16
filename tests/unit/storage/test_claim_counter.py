@@ -53,6 +53,7 @@ def _make_node(storage_public_key_bytes, accounts, chain_id=1):
         config=NodeConfig(chain_id=chain_id),
         storage_public_key_bytes=storage_public_key_bytes,
         storage_secret_key=None,
+        storage_claim_bid=1,
         latest_block=SimpleNamespace(accounts=accounts, height=40),
         logger=SimpleNamespace(info=lambda *a, **k: None, exception=lambda *a, **k: None),
     )
@@ -106,19 +107,20 @@ class TestBuildMultiClaimTx(unittest.TestCase):
         self.node.storage_secret_key = self.secret
 
     def test_uses_given_counter(self):
-        tx = _build_multi_claim_tx(self.node, [_claim(42)], self.secret, 11)
+        tx = _build_multi_claim_tx(self.node, [_claim(42)], self.secret, 11, 1)
         self.assertEqual(tx.counter, 11)
 
     def test_signed_and_well_formed(self):
-        tx = _build_multi_claim_tx(self.node, [_claim(42)], self.secret, 0)
+        tx = _build_multi_claim_tx(self.node, [_claim(42)], self.secret, 0, 1)
         self.assertEqual(tx.code, TransactionCode.STORAGE_PAYMENT)
+        self.assertEqual(tx.base_fee, 1)
         self.assertEqual(tx.sender, self.pk)
         self.assertTrue(tx.signature)
         self.assertEqual(tx.recipient, b"\x00" * 32)
 
     def test_consecutive_counters(self):
-        tx1 = _build_multi_claim_tx(self.node, [_claim(1)], self.secret, 3)
-        tx2 = _build_multi_claim_tx(self.node, [_claim(2)], self.secret, 4)
+        tx1 = _build_multi_claim_tx(self.node, [_claim(1)], self.secret, 3, 1)
+        tx2 = _build_multi_claim_tx(self.node, [_claim(2)], self.secret, 4, 1)
         self.assertEqual((tx1.counter, tx2.counter), (3, 4))
         self.assertNotEqual(tx1.expr().hash(), tx2.expr().hash())
 
@@ -425,6 +427,7 @@ class TestClaimStep(unittest.TestCase):
             storage_claim_band=1,
             storage_claim_hash_rate=1000.0,
             storage_claim_inclusion_delay=1,
+            storage_claim_bid=1,
             logger=SimpleNamespace(info=lambda *a, **k: None, exception=lambda *a, **k: None),
         )
         self.head = SimpleNamespace(height=60, storage_difficulty=0)
@@ -574,6 +577,29 @@ class TestClaimStep(unittest.TestCase):
         self.assertEqual(entries, [])
         build.assert_called_once()
         self.assertEqual(self.queue.heap, [(110, self.storage_id)])
+
+
+class TestClaimBid(unittest.TestCase):
+    def test_the_claim_tx_carries_the_head_bid(self):
+        node = _make_node(b"\x01" * 32, _AccountsStub())
+        node.storage_claim_bid = 7
+        node.config = NodeConfig(chain_id=1, storage_claim_min_profit=0)
+        head = SimpleNamespace(height=40)
+        built = {}
+
+        def build(*args):
+            built["base_fee"] = args[4]
+            return SimpleNamespace(hash=b"h" * 32, expr=lambda: object())
+
+        with patch.object(claim_mod, "_build_multi_claim_tx", side_effect=build), \
+             patch.object(claim_mod, "_tree_bytes", return_value=100), \
+             patch("astreum.consensus.transaction.send.send_transaction"):
+            in_flight, _ = _send_batch(
+                node, head, [(*_claim(42), 10)], 0, Fraction(0)
+            )
+
+        self.assertIsNotNone(in_flight)
+        self.assertEqual(built["base_fee"], 7)
 
 
 if __name__ == "__main__":

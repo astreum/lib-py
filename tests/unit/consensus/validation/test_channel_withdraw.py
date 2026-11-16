@@ -118,7 +118,7 @@ class TestChannelWithdraw(unittest.TestCase):
         self.assertEqual(ch.counter, 6)
         self.assertEqual(
             withdrawer.balance,
-            withdrawer_before + 400 - receipt.transaction_fee - receipt.storage_fee,
+            withdrawer_before + 400 - receipt.total_fee,
         )
 
     # --- failures ---

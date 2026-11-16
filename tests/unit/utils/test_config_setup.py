@@ -156,16 +156,24 @@ class TestStorageClaimKeys(_ConfigCase):
     def test_storage_claim_fee_keys_default(self):
         result = self.build()
         self.assertEqual(result.storage_claim_fee_window, 65_536)
+        self.assertEqual(result.storage_claim_fee_samples, 64)
         self.assertEqual(result.storage_claim_min_profit, 10**9)
 
     def test_storage_claim_fee_keys_parsed(self):
-        result = self.build(storage_claim_fee_window="1000", storage_claim_min_profit=0)
+        result = self.build(
+            storage_claim_fee_window="1000",
+            storage_claim_fee_samples="32",
+            storage_claim_min_profit=0,
+        )
         self.assertEqual(result.storage_claim_fee_window, 1000)
+        self.assertEqual(result.storage_claim_fee_samples, 32)
         self.assertEqual(result.storage_claim_min_profit, 0)
 
     def test_storage_claim_fee_keys_rejected(self):
         with self.assertRaises(ValueError):
             self.build(storage_claim_fee_window=0)
+        with self.assertRaises(ValueError):
+            self.build(storage_claim_fee_samples=0)
         with self.assertRaises(ValueError):
             self.build(storage_claim_min_profit=-1)
 

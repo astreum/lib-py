@@ -12,6 +12,7 @@ from astreum.consensus.block.rate import (
     estimate_storage_rate,
     storage_fee_at_rate,
 )
+from astreum.consensus.block.base_fee import estimate_transaction_base_fee
 from astreum.consensus.constants import STORAGE_ADDRESS
 from astreum.consensus.transaction import create_transaction
 from astreum.consensus.transaction.code import TransactionCode
@@ -46,7 +47,6 @@ from astreum.storage.workers.claim_flow import (
     need,
 )
 from astreum.storage.workers.claim_schedule import (
-    _BASE_TX_FEE,
     _RECEIPT_OVERHEAD_BYTES,
     ClaimQueue,
     LaneChoice,
@@ -319,6 +319,7 @@ def _build_multi_claim_tx(
     claims: list[Claim],
     secret_key,
     counter: int,
+    base_fee: int,
 ) -> object:
     """Build a signed STORAGE_PAYMENT transaction with the given claims.
 
@@ -327,6 +328,7 @@ def _build_multi_claim_tx(
         claims: List of Claim tuples.
         secret_key: The signing key.
         counter: The transaction counter.
+        base_fee: The bid to carry and pay.
 
     Returns:
         The signed transaction object.
@@ -342,6 +344,7 @@ def _build_multi_claim_tx(
         recipient=b"\x00" * 32,
         code=TransactionCode.STORAGE_PAYMENT,
         amount=0,
+        base_fee=base_fee,
         data=claims_expr,
         secret_key=secret_key,
     )
@@ -379,10 +382,16 @@ def _send_batch(
         sent = getattr(node, "latest_block", None) or head
         if counter is None:
             counter = _chain_counter(node, sent)
-        tx = _build_multi_claim_tx(node, [entry[:5] for entry in entries], node.storage_secret_key, counter)
+        tx = _build_multi_claim_tx(
+            node,
+            [entry[:5] for entry in entries],
+            node.storage_secret_key,
+            counter,
+            node.storage_claim_bid,
+        )
         tx_bytes = _tree_bytes(tx.expr())
         cost = (
-            _BASE_TX_FEE
+            node.storage_claim_bid
             + storage_fee_at_rate(rate, tx_bytes)
             + storage_fee_at_rate(rate, _RECEIPT_OVERHEAD_BYTES)
         )
@@ -445,7 +454,7 @@ def _claim_step(
     band = node.storage_claim_band
     interval = fair_interval(head)
     retry = head.height + (interval or 1)
-    cost = claim_cost(rate, bytes_per_claim, band)
+    cost = claim_cost(rate, node.storage_claim_bid, bytes_per_claim, band)
     records: list[tuple[bytes, StorageRecord]] = []
     for storage_id in ids:
         record = None
@@ -545,6 +554,14 @@ def claim_storage(node: Node) -> None:
                     head_rate = estimate_storage_rate(head, node.config.storage_claim_fee_window)
                 except ValueError:
                     head_rate = None
+                try:
+                    node.storage_claim_bid = estimate_transaction_base_fee(node, head)
+                except Exception:
+                    node.logger.debug(
+                        "Claim worker: base fee estimate failed; bidding 1",
+                        exc_info=True,
+                    )
+                    node.storage_claim_bid = 1
                 storage_tree = account.data if account is not None else None
                 storage_rate = head_rate
                 tree_head = head
@@ -600,7 +617,9 @@ def claim_storage(node: Node) -> None:
                     discount_rate = calculate_discount_rate(head, node, range_blocks=ERA_SIZE)
                 except ValueError:
                     discount_rate = 0.0
-                cost = claim_cost(storage_rate, bytes_per_claim, band)
+                cost = claim_cost(
+                    storage_rate, node.storage_claim_bid, bytes_per_claim, band
+                )
                 items = [
                     (storage_id, lane_value(new_size, fair, discount_rate, cost), prefix_bits)
                     for storage_id, (new_size, prefix_bits) in held.items()

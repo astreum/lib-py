@@ -72,6 +72,7 @@ def _make_tx(
     data: Expr = NIL,
     secret_key,
     cost_limit: int = 0,
+    base_fee: int = 1,
     counter: int = 0,
 ) -> Transaction:
     if isinstance(data, bytes):
@@ -82,6 +83,7 @@ def _make_tx(
         code=code,
         counter=counter,
         cost_limit=cost_limit,
+        base_fee=base_fee,
         data=data,
         recipient=recipient,
         sender=sender_pk,
@@ -108,6 +110,8 @@ def _make_previous_block() -> Block:
         timestamp=0,
         accounts_hash=ZERO32,
         total_transaction_fee=0,
+        total_base_fee=0,
+        transaction_count=0,
         total_storage_fee=0,
         statistics=[(1, 1, 0, 0, 0, 0)],
         transactions_hash=ZERO32,
@@ -128,6 +132,8 @@ def _make_block(
         timestamp=0,
         accounts_hash=ZERO32,
         total_transaction_fee=0,
+        total_base_fee=0,
+        transaction_count=0,
         total_storage_fee=0,
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
@@ -173,6 +179,47 @@ class TestApplyTransaction(unittest.TestCase):
         self.block = _make_block(self.node, self.prev_block)
         _seed_storage_account(self.block)
 
+    def test_a_bid_of_seven_is_paid_as_seven(self):
+        sender_pk, sender_key = _seed_sender_account(self.block, balance=1_000_000)
+        tx = _make_tx(
+            chain_id=1,
+            sender_pk=sender_pk,
+            recipient=os.urandom(32),
+            amount=1,
+            secret_key=sender_key,
+            base_fee=7,
+        )
+        tx_hash = _store_tx(self.node, tx)
+        apply_transaction(self.node, self.block, tx_hash)
+
+        receipt = self.block.receipts[-1]
+        self.assertEqual(receipt.base_fee, 7)
+        self.assertEqual(receipt.execution_fee, 0)
+        self.assertEqual(
+            receipt.total_fee,
+            receipt.base_fee + receipt.data_fee + receipt.storage_fee,
+        )
+
+    def test_a_claim_that_cannot_pay_records_what_it_paid(self):
+        sender_pk, sender_key = _seed_sender_account(self.block, balance=0)
+        tx = _make_tx(
+            chain_id=1,
+            sender_pk=sender_pk,
+            recipient=STORAGE_ADDRESS,
+            amount=0,
+            code=TransactionCode.STORAGE_PAYMENT,
+            data=NIL,
+            secret_key=sender_key,
+            base_fee=7,
+        )
+        tx_hash = _store_tx(self.node, tx)
+        apply_transaction(self.node, self.block, tx_hash)
+
+        receipt = self.block.receipts[-1]
+        self.assertEqual(receipt.base_fee, 0)
+        self.assertEqual(receipt.execution_fee, 0)
+        self.assertEqual(receipt.base_fee + receipt.execution_fee, 0)
+
     def test_simple_transfer_updates_balances(self):
         """A TRANSFER transaction moves balance from sender to recipient."""
         sender_pk, sender_key = _seed_sender_account(self.block, balance=1_000_000)
@@ -193,7 +240,7 @@ class TestApplyTransaction(unittest.TestCase):
         )
 
         receipt = self.block.receipts[-1]
-        tx_fee = receipt.transaction_fee
+        tx_fee = receipt.total_fee
         storage_fee = receipt.storage_fee
         total_fee = receipt.total_fee
         mandatory_storage_cost = calculate_transaction_costs(
@@ -209,7 +256,7 @@ class TestApplyTransaction(unittest.TestCase):
         self.assertEqual(recipient_account.balance, amount)
         self.assertEqual(
             sender.balance,
-            1_000_000 - amount - receipt.transaction_fee - receipt.storage_fee,
+            1_000_000 - amount - receipt.total_fee,
         )
 
     def test_insufficient_balance_raises(self):
@@ -331,7 +378,7 @@ class TestApplyTransaction(unittest.TestCase):
 
         apply_transaction(self.node, self.block, tx_hash)
         receipt = self.block.receipts[-1]
-        tx_fee = receipt.transaction_fee
+        tx_fee = receipt.total_fee
         storage_fee = receipt.storage_fee
 
         sender = self.block.accounts.get_account(sender_pk, self.node)
@@ -342,7 +389,7 @@ class TestApplyTransaction(unittest.TestCase):
         # but fees are still deducted
         self.assertEqual(
             sender.balance,
-            1_000_000 - receipt.transaction_fee - receipt.storage_fee,
+            1_000_000 - receipt.total_fee,
         )
 
     def test_tx_stored_in_block_transactions_has_attributes(self):
@@ -391,7 +438,7 @@ class TestApplyTransactionFailureReceipt(unittest.TestCase):
 
         apply_transaction(self.node, self.block, tx_hash)
         receipt = self.block.receipts[-1]
-        tx_fee = receipt.transaction_fee
+        tx_fee = receipt.total_fee
         storage_fee = receipt.storage_fee
 
         self.assertEqual(self.block.receipts[0].status, STATUS_FAILED)
@@ -402,7 +449,7 @@ class TestApplyTransactionFailureReceipt(unittest.TestCase):
         )
         self.assertEqual(
             sender.balance,
-            1_000_000 - receipt.transaction_fee - receipt.storage_fee,
+            1_000_000 - receipt.total_fee,
         )
 
 
@@ -520,7 +567,7 @@ class TestStorageFees(unittest.TestCase):
         # The expr that goes into the receipts trie says the same.
         r = block.receipts[-1]
         failed = Receipt(
-            transaction_hash=r.transaction_hash, transaction_fee=r.transaction_fee,
+            transaction_hash=r.transaction_hash, base_fee=r.base_fee,
             storage_fee=r.storage_fee, data_fee=r.data_fee,
             execution_fee=r.execution_fee, status=STATUS_FAILED,
             logs_hash=r.logs_hash,

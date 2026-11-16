@@ -46,6 +46,7 @@ DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS = 0.25
 # Most pages one STORAGE_FOUND reply may span (about 4 MiB at ~65 KB a page).
 DEFAULT_STORAGE_FOUND_MAX_PAGES = 64
 DEFAULT_STORAGE_CLAIM_FEE_WINDOW = 65_536  # blocks
+DEFAULT_STORAGE_CLAIM_FEE_SAMPLES = 64
 DEFAULT_STORAGE_CLAIM_MIN_PROFIT = 10**9  # astre
 
 
@@ -100,6 +101,7 @@ class NodeConfig:
         storage_claim_hash_rate: Optional[float] = None,
         storage_claim_inclusion_delay: Optional[int] = None,
         storage_claim_fee_window: int = DEFAULT_STORAGE_CLAIM_FEE_WINDOW,
+        storage_claim_fee_samples: int = DEFAULT_STORAGE_CLAIM_FEE_SAMPLES,
         storage_claim_min_profit: int = DEFAULT_STORAGE_CLAIM_MIN_PROFIT,
         fair_use_limit: int = DEFAULT_FAIR_USE_LIMIT_BYTES,
         fair_use_ratio: float = DEFAULT_FAIR_USE_RATIO,
@@ -171,6 +173,7 @@ class NodeConfig:
         self.storage_claim_hash_rate = storage_claim_hash_rate
         self.storage_claim_inclusion_delay = storage_claim_inclusion_delay
         self.storage_claim_fee_window = storage_claim_fee_window
+        self.storage_claim_fee_samples = storage_claim_fee_samples
         self.storage_claim_min_profit = storage_claim_min_profit
         self.fair_use_limit = fair_use_limit
         self.fair_use_ratio = fair_use_ratio
@@ -569,6 +572,11 @@ def _setup_storage_claim(config: Dict) -> None:
     config["storage_claim_fee_window"] = _parse_int(
         "storage_claim_fee_window",
         config.get("storage_claim_fee_window", DEFAULT_STORAGE_CLAIM_FEE_WINDOW),
+        1,
+    )
+    config["storage_claim_fee_samples"] = _parse_int(
+        "storage_claim_fee_samples",
+        config.get("storage_claim_fee_samples", DEFAULT_STORAGE_CLAIM_FEE_SAMPLES),
         1,
     )
     config["storage_claim_min_profit"] = _parse_int(

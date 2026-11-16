@@ -256,7 +256,7 @@ class TestStoragePayment(unittest.TestCase):
 
         expected_payout = 100 * (1 - 0)
         sender_after = self.block.accounts.get_account(sender_pk, self.node).balance
-        fees = receipt.transaction_fee + receipt.storage_fee
+        fees = receipt.total_fee
         self.assertEqual(sender_after, sender_before - fees + expected_payout)
 
         updated = self._record_in_trie(list_id)
@@ -322,7 +322,7 @@ class TestStoragePayment(unittest.TestCase):
 
         expected_payout = 20000 * (1 - 0)
         sender_after = self.block.accounts.get_account(sender_pk, self.node).balance
-        fees = receipt.transaction_fee + receipt.storage_fee
+        fees = receipt.total_fee
         self.assertEqual(sender_after, sender_before - fees + expected_payout)
 
     def test_zero_balance_invalid_claim_soft_fails(self):
@@ -1002,7 +1002,7 @@ class TestStoragePayment(unittest.TestCase):
         self.assertEqual(receipt.status, STATUS_SUCCESS)
         account = self.block.accounts.get_account(pk, self.node)
         self.assertIsNotNone(account)
-        fees = receipt.transaction_fee + receipt.storage_fee
+        fees = receipt.total_fee
         self.assertEqual(account.balance, 20000 * 1 - fees)
         self.assertEqual(account.counter, 1)
         self.assertTrue(self.block.bloom_tree.new_exprs())

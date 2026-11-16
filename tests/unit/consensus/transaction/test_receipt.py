@@ -27,7 +27,7 @@ def _receipt(status=STATUS_SUCCESS, node=None, mint=0) -> Receipt:
             node.hot_storage[h] = int_(0)
     return Receipt(
         transaction_hash=tx_hash,
-        transaction_fee=1,
+        base_fee=1,
         storage_fee=700,
         data_fee=3,
         execution_fee=40,
@@ -57,9 +57,14 @@ class TestReceipt(unittest.TestCase):
             cell = cell.tail
         self.assertEqual(
             [c.value for c in cells],
-            [r.data_fee, r.execution_fee, None, r.mint, r.status, r.storage_fee, r.transaction_fee],
+            [r.data_fee, r.execution_fee, None, r.mint, r.status, r.storage_fee, r.base_fee],
         )
         self.assertEqual(cell.head_hash, r.transaction_hash)
+
+    def test_total_fee_sums_the_four_parts(self):
+        r = _receipt()
+        self.assertEqual(r.total_fee, r.base_fee + r.execution_fee + r.data_fee + r.storage_fee)
+        self.assertEqual(r.total_fee, 744)
 
     def test_from_storage_names_the_transaction_whether_or_not_it_is_stored(self):
         for stored in (False, True):
@@ -100,7 +105,7 @@ class TestReceipt(unittest.TestCase):
         r = _receipt(node=node)
         body = Expr("link", head_hash=r.transaction_hash)
         cells = [
-            int_(r.transaction_fee),
+            int_(r.base_fee),
             int_(r.storage_fee),
             int_(r.status),
             *([] if mint is None else [int_(mint)]),

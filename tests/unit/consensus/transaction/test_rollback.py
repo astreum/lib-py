@@ -159,7 +159,7 @@ class TestRollbackFailedTransfer(_Base):
         self.assertEqual(receipt.status, STATUS_FAILED)
         self.assertEqual(sender.counter, 1)
         self.assertEqual(
-            sender.balance, 1_000_000 - receipt.transaction_fee - receipt.storage_fee
+            sender.balance, 1_000_000 - receipt.total_fee
         )
 
     def test_failed_tx_does_not_create_recipient(self):
@@ -331,7 +331,7 @@ class TestPartialFees(_Base):
         block, receipt, sender = self._transfer(1, 0)
         self.assertEqual(receipt.status, STATUS_FAILED)
         self.assertEqual(sender.balance, 0)
-        self.assertEqual(receipt.transaction_fee, 1)
+        self.assertEqual(receipt.base_fee, 1)
         self.assertEqual(receipt.storage_fee, 0)
 
     def test_amount_unaffordable_pays_fees_only(self):

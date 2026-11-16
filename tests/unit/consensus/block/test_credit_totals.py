@@ -32,6 +32,8 @@ def _make_block(**overrides):
         timestamp=1234567890,
         accounts_hash=b"a" * 32,
         total_transaction_fee=0,
+        total_base_fee=0,
+        transaction_count=0,
         total_storage_fee=0,
         statistics=[(1, 1, 0, 0, 0, 0)],
         transactions_hash=b"t" * 32,

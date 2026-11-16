@@ -11,6 +11,7 @@ record holds (the records table of the validator), as a real provider does. Any
 GET that is not scoped, or that the record would not cover, is recorded.
 """
 
+import copy
 import os
 import sys
 import tempfile
@@ -184,6 +185,8 @@ class Fixture:
             timestamp=int(time.time()),
             accounts_hash=root,
             total_transaction_fee=0,
+        total_base_fee=0,
+        transaction_count=0,
             total_storage_fee=0,
             statistics=[(1, STAKE, 0, 0, 0, 0)],
             transactions_hash=ZERO32,
@@ -241,7 +244,7 @@ class Fixture:
             put_expr_in_hot_storage(node, cell)
 
         return [
-            ("transfer", self.tx(node, 0, self.friend, amount=1000)),
+            ("transfer", self.tx(node, 0, self.friend, amount=1000, base_fee=3)),
             ("new account", self.tx(node, 1, self.newcomer, amount=777)),
             (
                 "code call",
@@ -571,6 +574,25 @@ class TestEndToEnd(unittest.TestCase):
         self.assertIn("no exprs committed", reason)
         self.assertEqual(self.node.storage_index, before)
 
+    def test_a_bid_of_three_is_paid_as_three(self) -> None:
+        block = self.chain[1]
+        receipts = [receipt(self.node, block, h) for h in tx_hashes(self.node, block)]
+        self.assertIn(3, [r.base_fee for r in receipts])
+
+    def test_a_wrong_base_fee_total_is_rejected(self) -> None:
+        block = copy.copy(self.chain[1])
+        block.total_base_fee = (block.total_base_fee or 0) + 1
+        ok, reason = verify_block_transactions(self.node, block)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "total base fee mismatch")
+
+    def test_a_wrong_transaction_count_is_rejected(self) -> None:
+        block = copy.copy(self.chain[1])
+        block.transaction_count = (block.transaction_count or 0) + 1
+        ok, reason = verify_block_transactions(self.node, block)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "transaction count mismatch")
+
     def test_a_later_block_holds_another_transfer(self) -> None:
         later = [b for b in self.chain[2:] if b.transactions_hash != ZERO32]
         self.assertTrue(later, "the later transfer was not included")
@@ -589,7 +611,7 @@ class TestEndToEnd(unittest.TestCase):
 
     def _fees(self, block):
         receipts = [receipt(self.node, block, h) for h in tx_hashes(self.node, block)]
-        paid = sum(r.transaction_fee + r.data_fee for r in receipts)
+        paid = sum(r.base_fee + r.execution_fee + r.data_fee for r in receipts)
         return max(paid, 1), sum(r.storage_fee for r in receipts)
 
     def test_the_fee_total_grows_by_each_blocks_fee_income(self) -> None:

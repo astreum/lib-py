@@ -54,6 +54,8 @@ def block_to_expr(block: Block) -> Expr:
     body: Expr = link(_statistics_to_expr(block.statistics), NIL)
     body = link(bytes_(block.validator_public_key_bytes), body)
     body = link(Expr("link", head_hash=block.transactions_hash), body)
+    body = link(int_(block.transaction_count), body)
+    body = link(int_(block.total_base_fee), body)
     body = link(int_(block.total_transaction_fee), body)
     body = link(int_(block.total_storage_fee), body)
     body = link(int_(block.timestamp), body)

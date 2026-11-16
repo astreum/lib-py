@@ -122,7 +122,7 @@ class TestTreasuryBorrow(unittest.TestCase):
         # Sender credited the discounted amount (minus fees).
         self.assertEqual(
             sender.balance,
-            sender_before + discounted - receipt.transaction_fee - receipt.storage_fee,
+            sender_before + discounted - receipt.total_fee,
         )
         # Treasury debited the discounted amount.
         self.assertEqual(treasury.balance, (discounted + 1000) - discounted)

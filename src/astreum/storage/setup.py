@@ -128,6 +128,7 @@ def setup_storage(node: Any, config: NodeConfig) -> None:
     node.long_term_storage_interval = config.long_term_storage_interval
     node.long_term_cursor = 0
     node.storage_claim_band = config.storage_claim_band or 1
+    node.storage_claim_bid = 1
     node.storage_claim_hash_rate = config.storage_claim_hash_rate
     node.storage_claim_inclusion_delay = config.storage_claim_inclusion_delay or 1
     node.new_record_ids = deque() if node.is_storage_provider else None

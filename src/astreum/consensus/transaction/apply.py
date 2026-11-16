@@ -112,9 +112,11 @@ def _apply_tx_effects(
     receipt_status = STATUS_SUCCESS
     # The sum of the claim payouts. The receipt shows it only for a success.
     minted = 0
+    # The sender's bid. Consensus rejects a bid below 1, so it is read as is.
+    bid = transaction.base_fee
     # The base fee, plus the evaluation fee once a call has run: tx_fee already
     # holds the execution, so it is charged once and counted once.
-    tx_fee = 1 if not nested else 0
+    tx_fee = bid if not nested else 0
 
     # Pre-fee guard: top-level sender must always cover at least the base tx_fee.
     # Credit-funding codes are exempt — their handler credits the sender before
@@ -640,12 +642,13 @@ def _apply_tx_effects(
             Returns:
                 The constructed Receipt.
             """
+            base_fee_value = min(bid, tx_fee)
             return Receipt(
                 transaction_hash=transaction_hash,
-                transaction_fee=tx_fee,
+                base_fee=base_fee_value,
                 storage_fee=storage_fee,
                 data_fee=current_data_fee,
-                execution_fee=current_evaluation_fee,
+                execution_fee=tx_fee - base_fee_value,
                 status=receipt_status,
                 logs_hash=logs_expr.hash(),
                 mint=minted if receipt_status == STATUS_SUCCESS else 0,
@@ -707,7 +710,6 @@ def _apply_tx_effects(
         ):
             # The receipt records the final status and the fees taken.
             tx_fee = settlement.transaction_fee
-            current_evaluation_fee = min(current_evaluation_fee, tx_fee)
             current_data_fee = settlement.data_fee
             current_storage_fee = settlement.storage_fee
             receipt = _build_receipt(current_storage_fee)

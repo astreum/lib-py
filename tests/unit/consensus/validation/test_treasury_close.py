@@ -110,7 +110,7 @@ class TestTreasuryClose(unittest.TestCase):
 
         self.assertEqual(
             sender.balance,
-            sender_before - total_cost - receipt.transaction_fee - receipt.storage_fee,
+            sender_before - total_cost - receipt.total_fee,
         )
         self.assertEqual(treasury.balance, treasury_before + total_cost)
 
@@ -152,7 +152,7 @@ class TestTreasuryClose(unittest.TestCase):
 
         self.assertEqual(
             sender.balance,
-            sender_before - total_cost - receipt.transaction_fee - receipt.storage_fee,
+            sender_before - total_cost - receipt.total_fee,
         )
         self.assertEqual(treasury.balance, treasury_before + total_cost)
 
@@ -217,7 +217,7 @@ class TestTreasuryClose(unittest.TestCase):
 
         self.assertEqual(
             sender.balance,
-            sender_before - total_cost - receipt.transaction_fee - receipt.storage_fee,
+            sender_before - total_cost - receipt.total_fee,
         )
         self.assertEqual(treasury.balance, treasury_before + total_cost)
 

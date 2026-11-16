@@ -79,7 +79,7 @@ class TestChannelClose(unittest.TestCase):
         self.assertEqual(ch.counter, 3)               # +1
         self.assertEqual(
             sender.balance,
-            sender_before + 800 - receipt.transaction_fee - receipt.storage_fee,
+            sender_before + 800 - receipt.total_fee,
         )
 
     # --- failures ---

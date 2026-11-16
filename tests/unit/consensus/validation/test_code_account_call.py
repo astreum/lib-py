@@ -73,7 +73,7 @@ class TestCodeAccountCall(unittest.TestCase):
         apply_transaction(self.node, self.block, tx_hash)
         receipt = self.block.receipts[-1]
         self.assertEqual(receipt.status, STATUS_SUCCESS)
-        self.assertGreater(receipt.transaction_fee, 0)
+        self.assertGreater(receipt.total_fee, 0)
 
         acct = self.block.accounts.get_account(recipient, self.node)
         self.assertEqual(acct.balance, 6000)
@@ -92,14 +92,15 @@ class TestCodeAccountCall(unittest.TestCase):
         receipt = self.block.receipts[-1]
         self.assertGreater(receipt.execution_fee, 0)
 
-        # The execution is inside transaction_fee: the sender pays it once,
-        # and the block's fee totals (transaction + storage) hold it once.
+        # The base fee and the execution fee are separate: the sender pays
+        # both once, and the block's fee totals hold them once.
         after = self.block.accounts.get_account(sender_pk, self.node).balance
         self.assertEqual(before - after, 1000 + receipt.total_fee)
         self.assertEqual(
-            receipt.total_fee, receipt.transaction_fee + receipt.storage_fee + receipt.data_fee
+            receipt.total_fee,
+            receipt.base_fee + receipt.execution_fee + receipt.storage_fee + receipt.data_fee,
         )
-        self.assertGreaterEqual(receipt.transaction_fee, 1 + receipt.execution_fee)
+        self.assertEqual(receipt.base_fee, 1)
 
     def test_tx_new_transfers_to_sender(self):
         sender_pk, sender_key = seed_sender_account(self.block, balance=1_000_000)

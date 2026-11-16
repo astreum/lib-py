@@ -58,7 +58,7 @@ class TestTransfer(unittest.TestCase):
         self.assertEqual(recipient_acct.balance, amount)
         self.assertEqual(
             sender.balance,
-            1_000_000 - amount - receipt.transaction_fee - receipt.storage_fee,
+            1_000_000 - amount - receipt.total_fee,
         )
 
     def test_transfer_to_self_only_pays_fees(self):
@@ -76,7 +76,7 @@ class TestTransfer(unittest.TestCase):
         self.assertEqual(receipt.status, STATUS_SUCCESS)
         self.assertEqual(
             sender.balance,
-            1_000_000 - receipt.transaction_fee - receipt.storage_fee,
+            1_000_000 - receipt.total_fee,
         )
 
     def test_transfer_appended_with_correct_attributes(self):

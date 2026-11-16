@@ -64,7 +64,7 @@ def calculate_transaction_costs(
         """
         return Receipt(
             transaction_hash=tx_hash,
-            transaction_fee=1,
+            base_fee=transaction.base_fee,
             storage_fee=storage_fee,
             data_fee=0,
             execution_fee=0,

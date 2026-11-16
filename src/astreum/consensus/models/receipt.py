@@ -61,7 +61,7 @@ class Receipt:
     def __init__(
         self,
         transaction_hash: bytes,
-        transaction_fee: int,
+        base_fee: int,
         storage_fee: int,
         data_fee: int,
         execution_fee: int,
@@ -70,7 +70,7 @@ class Receipt:
         mint: int = 0,
     ) -> None:
         self.transaction_hash = transaction_hash
-        self.transaction_fee = transaction_fee
+        self.base_fee = base_fee
         self.storage_fee = storage_fee
         self.data_fee = data_fee
         self.execution_fee = execution_fee
@@ -88,11 +88,9 @@ class Receipt:
             None.
 
         Returns:
-            Sum of transaction, data, and storage fees.
+            Sum of the base, execution, data, and storage fees.
         """
-        # transaction_fee holds the execution fee: counting it again would
-        # charge a call twice.
-        return self.transaction_fee + self.data_fee + self.storage_fee
+        return self.base_fee + self.execution_fee + self.data_fee + self.storage_fee
 
     def to_expr(self) -> "Expr":
         """Convert receipt to expression.
@@ -104,7 +102,7 @@ class Receipt:
             The expression representation.
         """
         body: Expr = Expr("link", head_hash=self.transaction_hash)
-        body = link(int_(self.transaction_fee), body)
+        body = link(int_(self.base_fee), body)
         body = link(int_(self.storage_fee), body)
         body = link(int_(self.status), body)
         body = link(int_(self.mint), body)
@@ -186,7 +184,7 @@ class Receipt:
             mint_node,
             status_node,
             storage_fee_node,
-            transaction_fee_node,
+            base_fee_node,
         ) = body_nodes
 
         if not get_expr_tag(data_fee_node, node, contact, block_hash) == "int":
@@ -211,8 +209,8 @@ class Receipt:
             raise ValueError("expected Int for status")
         if not get_expr_tag(storage_fee_node, node, contact, block_hash) == "int":
             raise ValueError("expected Int for storage_fee")
-        if not get_expr_tag(transaction_fee_node, node, contact, block_hash) == "int":
-            raise ValueError("expected Int for transaction_fee")
+        if not get_expr_tag(base_fee_node, node, contact, block_hash) == "int":
+            raise ValueError("expected Int for base_fee")
 
         status_value = get_expr_value(status_node, node, contact, block_hash)
         if status_value not in (STATUS_SUCCESS, STATUS_FAILED):
@@ -220,7 +218,7 @@ class Receipt:
 
         receipt = cls(
             transaction_hash=tx_hash,
-            transaction_fee=get_expr_value(transaction_fee_node, node, contact, block_hash),
+            base_fee=get_expr_value(base_fee_node, node, contact, block_hash),
             storage_fee=get_expr_value(storage_fee_node, node, contact, block_hash),
             data_fee=get_expr_value(data_fee_node, node, contact, block_hash),
             execution_fee=get_expr_value(execution_fee_node, node, contact, block_hash),

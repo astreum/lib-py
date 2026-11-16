@@ -8,7 +8,6 @@ from astreum.consensus.block.rate import storage_fee_at_rate
 from astreum.consensus.transaction.storage.difficulty import distance_delta, required_bits
 from astreum.consensus.validation.validator import SLOT_DURATION_SECONDS
 
-_BASE_TX_FEE = 1  # apply.py:77 — protocol-derived base transaction fee
 # Walk size of an 8-field claim receipt (models/receipt.py) with mint=10**12,
 # storage_fee=70_000, data_fee=500: 725 bytes, rounded up to the next multiple
 # of 10 so the claim cost estimate is not low for real claims.
@@ -25,8 +24,8 @@ def affordable_bits(budget: int) -> int:
     return budget.bit_length() - 1
 
 
-def claim_cost(rate: Fraction, bytes_per_claim: int, band: int) -> int:
-    overhead = _BASE_TX_FEE + storage_fee_at_rate(rate, _RECEIPT_OVERHEAD_BYTES)
+def claim_cost(rate: Fraction, base_fee: int, bytes_per_claim: int, band: int) -> int:
+    overhead = base_fee + storage_fee_at_rate(rate, _RECEIPT_OVERHEAD_BYTES)
     return storage_fee_at_rate(rate, bytes_per_claim) + -(-overhead // band)
 
 

@@ -23,6 +23,8 @@ class TestBlockNonce(unittest.TestCase):
             timestamp=1,
             accounts_hash=ZERO32,
             total_transaction_fee=0,
+        total_base_fee=0,
+        transaction_count=0,
             total_storage_fee=0,
             statistics=[(1, 1, 0, 0, 0, 0)],
             transactions_hash=None,

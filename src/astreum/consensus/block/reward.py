@@ -16,7 +16,7 @@ def validator_reward(receipts: Iterable) -> int:
     Returns:
         The reward in aster.
     """
-    paid = sum(r.transaction_fee + r.data_fee for r in receipts)
+    paid = sum(r.total_fee - r.storage_fee for r in receipts)
     return max(paid, 1)
 
 

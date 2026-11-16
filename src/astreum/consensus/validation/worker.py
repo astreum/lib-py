@@ -57,7 +57,8 @@ from astreum.crypto.bloom_search import make_search_variants, ERA_SIZE
 def _next_signed_transaction(node: Any) -> Transaction:
     """Take the next transaction with a valid signature from the queue.
 
-    A transaction with an invalid signature is dropped.
+    A transaction with an invalid signature, or with a base fee below 1, is
+    dropped.
 
     Args:
         node: The node that holds the transaction queue.
@@ -70,9 +71,65 @@ def _next_signed_transaction(node: Any) -> Transaction:
     """
     while True:
         transaction = node._validation_transaction_queue.get_nowait()
-        if transaction.verify_signature():
-            return transaction
-        node.logger.debug("Dropped queued transaction: invalid signature")
+        if not transaction.verify_signature():
+            node.logger.debug("Dropped queued transaction: invalid signature")
+            continue
+        if transaction.base_fee < 1:
+            node.logger.debug("Dropped queued transaction: base fee below 1")
+            continue
+        return transaction
+
+
+def _drain_pending_transactions(node: Any) -> list[Transaction]:
+    """Take every valid queued transaction, highest base fee first.
+
+    The sort is stable, so equal bids keep arrival order.
+
+    Args:
+        node: The node that holds the transaction queue.
+
+    Returns:
+        The valid transactions, highest base fee first.
+    """
+    pending: list[Transaction] = []
+    while True:
+        try:
+            pending.append(_next_signed_transaction(node))
+        except Empty:
+            break
+    pending.sort(key=lambda tx: -tx.base_fee)
+    return pending
+
+
+def _apply_pending_transactions(
+    node: Any, block: Any, pending: list[Transaction]
+) -> None:
+    """Apply the drained transactions in order.
+
+    On NotImplementedError, the current transaction and the unapplied tail go
+    back to the queue, in order.
+
+    Args:
+        node: The node that holds the queue.
+        block: The block being built.
+        pending: The drained transactions, highest base fee first.
+
+    Returns:
+        None
+    """
+    for index, current_tx in enumerate(pending):
+        try:
+            apply_transaction_obj(node, block, current_tx)
+        except NotImplementedError:
+            tx_hex = current_tx.hash
+            node.logger.warning("Transaction %s unsupported; re-queued", tx_hex)
+            for rest in pending[index:]:
+                node._validation_transaction_queue.put(rest)
+            time.sleep(0.5)
+            break
+        except Exception:
+            tx_hex = current_tx.hash
+            node.logger.exception("Failed applying transaction %s", tx_hex)
 
 def included_transaction_exprs(node: Any, transactions: list) -> list:
     """Every expr of the given transactions' trees, each once.
@@ -316,12 +373,9 @@ def make_validation_worker(
                 time.sleep(0.5)
                 continue
 
-            try:
-                current_tx = _next_signed_transaction(node)
-                queue_empty = False
-            except Empty:
-                current_tx = None
-                queue_empty = True
+            pending = _drain_pending_transactions(node)
+            queue_empty = not pending
+            if queue_empty:
                 node.logger.debug(
                     "No pending validation transactions; generating empty block"
                 )
@@ -335,6 +389,8 @@ def make_validation_worker(
                 accounts_hash=previous_block.accounts_hash,
                 bloom_hash=previous_block.bloom_hash,
                 total_transaction_fee=0,
+                total_base_fee=0,
+                transaction_count=0,
                 total_storage_fee=0,
                 transactions_hash=None,
                 receipts_hash=None,
@@ -433,23 +489,7 @@ def make_validation_worker(
                     previous_block.height % ERA_SIZE, previous_block.expr_id, node
                 )
 
-            while current_tx is not None:
-                try:
-                    apply_transaction_obj(node, new_block, current_tx)
-                except NotImplementedError:
-                    tx_hex = current_tx.hash
-                    node.logger.warning("Transaction %s unsupported; re-queued", tx_hex)
-                    node._validation_transaction_queue.put(current_tx)
-                    time.sleep(0.5)
-                    break
-                except Exception:
-                    tx_hex = current_tx.hash
-                    node.logger.exception("Failed applying transaction %s", tx_hex)
-
-                try:
-                    current_tx = _next_signed_transaction(node)
-                except Empty:
-                    current_tx = None
+            _apply_pending_transactions(node, new_block, pending)
 
             transactions_at = time.perf_counter()
 
@@ -468,10 +508,16 @@ def make_validation_worker(
                     new_block.pending_exprs.append(get_radix_node_expr(trie_node))
                 storage_account.data_hash = storage_account.data.root_hash
 
-            total_transaction_fee = sum(r.transaction_fee for r in new_block.receipts)
+            total_transaction_fee = sum(
+                r.base_fee + r.execution_fee for r in new_block.receipts
+            )
+            total_base_fee = sum(r.base_fee for r in new_block.receipts)
+            transaction_count = len(new_block.receipts)
             total_storage_fee = sum(r.storage_fee for r in new_block.receipts)
 
             new_block.total_transaction_fee = total_transaction_fee
+            new_block.total_base_fee = total_base_fee
+            new_block.transaction_count = transaction_count
             new_block.total_storage_fee = total_storage_fee
 
             treasury_account = new_block.accounts.get_account(TREASURY_ADDRESS, node)

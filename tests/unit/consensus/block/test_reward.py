@@ -11,9 +11,13 @@ if str(SRC_DIR) not in sys.path:
 from astreum.consensus.block.reward import fee_income, validator_reward  # noqa: E402
 
 
-def _receipt(transaction_fee=0, data_fee=0, storage_fee=0):
+def _receipt(base_fee=0, execution_fee=0, data_fee=0, storage_fee=0):
     return SimpleNamespace(
-        transaction_fee=transaction_fee, data_fee=data_fee, storage_fee=storage_fee
+        base_fee=base_fee,
+        execution_fee=execution_fee,
+        data_fee=data_fee,
+        storage_fee=storage_fee,
+        total_fee=base_fee + execution_fee + data_fee + storage_fee,
     )
 
 
@@ -22,11 +26,14 @@ class TestValidatorReward(unittest.TestCase):
         self.assertEqual(validator_reward([]), 1)
 
     def test_the_reward_is_the_transaction_and_data_fees(self):
-        receipts = [_receipt(3, 5, 100), _receipt(2, 0, 40)]
+        receipts = [
+            _receipt(base_fee=3, data_fee=5, storage_fee=100),
+            _receipt(base_fee=2, storage_fee=40),
+        ]
         self.assertEqual(validator_reward(receipts), 3 + 5 + 2)
 
     def test_the_storage_fee_is_not_paid_to_the_validator(self):
-        self.assertEqual(validator_reward([_receipt(0, 0, 100)]), 1)
+        self.assertEqual(validator_reward([_receipt(storage_fee=100)]), 1)
 
 
 class TestFeeIncome(unittest.TestCase):
@@ -34,7 +41,10 @@ class TestFeeIncome(unittest.TestCase):
         self.assertEqual(fee_income([]), 1)
 
     def test_fee_income_is_the_reward_plus_the_storage_fee(self):
-        receipts = [_receipt(3, 5, 100), _receipt(2, 0, 40)]
+        receipts = [
+            _receipt(base_fee=3, data_fee=5, storage_fee=100),
+            _receipt(base_fee=2, storage_fee=40),
+        ]
         self.assertEqual(fee_income(receipts), (3 + 5 + 2) + (100 + 40))
 
 

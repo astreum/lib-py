@@ -85,9 +85,9 @@ def get_block_from_storage(
         raise ValueError(
             f"unable to resolve block body (missed={[h.hex()[:8] for h in missed]})"
         )
-    if len(body_nodes) != 19:
+    if len(body_nodes) != 21:
         raise ValueError(
-            f"malformed block body length (got={len(body_nodes)}, expected=19)"
+            f"malformed block body length (got={len(body_nodes)}, expected=21)"
         )
 
     (
@@ -107,6 +107,8 @@ def get_block_from_storage(
         timestamp_node,
         total_storage_fee_node,
         total_transaction_fee_node,
+        total_base_fee_node,
+        transaction_count_node,
         transactions_link,
         validator_node,
         statistics_node,
@@ -144,6 +146,10 @@ def get_block_from_storage(
         raise ValueError("expected Int for total_storage_fee")
     if not get_expr_tag(total_transaction_fee_node, astreum_node, contact, block_hash) == "int":
         raise ValueError("expected Int for total_transaction_fee")
+    if not get_expr_tag(total_base_fee_node, astreum_node, contact, block_hash) == "int":
+        raise ValueError("expected Int for total_base_fee")
+    if not get_expr_tag(transaction_count_node, astreum_node, contact, block_hash) == "int":
+        raise ValueError("expected Int for transaction_count")
     if not get_expr_tag(transactions_link, astreum_node, contact, block_hash) == "link":
         raise ValueError("expected Link for transactions_hash")
     if not get_expr_tag(validator_node, astreum_node, contact, block_hash) == "bytes":
@@ -186,6 +192,8 @@ def get_block_from_storage(
         timestamp=get_expr_value(timestamp_node, astreum_node, contact, block_hash),
         accounts_hash=get_expr_head_hash(accounts_link),
         total_transaction_fee=get_expr_value(total_transaction_fee_node, astreum_node, contact, block_hash),
+        total_base_fee=get_expr_value(total_base_fee_node, astreum_node, contact, block_hash),
+        transaction_count=get_expr_value(transaction_count_node, astreum_node, contact, block_hash),
         total_storage_fee=get_expr_value(total_storage_fee_node, astreum_node, contact, block_hash),
         transactions_hash=get_expr_head_hash(transactions_link),
         receipts_hash=get_expr_head_hash(receipts_link),
@@ -242,7 +250,7 @@ def get_previous_block_hash_local(astreum_node: Any, block_hash: bytes) -> bytes
         if missed or len(inner_nodes) != 2:
             return None
         body_nodes, missed = resolve_list_exprs(astreum_node, inner_nodes[0], local=True)
-        if missed or len(body_nodes) != 19:
+        if missed or len(body_nodes) != 21:
             return None
         # Position 9 of the body is the previous block link.
         return get_expr_head_hash(body_nodes[9])

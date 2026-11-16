@@ -36,7 +36,7 @@ def _receipt(node, mint=0) -> Receipt:
         node.hot_storage[h] = int_(0)
     return Receipt(
         transaction_hash=tx_hash,
-        transaction_fee=1,
+        base_fee=1,
         storage_fee=700,
         data_fee=3,
         execution_fee=40,
@@ -78,7 +78,7 @@ class TestGetReceipt(unittest.TestCase):
         self.assertIsInstance(got, Receipt)
         self.assertEqual(got.transaction_hash, wanted.transaction_hash)
         self.assertEqual(got.status, wanted.status)
-        self.assertEqual(got.transaction_fee, wanted.transaction_fee)
+        self.assertEqual(got.base_fee, wanted.base_fee)
         self.assertEqual(got.storage_fee, wanted.storage_fee)
         self.assertEqual(got.data_fee, wanted.data_fee)
         self.assertEqual(got.execution_fee, wanted.execution_fee)

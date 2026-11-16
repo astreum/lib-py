@@ -170,6 +170,18 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
                 _hex(block.expr_id),
             )
             return False, "genesis total transaction fee mismatch"
+        if block.total_base_fee not in (0, None):
+            node.logger.debug(
+                "Block verify genesis total base fee mismatch block=%s",
+                _hex(block.expr_id),
+            )
+            return False, "genesis total base fee mismatch"
+        if block.transaction_count not in (0, None):
+            node.logger.debug(
+                "Block verify genesis transaction count mismatch block=%s",
+                _hex(block.expr_id),
+            )
+            return False, "genesis transaction count mismatch"
         if block.total_storage_fee not in (0, None):
             node.logger.debug(
                 "Block verify genesis total storage fee mismatch block=%s",
@@ -298,6 +310,8 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         accounts_hash=prev_block.accounts_hash,
         bloom_hash=prev_block.bloom_hash,
         total_transaction_fee=0,
+        total_base_fee=0,
+        transaction_count=0,
         total_storage_fee=0,
         transactions_hash=None,
         receipts_hash=None,
@@ -379,10 +393,20 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
                 _hex(block.expr_id), _hex(tx_hash),
             )
             return False, f"invalid transaction signature tx={_hex(tx_hash)}"
+        if transaction.base_fee < 1:
+            node.logger.debug(
+                "Block verify invalid base fee block=%s tx=%s",
+                _hex(block.expr_id), _hex(tx_hash),
+            )
+            return False, f"invalid base fee tx={_hex(tx_hash)}"
         apply_transaction_obj(node, work_block, transaction)
 
     # Derive totals from collected receipts
-    total_transaction_fee = sum(r.transaction_fee for r in work_block.receipts)
+    total_transaction_fee = sum(
+        r.base_fee + r.execution_fee for r in work_block.receipts
+    )
+    total_base_fee = sum(r.base_fee for r in work_block.receipts)
+    transaction_count = len(work_block.receipts)
     total_storage_fee = sum(r.storage_fee for r in work_block.receipts)
     total_fee = sum(r.total_fee for r in work_block.receipts)
 
@@ -430,6 +454,34 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
             block.total_transaction_fee,
         )
         return False, "total transaction fee mismatch"
+    if block.total_base_fee is None:
+        node.logger.debug(
+            "Block verify missing total base fee block=%s",
+            _hex(block.expr_id),
+        )
+        return False, "missing total base fee"
+    if block.total_base_fee != total_base_fee:
+        node.logger.debug(
+            "Block verify total base fee mismatch block=%s expected=%s actual=%s",
+            _hex(block.expr_id),
+            total_base_fee,
+            block.total_base_fee,
+        )
+        return False, "total base fee mismatch"
+    if block.transaction_count is None:
+        node.logger.debug(
+            "Block verify missing transaction count block=%s",
+            _hex(block.expr_id),
+        )
+        return False, "missing transaction count"
+    if block.transaction_count != transaction_count:
+        node.logger.debug(
+            "Block verify transaction count mismatch block=%s expected=%s actual=%s",
+            _hex(block.expr_id),
+            transaction_count,
+            block.transaction_count,
+        )
+        return False, "transaction count mismatch"
     if block.total_storage_fee is None:
         node.logger.debug(
             "Block verify missing total storage fee block=%s",
@@ -544,12 +596,12 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
                 _hex(block.expr_id),
             )
             return False, f"receipt status mismatch tx={_hex(expected.transaction_hash)}"
-        if stored.transaction_fee != expected.transaction_fee:
+        if stored.base_fee != expected.base_fee:
             node.logger.debug(
-                "Block verify receipt transaction fee mismatch block=%s",
+                "Block verify receipt base fee mismatch block=%s",
                 _hex(block.expr_id),
             )
-            return False, f"receipt transaction fee mismatch tx={_hex(expected.transaction_hash)}"
+            return False, f"receipt base fee mismatch tx={_hex(expected.transaction_hash)}"
         if stored.storage_fee != expected.storage_fee:
             node.logger.debug(
                 "Block verify receipt storage fee mismatch block=%s",

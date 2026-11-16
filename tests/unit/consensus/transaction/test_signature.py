@@ -31,12 +31,13 @@ def _public(key: Ed25519PrivateKey) -> bytes:
     return key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
 
 
-def _signed(key: Ed25519PrivateKey, amount: int = 5, counter: int = 0) -> Transaction:
+def _signed(key: Ed25519PrivateKey, amount: int = 5, counter: int = 0, base_fee: int = 1) -> Transaction:
     tx = Transaction(
         chain_id=0,
         amount=amount,
         code=TransactionCode.TRANSFER,
         counter=counter,
+        base_fee=base_fee,
         recipient=os.urandom(32),
         sender=_public(key),
     )
@@ -69,6 +70,11 @@ class TestVerifySignature(unittest.TestCase):
     def test_signature_by_another_key_is_invalid(self) -> None:
         tx = _signed(self.key)
         tx.signature = Ed25519PrivateKey.generate().sign(tx.body_hash)
+        self.assertFalse(tx.verify_signature())
+
+    def test_changed_base_fee_is_invalid(self) -> None:
+        tx = _signed(self.key)
+        tx.base_fee = 2
         self.assertFalse(tx.verify_signature())
 
     def test_changed_amount_is_invalid(self) -> None:

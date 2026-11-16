@@ -326,10 +326,11 @@ A `Receipt` has these fields:
 |-------|-------------|
 | `transaction_hash` | Hash of the transaction. |
 | `status` | Result status of the transaction. |
-| `transaction_fee` | Transaction fee charged. |
+| `base_fee` | Base fee charged: the sender's bid, capped by what the balance paid. |
 | `data_fee` | Data fee charged. |
 | `storage_fee` | Storage fee charged. |
 | `execution_fee` | Execution fee charged. |
+| `total_fee` | Property. The sum of `base_fee`, `execution_fee`, `data_fee`, and `storage_fee`. |
 | `logs_hash` | Hash of the transaction logs. |
 | `mint` | New coin the transaction gave its sender: the sum of the valid storage claim payouts. It is `0` for failed transactions and for transactions that are not claims. |
 

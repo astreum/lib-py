@@ -229,7 +229,7 @@ def _parse_transaction(root: Expr) -> "Transaction":
         raise ValueError("transaction body must be a Link chain")
 
     body_nodes = _list_items(body)
-    if len(body_nodes) != 8:
+    if len(body_nodes) != 9:
         raise ValueError("malformed transaction body length")
 
     (
@@ -237,6 +237,7 @@ def _parse_transaction(root: Expr) -> "Transaction":
         chain_id_node,
         code_node,
         cost_limit_node,
+        base_fee_node,
         counter_node,
         data_node,
         recipient_node,
@@ -251,6 +252,8 @@ def _parse_transaction(root: Expr) -> "Transaction":
         raise ValueError("expected Int for code")
     if get_expr_builtin_tag(cost_limit_node) != "int":
         raise ValueError("expected Int for cost_limit")
+    if get_expr_builtin_tag(base_fee_node) != "int":
+        raise ValueError("expected Int for base_fee")
     if get_expr_builtin_tag(counter_node) != "int":
         raise ValueError("expected Int for counter")
     if get_expr_builtin_tag(recipient_node) != "bytes":
@@ -265,6 +268,7 @@ def _parse_transaction(root: Expr) -> "Transaction":
         code=TransactionCode(code_node.value),
         counter=counter_node.value,
         cost_limit=cost_limit_node.value,
+        base_fee=base_fee_node.value,
         data=data_node,
         recipient=recipient_node.value,
         sender=sender_node.value,

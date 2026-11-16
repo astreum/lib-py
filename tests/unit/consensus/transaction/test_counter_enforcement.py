@@ -94,7 +94,7 @@ class TestCounterEnforcement(unittest.TestCase):
         self.assertEqual(sender.counter, 0)  # not consumed
         # Fees still charged (plus new-recipient storage fee added after the
         # receipt was built), transfer not applied.
-        self.assertLess(sender.balance, 1_000_000 - receipt.transaction_fee)
+        self.assertLess(sender.balance, 1_000_000 - receipt.base_fee)
         recipient_account = self.block.accounts.get_account(recipient, self.node)
         self.assertTrue(recipient_account is None or recipient_account.balance == 0)
 

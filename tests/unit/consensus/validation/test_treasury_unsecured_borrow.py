@@ -140,7 +140,7 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
         net_amount = discounted - price
         self.assertEqual(
             sender.balance,
-            sender_before + net_amount - receipt.transaction_fee - receipt.storage_fee,
+            sender_before + net_amount - receipt.total_fee,
         )
         self.assertIsNotNone(guarantor)
         self.assertEqual(guarantor.balance, price)
@@ -359,7 +359,7 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
         self.assertEqual(
             sender.balance,
             sender_before + (discounted - expected_fee)
-            - receipt.transaction_fee - receipt.storage_fee,
+            - receipt.total_fee,
         )
 
     def test_net_amount_non_positive_fails(self):

@@ -174,7 +174,7 @@ class TestTreasuryUnsecuredRepay(_UnsecuredRepayCloseTestBase):
         # Amount was refunded: net change is only the ordinary tx/storage fees.
         self.assertEqual(
             sender.balance,
-            sender_before - receipt.transaction_fee - receipt.storage_fee,
+            sender_before - receipt.total_fee,
         )
 
     def test_two_sequential_repays_do_not_double_count(self):
@@ -285,7 +285,7 @@ class TestTreasuryUnsecuredClose(_UnsecuredRepayCloseTestBase):
         sender = block.accounts.get_account(sender_pk, self.node)
         self.assertEqual(
             sender.balance,
-            sender_before - receipt.transaction_fee - receipt.storage_fee,
+            sender_before - receipt.total_fee,
         )
 
     def test_partial_default_releases_proportional_guarantee(self):

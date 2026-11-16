@@ -55,9 +55,9 @@ def get_transaction_from_storage(
         raise ValueError(
             f"unable to resolve transaction body (missed={[h.hex()[:8] for h in missed]})"
         )
-    if len(body_nodes) != 8:
+    if len(body_nodes) != 9:
         raise ValueError(
-            f"malformed transaction body length (got={len(body_nodes)}, expected=8)"
+            f"malformed transaction body length (got={len(body_nodes)}, expected=9)"
         )
 
     (
@@ -65,6 +65,7 @@ def get_transaction_from_storage(
         chain_id_node,
         code_node,
         cost_limit_node,
+        base_fee_node,
         counter_node,
         data_node,
         recipient_node,
@@ -79,6 +80,8 @@ def get_transaction_from_storage(
         raise ValueError("expected Int for code")
     if not get_expr_tag(cost_limit_node, node, contact, block_hash) == "int":
         raise ValueError("expected Int for cost_limit")
+    if not get_expr_tag(base_fee_node, node, contact, block_hash) == "int":
+        raise ValueError("expected Int for base_fee")
     if not get_expr_tag(counter_node, node, contact, block_hash) == "int":
         raise ValueError("expected Int for counter")
     if not get_expr_builtin_tag(recipient_node) == "bytes":
@@ -97,6 +100,7 @@ def get_transaction_from_storage(
         code=TransactionCode(get_expr_value(code_node, node, contact, block_hash)),
         counter=get_expr_value(counter_node, node, contact, block_hash),
         cost_limit=get_expr_value(cost_limit_node, node, contact, block_hash),
+        base_fee=get_expr_value(base_fee_node, node, contact, block_hash),
         data=data_node,
         recipient=recipient_node.value,
         sender=sender_node.value,

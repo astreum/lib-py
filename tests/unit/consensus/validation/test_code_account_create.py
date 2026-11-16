@@ -75,7 +75,7 @@ class TestCodeAccountCreate(unittest.TestCase):
         self.assertEqual(expr_account.code_hash, program_hash)
         self.assertEqual(
             sender.balance,
-            sender_before - initial_balance - receipt.transaction_fee - receipt.storage_fee,
+            sender_before - initial_balance - receipt.total_fee,
         )
 
     # --- failures ---

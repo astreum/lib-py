@@ -16,6 +16,7 @@ class Transaction:
     code: TransactionCode
     counter: int
     cost_limit: int = 0
+    base_fee: int = 1
     data: Expr = NIL
     recipient: bytes = b""
     sender: bytes = b""
@@ -29,11 +30,12 @@ class Transaction:
     _expr: Optional["Expr"] = field(default=None, repr=False)
 
     def _body(self) -> Expr:
-        """Build the signed body: the list of the eight transaction fields."""
+        """Build the signed body: the list of the nine transaction fields."""
         body: Expr = link(bytes_(self.sender), NIL)
         body = link(bytes_(self.recipient), body)
         body = link(self.data, body)
         body = link(int_(self.counter), body)
+        body = link(int_(self.base_fee), body)
         body = link(int_(self.cost_limit), body)
         body = link(int_(self.code), body)
         body = link(int_(self.chain_id), body)

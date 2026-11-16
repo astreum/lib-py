@@ -13,7 +13,8 @@ if str(SRC_DIR) not in sys.path:
 
 import os
 
-from astreum.expression import resolve_inner_exprs
+from astreum.expression import NIL, resolve_inner_exprs
+from astreum.consensus.transaction import Transaction, TransactionCode
 from astreum.consensus.transaction.message import (
     decode_transaction_message,
     encode_transaction_message,
@@ -108,6 +109,49 @@ class TestTransactionMessage(unittest.TestCase):
         self.assertEqual(decoded.amount, tx.amount)
         self.assertEqual(decoded.body_hash, tx.body_hash)
         self.assertEqual(decoded.expr().hash(), expected)
+
+    def test_body_has_nine_links_in_order(self) -> None:
+        tx = Transaction(
+            chain_id=1,
+            amount=100_000,
+            code=TransactionCode.TRANSFER,
+            counter=3,
+            cost_limit=5,
+            recipient=os.urandom(32),
+            sender=self.sender_pk,
+        )
+        cells = []
+        cell = tx._body()
+        while cell is not None and cell.tail is not None:
+            cells.append(cell.head)
+            cell = cell.tail
+        self.assertEqual(len(cells), 9)
+        self.assertEqual(cells[0].value, 100_000)  # amount
+        self.assertEqual(cells[3].value, 5)        # cost_limit
+        self.assertEqual(cells[4].value, 1)        # base_fee
+        self.assertEqual(cells[5].value, 3)        # counter
+
+    def test_an_eight_link_body_is_rejected(self) -> None:
+        from astreum.consensus.transaction.from_storage import (
+            get_transaction_from_storage,
+        )
+        from astreum.expression import bytes_, int_, link, symbol
+        from astreum.storage.exprs import put_expr_in_hot_storage
+
+        body = link(bytes_(self.sender_pk), NIL)
+        body = link(bytes_(os.urandom(32)), body)
+        body = link(NIL, body)
+        body = link(int_(0), body)
+        body = link(int_(0), body)
+        body = link(int_(0), body)
+        body = link(int_(1), body)
+        body = link(int_(1), body)
+        root = link(
+            link(body, link(bytes_(b"\x00" * 64), NIL)), symbol("transaction")
+        )
+        put_expr_in_hot_storage(self.node, root)
+        with self.assertRaises(ValueError):
+            get_transaction_from_storage(self.node, root.hash())
 
     def test_decode_garbage_returns_none(self) -> None:
         self.assertIsNone(decode_transaction_message(b""))

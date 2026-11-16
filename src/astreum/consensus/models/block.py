@@ -21,6 +21,8 @@ class Block:
     timestamp: Optional[int]
     accounts_hash: Optional[bytes]
     total_transaction_fee: Optional[int]
+    total_base_fee: Optional[int]
+    transaction_count: Optional[int]
     total_storage_fee: Optional[int]
     transactions_hash: Optional[bytes]
     receipts_hash: Optional[bytes]
@@ -60,6 +62,8 @@ class Block:
         timestamp: Optional[int],
         accounts_hash: Optional[bytes],
         total_transaction_fee: Optional[int],
+        total_base_fee: Optional[int],
+        transaction_count: Optional[int],
         total_storage_fee: Optional[int],
         transactions_hash: Optional[bytes],
         receipts_hash: Optional[bytes],
@@ -98,6 +102,8 @@ class Block:
         self.timestamp = timestamp
         self.accounts_hash = accounts_hash
         self.total_transaction_fee = total_transaction_fee
+        self.total_base_fee = total_base_fee
+        self.transaction_count = transaction_count
         self.total_storage_fee = total_storage_fee
         self.transactions_hash = transactions_hash
         self.receipts_hash = receipts_hash

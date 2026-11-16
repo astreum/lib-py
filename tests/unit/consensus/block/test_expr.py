@@ -37,6 +37,8 @@ def _make_block(**overrides):
         timestamp=1234567890,
         accounts_hash=b"a" * 32,
         total_transaction_fee=0,
+        total_base_fee=11,
+        transaction_count=3,
         total_storage_fee=0,
         statistics=[(1, 1, 0, 0, 0, 0)],
         transactions_hash=b"t" * 32,
@@ -59,6 +61,8 @@ def _assert_block_fields(test_case: unittest.TestCase, b: Block):
     test_case.assertEqual(b.timestamp, 1234567890)
     test_case.assertEqual(b.accounts_hash, b"a" * 32)
     test_case.assertEqual(b.total_transaction_fee, 0)
+    test_case.assertEqual(b.total_base_fee, 11)
+    test_case.assertEqual(b.transaction_count, 3)
     test_case.assertEqual(b.total_storage_fee, 0)
     test_case.assertEqual(b.total_fee, 0)
     test_case.assertEqual(b.statistics, [(1, 1, 0, 0, 0, 0)])
@@ -176,7 +180,7 @@ class TestBlockExprColdStorage(unittest.TestCase):
                 entry = link(int_(value), entry)
             stats = link(entry, stats)
         bad_body = NIL
-        for node in reversed(nodes[:18] + [stats]):
+        for node in reversed(nodes[:20] + [stats]):
             bad_body = link(node, bad_body)
         bad_expr = link(link(bad_body, link(bytes_(b.signature), NIL)), symbol("block"))
         put_expr_in_cold_storage(self.node, bad_expr)
@@ -212,7 +216,7 @@ class TestBlockExprColdStorage(unittest.TestCase):
                 entry = link(int_(value), entry)
             stats = link(entry, stats)
         bad_body = NIL
-        for node in reversed(nodes[:18] + [stats]):
+        for node in reversed(nodes[:20] + [stats]):
             bad_body = link(node, bad_body)
         bad_expr = link(link(bad_body, link(bytes_(b.signature), NIL)), symbol("block"))
         put_expr_in_cold_storage(self.node, bad_expr)
@@ -239,12 +243,12 @@ class TestBlockExprColdStorage(unittest.TestCase):
 
 
 class TestBlockCounters(unittest.TestCase):
-    def test_block_body_has_19_fields(self):
+    def test_block_body_has_21_fields(self):
         b = _make_block()
         body = get_block_expr(b).head.head
         nodes, missed = resolve_list_exprs(None, body)
         self.assertFalse(missed)
-        self.assertEqual(len(nodes), 19)
+        self.assertEqual(len(nodes), 21)
 
     def test_storage_difficulty_defaults_to_zero(self):
         b = _make_block()
