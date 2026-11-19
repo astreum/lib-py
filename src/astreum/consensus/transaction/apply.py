@@ -473,11 +473,6 @@ def _apply_tx_effects(
                 if transfer_amount > 0:
                     recipient_account.balance += transfer_amount
 
-        case TransactionCode.STORAGE_REMOVE:
-            (recipient_account, is_recipient_new) = _get_or_create_recipient_account()
-            transfer_amount = 0
-            pass
-
         case TransactionCode.CODE_ACCOUNT_CREATE:
             if receipt_status == STATUS_SUCCESS:
                 expression_create_success = handle_expression_account_create(

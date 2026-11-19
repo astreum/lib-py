@@ -20,7 +20,6 @@ class TransactionCode(IntEnum):
 
     STORAGE_CREATE = 0x30
     STORAGE_PAYMENT = 0x31
-    STORAGE_REMOVE = 0x32
 
     CODE_ACCOUNT_CREATE = 0x40
     CODE_ACCOUNT_CALL = 0x41
