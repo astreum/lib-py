@@ -36,6 +36,7 @@ USER_RECORD_SHAPE = pair(
 class LoanType(IntEnum):
     SECURED = 0
     UNSECURED = 1
+    CLAIM_COST = 2
 
 
 def _root_item(root_hash: bytes, block: Optional[bytes]) -> Expr:
@@ -62,10 +63,11 @@ class TreasuryUserRecord:
     Attributes:
         balance: Staked ASTR balance backing this account's secured loans.
         loans_root_hash: Root hash of a `RadixTree` of this account's
-            secured/unsecured loans, keyed by the `TREASURY_BORROW`
-            transaction hash that created each one. `ZERO32` if empty.
+            loans of every type, keyed by the transaction hash that created
+            each one. `ZERO32` if empty.
         total_interest_paid: Cumulative interest paid across this account's
-            repaid/closed loans.
+            loans, including the loan service collected when a claim's
+            payout is netted at settlement.
         guarantees_root_hash: Root hash of a `RadixTree` of this account's
             posted guarantees (`TreasuryGuarantee`), keyed by the
             `TREASURY_GUARANTEE` transaction hash that created each one. `ZERO32`
@@ -237,7 +239,9 @@ class TreasuryBorrowRequest:
     transaction data's guarantee refs. There is no interval and no count.
 
     Attributes:
-        loan_type: `SECURED` or `UNSECURED`.
+        loan_type: `SECURED` or `UNSECURED`. `CLAIM_COST` exists in
+            `LoanType` but is written only by the chain at claim apply, and
+            the borrow handler rejects it.
     """
 
     loan_type: LoanType
@@ -321,7 +325,7 @@ class TreasuryLoanRecord:
 
     Attributes:
         creation_block_number: Block at which the loan was originated.
-        loan_type: `SECURED` or `UNSECURED`.
+        loan_type: `SECURED`, `UNSECURED`, or `CLAIM_COST`.
         discounted_amount: Principal ``L`` the treasury paid out. No
             discount applies to the perpetual shape.
         payment_amount: Payment owed per block.
@@ -582,7 +586,7 @@ def encode_borrow_request(request: TreasuryBorrowRequest) -> bytes:
     try:
         loan_type = LoanType(request.loan_type)
     except ValueError as exc:
-        raise ValueError("loan_type must be SECURED or UNSECURED") from exc
+        raise ValueError("loan_type must be SECURED, UNSECURED, or CLAIM_COST") from exc
     return bytes([BORROW_REQUEST_VERSION, int(loan_type)])
 
 

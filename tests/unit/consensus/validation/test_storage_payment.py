@@ -64,7 +64,9 @@ from astreum.storage.radix import (
 from astreum.storage.radix.node import radix_node_hash
 from astreum.expression import Expr, ZERO32, NIL, int_, bytes_, link
 from astreum.consensus.block.encoding.expr import get_block_expr
-from astreum.consensus.constants import STORAGE_ADDRESS
+from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
+from astreum.consensus.transaction.treasury.loans import load_user_loan
+from astreum.consensus.transaction.treasury.record import LoanType
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 
 from _helpers import (
@@ -74,6 +76,7 @@ from _helpers import (
     make_previous_block,
     seed_sender_account,
     seed_storage_account,
+    seed_treasury_account,
     store_expr_tree,
     store_tx,
 )
@@ -256,8 +259,10 @@ class TestStoragePayment(unittest.TestCase):
 
         expected_payout = 100 * (1 - 0)
         sender_after = self.block.accounts.get_account(sender_pk, self.node).balance
-        fees = receipt.total_fee
-        self.assertEqual(sender_after, sender_before - fees + expected_payout)
+        # The zero amount finances the storage fee; the base fee is cash.
+        self.assertEqual(
+            sender_after, sender_before + expected_payout - receipt.base_fee
+        )
 
         updated = self._record_in_trie(list_id)
         self.assertEqual(updated.lanes[0].height, 1)
@@ -305,7 +310,7 @@ class TestStoragePayment(unittest.TestCase):
                 self.assertEqual(self._status(), STATUS_SUCCESS)
 
     def test_zero_balance_incumbent_claim_succeeds(self):
-        """A zero-balance sender can claim; the payout covers the tx's own fees."""
+        """A zero-balance sender can claim; the loan finances the storage fee."""
         sender_pk, _ = seed_sender_account(self.block, balance=0)
         list_id = os.urandom(32)
         record, slots = self._seed_storage_record(
@@ -322,8 +327,10 @@ class TestStoragePayment(unittest.TestCase):
 
         expected_payout = 20000 * (1 - 0)
         sender_after = self.block.accounts.get_account(sender_pk, self.node).balance
-        fees = receipt.total_fee
-        self.assertEqual(sender_after, sender_before - fees + expected_payout)
+        # The base fee is cash; the storage fee is the loan.
+        self.assertEqual(
+            sender_after, sender_before + expected_payout - receipt.base_fee
+        )
 
     def test_zero_balance_invalid_claim_soft_fails(self):
         """A zero-balance sender with an invalid claim soft-fails (no raise)."""
@@ -353,7 +360,8 @@ class TestStoragePayment(unittest.TestCase):
         receipt = self.block.receipts[-1]
         self.assertEqual(receipt.status, STATUS_SUCCESS)
         after = self.block.accounts.get_account(sender_pk, self.node).balance
-        self.assertEqual(after, before - receipt.total_fee + 100)
+        # The zero amount finances the storage fee; the base fee is cash.
+        self.assertEqual(after, before + 100 - receipt.base_fee)
 
     def test_two_records_in_one_tx_each_pay(self):
         sender_pk, _ = seed_sender_account(self.block, balance=1_000_000)
@@ -369,7 +377,7 @@ class TestStoragePayment(unittest.TestCase):
         receipt = self.block.receipts[-1]
         self.assertEqual(receipt.status, STATUS_SUCCESS)
         after = self.block.accounts.get_account(sender_pk, self.node).balance
-        self.assertEqual(after, before - receipt.total_fee + 400)
+        self.assertEqual(after, before + 400 - receipt.base_fee)
         for list_id in ids:
             self.assertEqual(self._record_in_trie(list_id).lanes[0].height, 1)
 
@@ -429,10 +437,11 @@ class TestStoragePayment(unittest.TestCase):
         """A valid claim whose sender cannot pay the final fees mints nothing.
 
         This test patches ``settle_fees`` to force a branch that the real
-        ``settle_fees`` cannot reach. The test of the real late-failure
-        path is ``test_unaffordable_fees_receipt_mint_is_zero``.
+        ``settle_fees`` cannot reach. The real claim-fee path is
+        ``test_zero_balance_payout_below_the_storage_fee_is_financed``.
         """
         sender_pk, _ = seed_sender_account(self.block, balance=1_000_000)
+        seed_treasury_account(self.node, self.block, treasury_balance=0)
         list_id = os.urandom(32)
         record, slots = self._seed_storage_record(
             list_id, last_payment_winner=sender_pk, new_size=100
@@ -444,25 +453,55 @@ class TestStoragePayment(unittest.TestCase):
             return replace(real(*args, **kwargs), affordable=False)
 
         with patch.object(apply_module, "settle_fees", unaffordable):
-            self._submit_claims(sender_pk, [self._valid_claim(record, slots, list_id)])
+            tx_hash = self._submit_claims(
+                sender_pk, [self._valid_claim(record, slots, list_id)]
+            )
         receipt = self.block.receipts[-1]
         self.assertEqual(receipt.status, STATUS_FAILED)
         self.assertEqual(receipt.mint, 0)
         after = self.block.accounts.get_account(sender_pk, self.node).balance
         self.assertEqual(after, before - receipt.total_fee)
 
-    def test_unaffordable_fees_receipt_mint_is_zero(self):
-        """The payout cannot cover the fees: the failure comes after the handler."""
+        flush_pending(self.node, self.block)
+        treasury = self.block.accounts.get_account(TREASURY_ADDRESS, self.node)
+        self.assertIsNone(
+            load_user_loan(
+                node=self.node,
+                treasury_account=treasury,
+                borrower=sender_pk,
+                loan_transaction_id=tx_hash,
+            )
+        )
+
+    def test_zero_balance_payout_below_the_storage_fee_is_financed(self):
+        """The payout covers the base fee, not the storage fee: the loan does."""
         sender_pk, _ = seed_sender_account(self.block, balance=0)
         list_id = os.urandom(32)
         record, slots = self._seed_storage_record(
-            list_id, last_payment_winner=sender_pk, new_size=1
+            list_id, last_payment_winner=sender_pk, new_size=10
         )
-        self._submit_claims(sender_pk, [self._valid_claim(record, slots, list_id)])
+        tx_hash = self._submit_claims(
+            sender_pk, [self._valid_claim(record, slots, list_id)]
+        )
         receipt = self.block.receipts[-1]
-        self.assertEqual(receipt.status, STATUS_FAILED)
-        self.assertEqual(receipt.mint, 0)
-        self.assertEqual(self._record_in_trie(list_id).lanes[0].height, 0)
+        self.assertEqual(receipt.status, STATUS_SUCCESS)
+        self.assertEqual(receipt.mint, 10)
+        self.assertLessEqual(receipt.base_fee, receipt.mint)
+        self.assertGreater(receipt.storage_fee, receipt.mint)
+        self.assertEqual(self._record_in_trie(list_id).lanes[0].height, 1)
+        sender_after = self.block.accounts.get_account(sender_pk, self.node).balance
+        self.assertEqual(sender_after, receipt.mint - receipt.base_fee)
+
+        flush_pending(self.node, self.block)
+        treasury = self.block.accounts.get_account(TREASURY_ADDRESS, self.node)
+        loan = load_user_loan(
+            node=self.node,
+            treasury_account=treasury,
+            borrower=sender_pk,
+            loan_transaction_id=tx_hash,
+        )
+        self.assertIsNotNone(loan)
+        self.assertEqual(loan.discounted_amount, receipt.storage_fee)
 
     # --- failure paths ---
 
@@ -653,7 +692,9 @@ class TestStoragePayment(unittest.TestCase):
         self.assertEqual(receipt.status, STATUS_SUCCESS)
         expected_payout = record.new_size * (self.block.height - record.lanes[0].height)
         sender_after = self.block.accounts.get_account(sender_pk, self.node).balance
-        self.assertEqual(sender_after, sender_before - receipt.total_fee + expected_payout)
+        self.assertEqual(
+            sender_after, sender_before + expected_payout - receipt.base_fee
+        )
 
     # --- lanes ---
 
@@ -682,8 +723,14 @@ class TestStoragePayment(unittest.TestCase):
         receipt_b = self.block.receipts[-1]
         self.assertEqual(receipt_b.status, STATUS_SUCCESS)
 
-        self.assertEqual(self._balance(pk_a), before_a - receipt_a.total_fee + 100)
-        self.assertEqual(self._balance(pk_b), before_b - receipt_b.total_fee + 100)
+        # Both claims have amount 0: the loan finances each storage fee, and
+        # each sender pays its base fee in cash.
+        self.assertEqual(
+            self._balance(pk_a), before_a + 100 - receipt_a.base_fee
+        )
+        self.assertEqual(
+            self._balance(pk_b), before_b + 100 - receipt_b.base_fee
+        )
         updated = self._record_in_trie(list_id)
         self.assertEqual([l.winner for l in updated.lanes], [pk_a, pk_b])
         self.assertEqual([l.height for l in updated.lanes], [1, 1])
@@ -722,7 +769,9 @@ class TestStoragePayment(unittest.TestCase):
         ])
         receipt = self.block.receipts[-1]
         self.assertEqual(receipt.status, STATUS_SUCCESS)
-        self.assertEqual(self._balance(pk_a), before - receipt.total_fee + 100 * height)
+        self.assertEqual(
+            self._balance(pk_a), before + 100 * height - receipt.base_fee
+        )
         updated = self._record_in_trie(list_id)
         self.assertEqual(updated.lanes[0].winner, pk_a)
         self.assertEqual(updated.lanes[1].winner, ZERO32)
@@ -740,7 +789,8 @@ class TestStoragePayment(unittest.TestCase):
         claim = self._valid_claim(record, slots, list_id, lane=1)
         self._submit_claims(sender_pk, [claim, claim])
         receipt = self.block.receipts[-1]
-        self.assertEqual(self._balance(sender_pk), before - receipt.total_fee + 100)
+        # The zero amount finances the storage fee; the base fee is cash.
+        self.assertEqual(self._balance(sender_pk), before + 100 - receipt.base_fee)
         self.assertEqual(self._record_in_trie(list_id).lanes[1].height, 1)
 
     def test_lanes_challenge_different_indices(self):
@@ -799,12 +849,18 @@ class TestStoragePayment(unittest.TestCase):
         )
         before_a, before_b = self._balance(pk_a), self._balance(pk_b)
         self._submit_claims(pk_a, [self._valid_claim(record, slots, list_id, lane=0)])
-        fee_a = self.block.receipts[-1].total_fee
+        receipt_a = self.block.receipts[-1]
         flush_pending(self.node, self.block)
         self._submit_claims(pk_b, [self._valid_claim(record, slots, list_id, lane=1)])
-        fee_b = self.block.receipts[-1].total_fee
-        self.assertEqual(self._balance(pk_a), before_a - fee_a + 100 * (10 - 2))
-        self.assertEqual(self._balance(pk_b), before_b - fee_b + 100 * (10 - 6))
+        receipt_b = self.block.receipts[-1]
+        self.assertEqual(
+            self._balance(pk_a),
+            before_a + 100 * (10 - 2) - receipt_a.base_fee,
+        )
+        self.assertEqual(
+            self._balance(pk_b),
+            before_b + 100 * (10 - 6) - receipt_b.base_fee,
+        )
 
     def test_takeover_penalty_per_lane(self):
         """The bits use the claimed lane: a fresh lane 0 is hard, an old lane 1 is free."""
@@ -968,7 +1024,7 @@ class TestStoragePayment(unittest.TestCase):
 
     def test_rolled_back_takeover_leaves_no_count(self):
         self._takeover(
-            4, extra_patches=[patch.object(apply_module, "storage_walk_fee", return_value=10**12)]
+            4, extra_patches=[patch.object(apply_module, "storage_walk_fee", return_value=None)]
         )
         self.assertEqual(self._status(), STATUS_FAILED)
         self.assertEqual(self.block.storage_votes, 0)
@@ -1002,8 +1058,8 @@ class TestStoragePayment(unittest.TestCase):
         self.assertEqual(receipt.status, STATUS_SUCCESS)
         account = self.block.accounts.get_account(pk, self.node)
         self.assertIsNotNone(account)
-        fees = receipt.total_fee
-        self.assertEqual(account.balance, 20000 * 1 - fees)
+        # The zero amount finances the storage fee; the base fee is cash.
+        self.assertEqual(account.balance, 20000 * 1 - receipt.base_fee)
         self.assertEqual(account.counter, 1)
         self.assertTrue(self.block.bloom_tree.new_exprs())
 
@@ -1032,17 +1088,33 @@ class TestStoragePayment(unittest.TestCase):
         self.assertIsNone(self.block.accounts.get_account(pk, self.node))
         self.assertEqual(self._state(), before)
 
-    def test_new_sender_payout_below_fees_is_rejected(self):
+    def test_new_sender_payout_below_the_storage_fee_is_financed(self):
         pk = _new_key()
-        list_id, claim = self._incumbent_claim(pk, new_size=1)
-        before = self._state()
-        with self.assertRaisesRegex(ValueError, "new sender claim failed"):
-            self._submit_claims(pk, [claim])
-        self.assertIsNone(self.block.accounts.get_account(pk, self.node))
-        self.assertEqual(self._state(), before)
+        list_id, claim = self._incumbent_claim(pk, new_size=10)
+        tx_hash = self._submit_claims(pk, [claim])
+
+        receipt = self.block.receipts[-1]
+        self.assertEqual(receipt.status, STATUS_SUCCESS)
+        self.assertGreater(receipt.storage_fee, receipt.mint)
+        self.assertLessEqual(receipt.base_fee, receipt.mint)
+        account = self.block.accounts.get_account(pk, self.node)
+        self.assertIsNotNone(account)
+        self.assertEqual(account.balance, receipt.mint - receipt.base_fee)
         record = self._record_in_trie(list_id)
         self.assertEqual(record.lanes[0].winner, pk)
-        self.assertEqual(record.lanes[0].height, 0)
+        self.assertEqual(record.lanes[0].height, 1)
+
+        flush_pending(self.node, self.block)
+        treasury = self.block.accounts.get_account(TREASURY_ADDRESS, self.node)
+        loan = load_user_loan(
+            node=self.node,
+            treasury_account=treasury,
+            borrower=pk,
+            loan_transaction_id=tx_hash,
+        )
+        self.assertIsNotNone(loan)
+        self.assertEqual(loan.loan_type, LoanType.CLAIM_COST)
+        self.assertEqual(loan.discounted_amount, receipt.storage_fee)
 
     def test_new_sender_counter_mismatch_is_rejected(self):
         pk = _new_key()

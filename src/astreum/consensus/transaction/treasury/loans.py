@@ -1,19 +1,345 @@
 from __future__ import annotations
 
+from collections import ChainMap
 from dataclasses import replace
 from typing import Any
 
 from astreum.expression import Expr, resolve_inner_exprs
 from astreum.expression import ZERO32
 from astreum.storage.radix import RadixTree, get_all_from_radix_tree_with_blocks, get_from_radix_tree, put_in_radix_tree
+from astreum.consensus.account import create_account
 from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.consensus.transaction.treasury.record import (
+    load_loan_record,
     load_user_record,
     LoanType,
     TreasuryLoanRecord,
     TreasuryUserRecord,
 )
-from astreum.consensus.transaction.treasury.utils import _trie_exprs
+from astreum.consensus.transaction.treasury.utils import _overdue_blocks, _trie_exprs
+
+
+class _PendingNodes:
+    """A node view that reads a block's pending exprs before storage.
+
+    A block applies its transactions before it writes their exprs. A later
+    transaction in the same block must still see what an earlier one wrote
+    into the treasury tries, so this view answers a hash from the pending
+    list first and falls back to the node.
+    """
+
+    def __init__(self, node: Any, exprs: list[Expr]):
+        self._node = node
+        self._by_hash = {expr.hash(): expr for expr in exprs or () if expr is not None}
+
+    @property
+    def hot_storage(self):
+        """The node's hot storage with the pending exprs in front."""
+        return ChainMap(self._by_hash, getattr(self._node, "hot_storage", {}))
+
+    def __getattr__(self, name: str):
+        """Delegate every other storage attribute to the wrapped node."""
+        return getattr(self._node, name)
+
+
+def load_user_loan(
+    *,
+    node: Any,
+    treasury_account: Any,
+    borrower: bytes,
+    loan_transaction_id: bytes,
+    contact=None,
+) -> TreasuryLoanRecord | None:
+    """Load one loan from a borrower's treasury user record.
+
+    Every loan type, including `CLAIM_COST`, is stored in the same loans
+    trie, keyed by the transaction that created it.
+
+    Args:
+        node: Storage node used to resolve trie and expr data.
+        treasury_account: The `TREASURY_ADDRESS` account. Its ``data`` trie
+            holds the borrower's `TreasuryUserRecord`.
+        borrower: The borrower's 32-byte address.
+        loan_transaction_id: The loan's trie key.
+        contact: Optional node contact for hash-only reads.
+
+    Returns:
+        The loan, or None if the borrower has no record, has no loans, or
+        the key is absent.
+    """
+    user_record = load_user_record(
+        node, treasury_account.data, borrower, contact=contact
+    )
+    if user_record is None or user_record.loans_root_hash == ZERO32:
+        return None
+    loans_trie = RadixTree(
+        root_hash=user_record.loans_root_hash,
+        contact=contact,
+        root_block=user_record.loans_root_block,
+    )
+    return load_loan_record(node, loans_trie, loan_transaction_id, contact=contact)
+
+
+def load_user_loans(
+    *,
+    node: Any,
+    treasury_account: Any,
+    borrower: bytes,
+    user_record: TreasuryUserRecord | None = None,
+    contact=None,
+) -> list[tuple[bytes, TreasuryLoanRecord]]:
+    """Load every loan in a borrower's treasury user record.
+
+    Every loan type lives in the same loans trie, keyed by the transaction
+    that created it, so one enumeration covers `SECURED`, `UNSECURED`, and
+    `CLAIM_COST` loans.
+
+    Args:
+        node: Storage node used to resolve trie and expr data.
+        treasury_account: The `TREASURY_ADDRESS` account. Its ``data`` trie
+            holds the borrower's `TreasuryUserRecord`.
+        borrower: The borrower's 32-byte address.
+        user_record: The borrower's current record, or None to load it from
+            the treasury data trie.
+        contact: Optional node contact for hash-only reads.
+
+    Returns:
+        ``(loan_transaction_id, loan)`` pairs, empty if the borrower has no
+        record, has no loans, or a loan cannot be decoded.
+    """
+    if user_record is None:
+        user_record = load_user_record(
+            node, treasury_account.data, borrower, contact=contact
+        )
+    if user_record is None or user_record.loans_root_hash == ZERO32:
+        return []
+    loans_trie = RadixTree(
+        root_hash=user_record.loans_root_hash,
+        contact=contact,
+        root_block=user_record.loans_root_block,
+    )
+    loans: list[tuple[bytes, TreasuryLoanRecord]] = []
+    for loan_transaction_id, (loan_head, loan_block) in (
+        get_all_from_radix_tree_with_blocks(loans_trie, node).items()
+    ):
+        loan = TreasuryLoanRecord.from_storage(
+            node, loan_head, contact=contact, block_hash=loan_block
+        )
+        if loan is not None:
+            loans.append((loan_transaction_id, loan))
+    return loans
+
+
+def write_user_loan(
+    *,
+    node: Any,
+    treasury_account: Any,
+    borrower: bytes,
+    user_record: TreasuryUserRecord | None,
+    loan_transaction_id: bytes,
+    loan: TreasuryLoanRecord,
+    pending_exprs: list[Expr],
+    contact=None,
+) -> TreasuryUserRecord | None:
+    """Store one loan in a borrower's treasury user record.
+
+    The loan goes into the borrower's loans trie, keyed by
+    *loan_transaction_id* like every other loan. The user record's loans
+    root is updated and written back to the treasury data trie.
+
+    Args:
+        node: Storage node used to resolve and persist trie/expr data.
+        treasury_account: The `TREASURY_ADDRESS` account. Its ``data`` trie
+            receives the updated user record.
+        borrower: The borrower's 32-byte address.
+        user_record: The borrower's current user record, or None to load it
+            from the treasury data trie. A default record is created only
+            when storage has none.
+        loan_transaction_id: The loan's trie key.
+        loan: The loan record to store.
+        pending_exprs: Pending expressions to extend with the loan, the
+            loans trie nodes, and the updated user record. They are also read
+            back, so a record written by an earlier transaction of the same
+            block is visible.
+        contact: Optional node contact for hash-only reads.
+
+    Returns:
+        The updated user record, or None if the key already exists.
+    """
+    # Earlier transactions of this block may have written the record and the
+    # loans trie; their exprs are pending, not stored yet.
+    lookup = _PendingNodes(node, pending_exprs)
+    if user_record is None:
+        user_record = load_user_record(
+            lookup, treasury_account.data, borrower, contact=contact
+        )
+    if user_record is None:
+        user_record = TreasuryUserRecord()
+    loans_root_hash = user_record.loans_root_hash or ZERO32
+    loans_trie = RadixTree(
+        root_hash=None if loans_root_hash == ZERO32 else loans_root_hash,
+        contact=contact,
+        root_block=user_record.loans_root_block,
+    )
+    if get_from_radix_tree(loans_trie, lookup, loan_transaction_id) is not None:
+        return None
+
+    loan_expr = loan.expr()
+    put_in_radix_tree(loans_trie, lookup, loan_transaction_id, loan_expr.hash())
+    updated_user_record = replace(
+        user_record,
+        loans_root_hash=loans_trie.root_hash or ZERO32,
+        loans_root_block=loans_trie.root_block,
+    )
+    put_in_radix_tree(
+        treasury_account.data,
+        lookup,
+        borrower,
+        updated_user_record.expr().hash(),
+    )
+    treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
+
+    trie_exprs = _trie_exprs(loans_trie)
+    # The new record names the new loans root, whose nodes are pending only.
+    resolved = _PendingNodes(node, list(pending_exprs) + trie_exprs + [loan_expr])
+    loan_exprs, _ = resolve_inner_exprs(resolved, loan_expr, contact=contact)
+    user_record_exprs, _ = resolve_inner_exprs(
+        resolved, updated_user_record.expr(), contact=contact
+    )
+    pending_exprs.extend(loan_exprs + trie_exprs + user_record_exprs)
+    return updated_user_record
+
+
+def settle_claim_payout(
+    *,
+    node: Any,
+    block: Any,
+    accounts: Any,
+    treasury_account: Any,
+    borrower: bytes,
+    payout: int,
+) -> int:
+    """Net a claim payout against every accrued loan service of the borrower.
+
+    Sums ``overdue_blocks * payment_amount`` over every open loan in the
+    borrower's loans trie, using the canonical ``paid_until_block``
+    convention. When the payout covers the total, every owner receives its
+    loan's service, every settled loan's ``paid_until_block`` advances to the
+    current height, and the sender keeps the remainder. When the payout does
+    not cover the total, nothing is settled and no owner is paid: the sender
+    keeps the whole payout, and the accrued service stays owed on the loans
+    for the owner to collect later.
+
+    A prepaid loan (``paid_until_block`` above the current height) has no
+    accrued service and keeps its pointer. A closed loan
+    (``paid_until_block == 0``) is not settled. A loan whose pointer is below
+    its ``creation_block_number`` is malformed and is skipped, like the repay
+    handlers' defensive guard.
+
+    Args:
+        node: Storage node used to resolve and persist trie/expr data.
+        block: The block whose height, contact, and pending exprs apply.
+        accounts: The block's accounts cache. Owner balances are credited
+            through it so supply tracking sees the movement.
+        treasury_account: The `TREASURY_ADDRESS` account. Its ``data`` trie
+            holds the borrower's `TreasuryUserRecord`.
+        borrower: The borrower's 32-byte address.
+        payout: The claim's gross payout ``R``.
+
+    Returns:
+        The amount to credit to the sender: ``payout - service`` when the
+        payout covers the service, possibly ``0``; otherwise the whole
+        ``payout``.
+    """
+    current_height = int(block.height)
+    # Earlier transactions of this block may have written the loans without
+    # flushing their exprs; read them from the pending list first.
+    lookup = _PendingNodes(node, block.pending_exprs)
+    user_record = load_user_record(
+        lookup, treasury_account.data, borrower, contact=block.contact
+    )
+    if user_record is None or user_record.loans_root_hash == ZERO32:
+        return payout
+
+    overdue_loans: list[tuple[bytes, TreasuryLoanRecord, int]] = []
+    service_total = 0
+    for loan_transaction_id, loan in load_user_loans(
+        node=lookup,
+        treasury_account=treasury_account,
+        borrower=borrower,
+        user_record=user_record,
+        contact=block.contact,
+    ):
+        if loan.paid_until_block <= 0 or loan.payment_amount <= 0:
+            continue
+        if loan.paid_until_block < loan.creation_block_number:
+            continue
+        overdue_blocks = _overdue_blocks(
+            loan=loan, current_height=current_height
+        )
+        if overdue_blocks <= 0:
+            continue
+        service = overdue_blocks * loan.payment_amount
+        overdue_loans.append((loan_transaction_id, loan, service))
+        service_total += service
+
+    if service_total == 0:
+        return payout
+    if payout < service_total:
+        # The rent is the provider's own money: it keeps the whole payout.
+        # Nothing is settled, so every pointer stays and the accrued service
+        # remains owed on the loans, to be collected by the owner later.
+        return payout
+
+    loans_trie = RadixTree(
+        root_hash=user_record.loans_root_hash,
+        contact=block.contact,
+        root_block=user_record.loans_root_block,
+    )
+    loan_exprs: list[Expr] = []
+    for loan_transaction_id, loan, service in overdue_loans:
+        updated_loan = replace(loan, paid_until_block=current_height)
+        put_in_radix_tree(
+            loans_trie, lookup, loan_transaction_id, updated_loan.expr().hash()
+        )
+        resolved_loan, _ = resolve_inner_exprs(
+            lookup, updated_loan.expr(), contact=block.contact
+        )
+        loan_exprs.extend(resolved_loan)
+
+        if loan.owner == TREASURY_ADDRESS:
+            treasury_account.balance += service
+        else:
+            owner_account = accounts.get_account(loan.owner, node)
+            if owner_account is None:
+                owner_account = create_account()
+            owner_account.balance += service
+            accounts.set_account(loan.owner, owner_account)
+
+    updated_user_record = replace(
+        user_record,
+        loans_root_hash=loans_trie.root_hash or ZERO32,
+        loans_root_block=loans_trie.root_block,
+        total_interest_paid=user_record.total_interest_paid + service_total,
+    )
+    put_in_radix_tree(
+        treasury_account.data,
+        lookup,
+        borrower,
+        updated_user_record.expr().hash(),
+    )
+    treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
+    accounts.set_account(TREASURY_ADDRESS, treasury_account)
+
+    trie_exprs = _trie_exprs(loans_trie)
+    # The new record names the new loans root, whose nodes and loans are
+    # pending only.
+    resolved = _PendingNodes(node, list(block.pending_exprs) + trie_exprs + loan_exprs)
+    user_record_exprs, _ = resolve_inner_exprs(
+        resolved, updated_user_record.expr(), contact=block.contact
+    )
+    block.pending_exprs.extend(loan_exprs + trie_exprs + user_record_exprs)
+    return payout - service_total
 
 
 def _apply_treasury_loan_payment(

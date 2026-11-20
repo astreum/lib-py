@@ -388,6 +388,49 @@ class TestTreasuryBorrow(unittest.TestCase):
         apply_transaction(self.node, self.block, tx_hash)
         self.assertEqual(self.block.receipts[-1].status, STATUS_FAILED)
 
+    def test_claim_cost_loan_type_cannot_be_borrowed(self):
+        # CLAIM_COST loans are written only by the chain at claim apply. A
+        # borrow request carrying type 2 must fail without moving cash or
+        # writing a loan.
+        sender_pk, sender_key = seed_sender_account(self.block, balance=10_000_000)
+        principal = 100
+        record = TreasuryUserRecord(
+            balance=principal, loans_root_hash=ZERO32, total_interest_paid=0,
+        )
+        seed_treasury_account(
+            self.node, self.block, treasury_balance=principal,
+            user_records={sender_pk: record},
+        )
+        tx = create_transaction(
+            chain_id=1, counter=0, sender=sender_pk, recipient=TREASURY_ADDRESS,
+            amount=principal, code=TransactionCode.TREASURY_BORROW,
+            loan_type=LoanType.CLAIM_COST, secret_key=sender_key,
+        )
+        tx_hash = store_tx(self.node, tx)
+        sender = self.block.accounts.get_account(sender_pk, self.node)
+        treasury = self.block.accounts.get_account(TREASURY_ADDRESS, self.node)
+        sender_before = sender.balance
+        treasury_before = treasury.balance
+        treasury_data_before = treasury.data.root_hash
+
+        status = handle_treasury_borrow(
+            node=self.node,
+            block=self.block,
+            transaction=tx,
+            transaction_hash=tx_hash,
+            sender_account=sender,
+            treasury_account=treasury,
+        )
+
+        self.assertEqual(status, STATUS_FAILED)
+        self.assertEqual(sender.balance, sender_before)
+        self.assertEqual(treasury.balance, treasury_before)
+        self.assertEqual(treasury.data.root_hash, treasury_data_before)
+        user_head = get_from_radix_tree(treasury.data, self.node, sender_pk)
+        user = TreasuryUserRecord.from_storage(self.node, user_head)
+        self.assertIsNotNone(user)
+        self.assertEqual(user.loans_root_hash, ZERO32)
+
     def test_zero_cumulative_fee_fails(self):
         # The block fee engine rejects zero fees before apply reaches the
         # handler, so the plan's guard is checked at the handler boundary.

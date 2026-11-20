@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from fractions import Fraction
 from typing import Any, Tuple
 
 from astreum.expression import Expr, NIL
@@ -10,7 +11,7 @@ from astreum.storage.radix import RadixTree, get_from_radix_tree, put_in_radix_t
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.account import create_account
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS, Receipt
-from astreum.consensus.block.rate import calculate_storage_fee
+from astreum.consensus.block.rate import calculate_quote_rate, calculate_storage_fee
 from astreum.crypto.bloom_search import make_involved_variants, make_search_variants
 from astreum.consensus.transaction.code import TransactionCode
 from astreum.consensus.transaction.from_storage import get_transaction_from_storage
@@ -31,9 +32,12 @@ from astreum.consensus.transaction.bloom.pending import (
     pending_bloom_fee,
 )
 from astreum.consensus.transaction.treasury.record import (
+    LoanType,
+    TreasuryLoanRecord,
     TreasuryUserRecord,
     load_user_record,
 )
+from astreum.consensus.transaction.treasury.loans import write_user_loan
 from astreum.consensus.transaction.treasury.close import handle_treasury_close
 from astreum.consensus.transaction.treasury.repay import handle_treasury_repay
 from astreum.consensus.transaction.treasury.guarantees import handle_treasury_guarantee
@@ -43,9 +47,26 @@ from astreum.consensus.transaction.fees import settle_fees
 from astreum.expression.helpers import get_expr_builtin_tag
 
 
-# Transaction codes whose handler credits the sender mid-flow (so a pre-check on
-# the sender's *initial* balance is invalid). These may self-fund via the credit.
-_CREDIT_FUNDING_CODES = {TransactionCode.STORAGE_PAYMENT}
+def _claim_fee_per_block(claim_fee: int, quote: Fraction) -> int:
+    """Return the per-block service of a financed claim storage fee.
+
+    The service is ``ceil(claim_fee * r_q)`` with ``r_q`` the block's
+    storage quote, as the plan fixes it.
+
+    Args:
+        claim_fee: The claim's storage fee ``C``.
+        quote: The block's quote ``r_q``, an exact `Fraction`.
+
+    Returns:
+        The per-block payment. Zero when the quote is zero; that branch is
+        defensive only, because a live chain raises in
+        ``calculate_storage_fee`` before a claim is applied.
+    """
+    if claim_fee <= 0 or quote <= 0:
+        return 0
+    return (
+        claim_fee * quote.numerator + quote.denominator - 1
+    ) // quote.denominator
 
 
 def _data_nodes(data: Expr) -> list[Expr]:
@@ -145,14 +166,19 @@ def _apply_tx_effects(
     # holds the execution, so it is charged once and counted once.
     tx_fee = bid if not nested else 0
 
-    # Pre-fee guard: top-level sender must always cover at least the base tx_fee.
-    # Credit-funding codes are exempt — their handler credits the sender before
-    # the final affordability check.
-    if (
+    # A claim's fee is elected by its amount when it applies: zero finances
+    # its storage fee as a loan, an amount of at least that fee pays it. The
+    # cash fees (the base fee) are still owed and are checked after the
+    # handler credits the claim's payout.
+    claim_elects_fee = (
         not nested
-        and sender_account.balance < tx_fee
-        and transaction.code not in _CREDIT_FUNDING_CODES
-    ):
+        and transaction.code == TransactionCode.STORAGE_PAYMENT
+        and transaction.recipient == STORAGE_ADDRESS
+    )
+
+    # Pre-fee guard: a top-level sender must cover at least the base tx_fee.
+    # A claim is checked after its handler credits the payout.
+    if not nested and not claim_elects_fee and sender_account.balance < tx_fee:
         raise ValueError("insufficient balance for transaction fee")
 
     transfer_amount = transaction.amount
@@ -163,6 +189,12 @@ def _apply_tx_effects(
         TransactionCode.TREASURY_BUY,
     ):
         transfer_amount = 0
+
+    # A financed claim's fee: zero for every other transaction. Set when the
+    # receipt prices the claim, and used to suppress the fee settlement.
+    claim_fee = 0
+    claim_quote = Fraction(0)
+    financed_claim = False
 
     # Counter guard (top-level only): a valid tx carries counter equal to the
     # sender account's counter; processing increments it. A mismatch fails the
@@ -194,10 +226,10 @@ def _apply_tx_effects(
             receipt_status = STATUS_FAILED
             transfer_amount = 0
     else:
-        # Top-level: historical combined check. Credit-funding codes are exempt
-        # — their handler credits the sender before the final affordability check.
+        # Top-level: historical combined check. A claim is exempt: the
+        # amount election is applied after the receipt prices the fee.
         if (
-            transaction.code not in _CREDIT_FUNDING_CODES
+            not claim_elects_fee
             and sender_account.balance < tx_fee + transfer_amount + max_execution_fee
         ):
             receipt_status = STATUS_FAILED
@@ -497,8 +529,8 @@ def _apply_tx_effects(
                     )
                     if minted == 0:
                         receipt_status = STATUS_FAILED
-                if transfer_amount > 0:
-                    recipient_account.balance += transfer_amount
+                # The amount election is applied after the receipt prices the
+                # fee: the recipient receives the remainder then.
 
         case TransactionCode.CODE_ACCOUNT_CREATE:
             if receipt_status == STATUS_SUCCESS:
@@ -552,6 +584,25 @@ def _apply_tx_effects(
             _reject_new_sender()
         _rollback()
 
+    def _cash_due() -> int:
+        """The cash the sender must hold at an early fee check.
+
+        A claim's storage fee is financed at zero or paid by its amount; only
+        its cash fees (the base fee and the data fee) are owed at this point.
+        The final settlement checks the amount and the full bill.
+
+        Args:
+            None.
+
+        Returns:
+            The cash due at this check.
+        """
+        if claim_elects_fee:
+            return tx_fee + current_data_fee
+        return (
+            tx_fee + transfer_amount + current_data_fee + current_storage_fee
+        )
+
     # Bloom Filter — top-level only.
     # (account, elements) pairs for the involved accounts. The elements are
     # priced here and inserted after the final status is known.
@@ -588,18 +639,12 @@ def _apply_tx_effects(
                     elements = elements[1:]
                 involved_batches.append((account_address, elements))
                 current_storage_fee += calculate_storage_fee(block, 2 * len(elements))
-        if sender_account.balance < (
-            tx_fee + transfer_amount + current_data_fee
-            + current_storage_fee
-        ):
+        if sender_account.balance < _cash_due():
             receipt_status = STATUS_FAILED
 
         operator_bloom_fee = pending_bloom_fee(block, transaction, receipt_status)
         current_storage_fee += operator_bloom_fee
-        if sender_account.balance < (
-            tx_fee + transfer_amount + current_data_fee
-            + current_storage_fee
-        ):
+        if sender_account.balance < _cash_due():
             receipt_status = STATUS_FAILED
     else:
         transaction.pending_bloom_keys.clear()
@@ -613,10 +658,7 @@ def _apply_tx_effects(
             receipt_status = STATUS_FAILED
         else:
             current_storage_fee += transaction_storage_fee
-            if sender_account.balance < (
-                tx_fee + transfer_amount + current_data_fee
-                + current_storage_fee
-            ):
+            if sender_account.balance < _cash_due():
                 receipt_status = STATUS_FAILED
 
     # Logs — both top-level and nested (nested logs bubble to outer machine).
@@ -628,10 +670,7 @@ def _apply_tx_effects(
             receipt_status = STATUS_FAILED
         else:
             current_storage_fee += logs_storage_fee
-            if not nested and sender_account.balance < (
-                tx_fee + transfer_amount + current_data_fee
-                + current_storage_fee
-            ):
+            if not nested and sender_account.balance < _cash_due():
                 receipt_status = STATUS_FAILED
 
     # New account: the sender pays for its cell before the balance is deducted.
@@ -687,14 +726,40 @@ def _apply_tx_effects(
             receipt = _build_receipt(current_storage_fee)
         current_storage_fee = receipt.storage_fee
 
+        # Claim origination: the amount field elects who pays the claim's
+        # storage fee C. The base fee is never part of C; it is paid in cash
+        # like every transaction's base fee. The election runs here, once C
+        # is final, so a failed receipt originates nothing.
+        if claim_elects_fee and receipt_status == STATUS_SUCCESS:
+            claim_fee = receipt.storage_fee
+            claim_quote = calculate_quote_rate(block)
+            if transaction.amount == 0:
+                # The loan finances C. The storage fee moves no cash; the
+                # base fee is still charged to the sender below.
+                financed_claim = True
+                transfer_amount = 0
+            elif transaction.amount >= claim_fee:
+                # The amount pays C; the remainder transfers.
+                transfer_amount = transaction.amount - claim_fee
+                if recipient_account is not None:
+                    recipient_account.balance += transfer_amount
+            else:
+                # No partial coverage.
+                receipt_status = STATUS_FAILED
+                transfer_amount = 0
+
     # Final affordability check — top-level only. A sender that cannot pay
     # everything fails the transaction and still pays min(balance, fees).
     # See consensus/transaction/fees.py.
     settlement = None
     if not nested:
-        if receipt_status == STATUS_SUCCESS and sender_account.balance < (
-            tx_fee + transfer_amount + current_data_fee
-            + current_storage_fee
+        if (
+            receipt_status == STATUS_SUCCESS
+            and not financed_claim
+            and sender_account.balance < (
+                tx_fee + transfer_amount + current_data_fee
+                + current_storage_fee
+            )
         ):
             receipt_status = STATUS_FAILED
         if sender_is_new and receipt_status != STATUS_SUCCESS:
@@ -702,18 +767,27 @@ def _apply_tx_effects(
         # Point 2: a late check failed. The handler writes do not stay.
         if receipt_status != STATUS_SUCCESS and not rolled_back:
             _rollback()
-        settlement = settle_fees(
-            sender_account.balance,
-            tx_fee,
-            current_data_fee,
-            current_storage_fee,
-            transfer_amount,
-        )
+        if financed_claim:
+            # C is a book entry: the receipt keeps it for fee income and the
+            # statistics, but no balance pays it. The cash fees (base and
+            # data) are still owed.
+            settlement = settle_fees(
+                sender_account.balance, tx_fee, current_data_fee, 0, 0
+            )
+        else:
+            settlement = settle_fees(
+                sender_account.balance,
+                tx_fee,
+                current_data_fee,
+                current_storage_fee,
+                transfer_amount,
+            )
         if not settlement.affordable:
             if sender_is_new:
                 _reject_new_sender()
             receipt_status = STATUS_FAILED
             transfer_amount = 0
+            financed_claim = False
             if not rolled_back:
                 # The handler writes (a claim payout) do not stay.
                 _rollback()
@@ -725,10 +799,13 @@ def _apply_tx_effects(
                     transfer_amount,
                 )
         if (
-            receipt.status != receipt_status
-            or settlement.transaction_fee != tx_fee
-            or settlement.data_fee != current_data_fee
-            or settlement.storage_fee != current_storage_fee
+            not financed_claim
+            and (
+                receipt.status != receipt_status
+                or settlement.transaction_fee != tx_fee
+                or settlement.data_fee != current_data_fee
+                or settlement.storage_fee != current_storage_fee
+            )
         ):
             # The receipt records the final status and the fees taken.
             tx_fee = settlement.transaction_fee
@@ -756,6 +833,36 @@ def _apply_tx_effects(
     else:
         sender_account.balance -= settlement.total
         storage_account.balance += settlement.storage_fee
+
+    # Claim-cost origination: a financed claim writes its CLAIM_COST loan
+    # once the receipt is final. The loan is bookkeeping: the fee is already
+    # booked in the receipt for fee income and the statistics, and no
+    # cash moved for it.
+    if not nested and financed_claim and receipt_status == STATUS_SUCCESS:
+        treasury_account = block.accounts.get_account(
+            address=TREASURY_ADDRESS, node=node
+        )
+        if treasury_account is None:
+            treasury_account = create_account()
+        loan = TreasuryLoanRecord(
+            creation_block_number=int(block.height),
+            loan_type=LoanType.CLAIM_COST,
+            discounted_amount=claim_fee,
+            payment_amount=_claim_fee_per_block(claim_fee, claim_quote),
+            paid_until_block=int(block.height),
+            owner=TREASURY_ADDRESS,
+        )
+        write_user_loan(
+            node=node,
+            treasury_account=treasury_account,
+            borrower=transaction.sender,
+            user_record=None,
+            loan_transaction_id=transaction_hash,
+            loan=loan,
+            pending_exprs=block.pending_exprs,
+            contact=block.contact,
+        )
+        block.accounts.set_account(TREASURY_ADDRESS, treasury_account)
 
     # Accounts write-back (cache).
     if not nested and counter_matched:

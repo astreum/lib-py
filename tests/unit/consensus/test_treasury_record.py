@@ -257,6 +257,54 @@ class TestTreasuryLoanRecord(unittest.TestCase):
         self.assertEqual(loaded.missed_count, 0)
         self.assertEqual(loaded.owner, TREASURY_ADDRESS)
 
+    def test_loan_type_values_are_stable(self):
+        self.assertEqual(int(LoanType.SECURED), 0)
+        self.assertEqual(int(LoanType.UNSECURED), 1)
+        self.assertEqual(int(LoanType.CLAIM_COST), 2)
+
+    def test_round_trip_claim_cost_loan(self):
+        node = _FakeNode()
+        record = TreasuryLoanRecord(
+            creation_block_number=42,
+            loan_type=LoanType.CLAIM_COST,
+            discounted_amount=1_200,
+            payment_amount=6,
+            paid_until_block=42,
+        )
+        expr = record.expr()
+        node.hot_storage[expr.hash()] = expr
+
+        nodes, missed = resolve_list_exprs(node, expr)
+        self.assertFalse(missed)
+        self.assertEqual(len(nodes), 9)
+        self.assertEqual(nodes[1].value, int(LoanType.CLAIM_COST))
+
+        loaded = TreasuryLoanRecord.from_storage(node, expr.hash())
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.creation_block_number, 42)
+        self.assertEqual(loaded.loan_type, LoanType.CLAIM_COST)
+        self.assertEqual(loaded.discounted_amount, 1_200)
+        self.assertEqual(loaded.payment_amount, 6)
+        self.assertEqual(loaded.paid_until_block, 42)
+        self.assertEqual(loaded.claimed_guarantees, [])
+        self.assertEqual(loaded.insurance_fee, 0)
+        self.assertEqual(loaded.missed_count, 0)
+        self.assertEqual(loaded.owner, TREASURY_ADDRESS)
+
+    def test_existing_loan_types_round_trip_unchanged(self):
+        for loan_type in (LoanType.SECURED, LoanType.UNSECURED):
+            with self.subTest(loan_type=loan_type):
+                node = _FakeNode()
+                record = TreasuryLoanRecord(
+                    **{**self._base_kwargs(), "loan_type": loan_type},
+                )
+                expr = record.expr()
+                node.hot_storage[expr.hash()] = expr
+
+                loaded = TreasuryLoanRecord.from_storage(node, expr.hash())
+                self.assertIsNotNone(loaded)
+                self.assertEqual(loaded.loan_type, loan_type)
+
     def test_from_storage_rejects_legacy_shapes(self):
         # The old fixed-term records are not decoded: the chain restarts at
         # genesis, so no old-shape record can exist on chain.

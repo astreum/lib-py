@@ -12,7 +12,7 @@ from astreum.expression import ZERO32, NIL
 from astreum.storage.radix import get_from_radix_tree_with_block, put_in_radix_tree
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.transaction.storage.initial import block_scope
-from astreum.consensus.constants import PROVIDERS_PER_RECORD
+from astreum.consensus.constants import PROVIDERS_PER_RECORD, TREASURY_ADDRESS
 from astreum.consensus.transaction.storage.difficulty import (
     distance_delta,
     fair_interval,
@@ -28,6 +28,7 @@ from astreum.consensus.transaction.storage.model import (
     storage_record_to_expr,
 )
 from astreum.crypto.merkle import MerkleTree, verify_merkle_tree_proof
+from astreum.consensus.transaction.treasury.loans import settle_claim_payout
 
 # A proof has one sibling per tree level; 64 levels cover 2**64 slots.
 MAX_PROOF_LEN = 64
@@ -255,8 +256,15 @@ def handle_storage_payment_contract(
     A valid claim pays the sender and rewrites its record at once, so a second
     claim on the same record in the same transaction no longer pays.
 
-    Returns the sum of the payouts of the valid claims. 0 means that no claim
-    was valid.
+    Settlement: a valid claim's rent nets against every accrued loan service
+    of the sender. Each loan's owner receives its share, every settled loan's
+    ``paid_until_block`` advances to this block, and the sender receives the
+    remainder. When the rent cannot cover the whole service, nothing is
+    settled and the sender keeps the whole rent; the service stays owed on
+    the loans.
+
+    Returns the sum of the gross payouts of the valid claims. 0 means that no
+    claim was valid.
     """
     try:
         # Resolve the link list of claims
@@ -283,7 +291,25 @@ def handle_storage_payment_contract(
             record, payout = checked
             storage_id = claim[0]
 
-            sender_account.balance += payout
+            # Settlement nets the claim's rent against every accrued loan
+            # service of the sender. Each loan's owner receives its share
+            # and every settled pointer advances to this block. A rent
+            # smaller than the service pays no owner and settles nothing:
+            # the sender keeps the whole rent and the service stays owed.
+            treasury_account = block.accounts.get_account(TREASURY_ADDRESS, node)
+            if treasury_account is None:
+                credited = payout
+            else:
+                credited = settle_claim_payout(
+                    node=node,
+                    block=block,
+                    accounts=block.accounts,
+                    treasury_account=treasury_account,
+                    borrower=transaction.sender,
+                    payout=payout,
+                )
+
+            sender_account.balance += credited
             minted += payout
 
             lane_number = claim[4]
