@@ -232,8 +232,23 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
                 _hex(block.expr_id),
             )
             return False, "genesis storage difficulty mismatch"
-        expected_stats = [(1, treasury_account.balance or 0, 0, 0, 0, 0)]
-        if getattr(block, "statistics", None) != expected_stats:
+        # Genesis statistics state history that nobody can recompute: they are
+        # a claim committed by the genesis hash, which the chain accepts as its
+        # trust root. A set-up chain may start with fee history (so its first
+        # block can be priced); a raw genesis starts with zeros. Check the
+        # shape and signs, not exact figures.
+        stats = getattr(block, "statistics", None)
+        valid_stats = (
+            isinstance(stats, (list, tuple))
+            and len(stats) == 1
+            and isinstance(stats[0], (list, tuple))
+            and len(stats[0]) == 6
+            and all(
+                isinstance(value, int) and not isinstance(value, bool) and value >= 0
+                for value in stats[0]
+            )
+        )
+        if not valid_stats:
             node.logger.debug(
                 "Block verify genesis statistics mismatch block=%s",
                 _hex(block.expr_id),
@@ -659,7 +674,15 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
     treasury_balance = treasury_account.balance or 0
 
     delta_fee = fee_income(work_block.receipts)
-    delta_tx_fees, delta_tx_bytes = demand_pair(work_block)
+    try:
+        delta_tx_fees, delta_tx_bytes = demand_pair(node, work_block)
+    except ValueError as exc:
+        node.logger.debug(
+            "Block verify demand pair unavailable block=%s: %s",
+            _hex(block.expr_id),
+            exc,
+        )
+        return False, "demand pair unavailable"
     expected_statistics = update_statistics(
         getattr(prev_block, "statistics", None),
         work_block.total_balance,

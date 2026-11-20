@@ -80,6 +80,13 @@ class TestIntegrationPortHandling(unittest.TestCase):
             time.sleep(0.1)
         self.assertIsNotNone(peer, "Handshake did not complete in time")
 
+        # Both nodes queue a PING from their real port when the handshake
+        # completes. Let it arrive and be processed first, or it can
+        # overwrite the injected source address below.
+        time.sleep(1.0)
+        peer = get_peer(node_b, node_a.storage_public_key_bytes)
+        self.assertIsNotNone(peer)
+
         original_addr = peer.address
         self.assertIsNotNone(original_addr)
 
@@ -96,11 +103,14 @@ class TestIntegrationPortHandling(unittest.TestCase):
             (msg_bytes, ("127.0.0.1", ephemeral_port), len(msg_bytes))
         )
 
-        time.sleep(0.5)
+        expected = ("127.0.0.1", ephemeral_port)
+        deadline = time.time() + 5
+        while time.time() < deadline and peer.address != expected:
+            time.sleep(0.05)
 
         self.assertEqual(
             peer.address,
-            ("127.0.0.1", ephemeral_port),
+            expected,
         )
 
 

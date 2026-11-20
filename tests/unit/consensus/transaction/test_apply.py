@@ -19,7 +19,7 @@ from astreum.consensus.transaction.apply import demand_pair
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.transaction.code import TransactionCode
 from astreum.consensus.transaction.storage.contract import calculate_transaction_costs
-from astreum.consensus.transaction.storage.initial import storage_walk_fee
+from astreum.consensus.transaction.storage.initial import storage_walk_fee, storage_walk_size
 from astreum.consensus.block.rate import calculate_storage_fee
 from astreum.consensus.models.receipt import Receipt
 from astreum.crypto.bloom_search import make_search_variants
@@ -601,21 +601,24 @@ class TestDemandPair(unittest.TestCase):
         return tx
 
     def test_empty_block_has_a_zero_pair(self):
-        self.assertEqual(demand_pair(self.block), (0, 0))
+        self.assertEqual(demand_pair(self.node, self.block), (0, 0))
 
     def test_one_claim_adds_its_fees_and_bytes_to_the_pair(self):
         tx = self._claim()
         receipt = self.block.receipts[-1]
-        tx_fees, tx_bytes = demand_pair(self.block)
+        tx_fees, tx_bytes = demand_pair(self.node, self.block)
 
         self.assertEqual(tx_fees, receipt.base_fee + receipt.execution_fee)
-        self.assertEqual(tx_bytes, tx.expr().size())
+        self.assertEqual(
+            tx_bytes,
+            storage_walk_size(self.node, self.block, tx.expr()),
+        )
         self.assertGreater(tx_bytes, 0)
 
     def test_storage_fee_does_not_enter_total_tx_fees(self):
         self._claim()
         receipt = self.block.receipts[-1]
-        tx_fees, _ = demand_pair(self.block)
+        tx_fees, _ = demand_pair(self.node, self.block)
 
         self.assertGreater(receipt.storage_fee, 0)
         self.assertEqual(tx_fees, receipt.base_fee + receipt.execution_fee)

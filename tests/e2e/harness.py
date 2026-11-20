@@ -118,6 +118,28 @@ def wait_until(predicate, timeout: float, message: str, nodes=(), interval: floa
 # --------------------------------------------------------------------- genesis
 
 
+def setup_statistics(total: int, funds_total: int = 0) -> list[tuple[int, ...]]:
+    """Return the all-time statistics entry a test chain starts with.
+
+    A raw genesis has no fee history, so no block past it can price its
+    storage record. Every test chain is SET UP: the all-time figures state
+    that the chain already ran at the spec's worked-example intensity 0.5
+    (total fees equal the supply level; the cumulative supply is twice it,
+    so ``r_bar = 0.5``), and the demand pair is the unit-fixture byte price
+    of 1 fee per 1,000,000 bytes. At that intensity a transfer's storage
+    fee is a few units, not the whole balance.
+
+    Args:
+        total: The staked amount of the genesis being built.
+        funds_total: The plain-account balances seeded in the genesis.
+
+    Returns:
+        The single all-time statistics entry.
+    """
+    level = total + funds_total
+    return [(level, level, 2 * level, 0, 1, 1_000_000)]
+
+
 def genesis_with(
     *,
     stakes: dict[bytes, int],
@@ -156,6 +178,7 @@ def genesis_with(
             put_in_radix_tree(stake_trie, node, key, record.expr())
             accounts.pending_exprs.extend(resolve_inner_exprs(node, record.expr())[0])
         total = sum(amount for _, amount in stake_items)
+        funds_total = sum(funds.values())
         stake_root = stake_trie.root_hash or ZERO32
 
         treasury = create_account(balance=total, data_hash=stake_root, counter=0)
@@ -187,7 +210,7 @@ def genesis_with(
         total_base_fee=0,
         transaction_count=0,
             total_storage_fee=0,
-            statistics=[(0, total, total, 0, 0, 0)],
+            statistics=setup_statistics(total, funds_total),
             transactions_hash=ZERO32,
             receipts_hash=ZERO32,
             validation_difficulty=0,

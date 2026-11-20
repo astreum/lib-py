@@ -3,6 +3,7 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -13,8 +14,10 @@ if str(SRC_DIR) not in sys.path:
 
 from astreum.node import Node  # noqa: E402
 from astreum.consensus.validation.node import validate_blockchain  # noqa: E402
-from astreum.communication.node import connect_node
-from astreum.communication.disconnect import disconnect_node
+from astreum.consensus.validation import node as validation_node  # noqa: E402
+from astreum.communication.node import connect_node  # noqa: E402
+from astreum.communication.disconnect import disconnect_node  # noqa: E402
+from tests.e2e.harness import STAKE, genesis_with, public  # noqa: E402
 
 
 class TestValidationProgress(unittest.TestCase):
@@ -39,7 +42,13 @@ class TestValidationProgress(unittest.TestCase):
         connect_node(node)
         try:
             secret_key = Ed25519PrivateKey.generate()
-            validate_blockchain(node, secret_key)
+            # The test chain is SET UP with fee history so its first block
+            # can be priced (a raw genesis cannot price any block).
+            genesis = genesis_with(stakes={public(secret_key): STAKE})
+            with mock.patch.object(
+                validation_node, "create_genesis_block", genesis
+            ):
+                validate_blockchain(node, secret_key)
 
             deadline = time.time() + 30
             prev_block_count = 0

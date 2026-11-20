@@ -75,7 +75,12 @@ from astreum.storage.radix import (  # noqa: E402
 )
 from astreum.storage.records import fetch_and_store_record, get_record_from_cold_storage  # noqa: E402
 from tests.e2e.consensus.validation.test_verify_stake_halving import _free_port  # noqa: E402
-from tests.e2e.harness import balance, receipt, tx_hashes  # noqa: E402
+from tests.e2e.harness import (  # noqa: E402
+    balance,
+    receipt,
+    setup_statistics,
+    tx_hashes,
+)
 from astreum.consensus.block.rate_window import update_statistics  # noqa: E402
 from astreum.expression.helpers import get_expr_builtin_tag
 
@@ -188,7 +193,7 @@ class Fixture:
         total_base_fee=0,
         transaction_count=0,
             total_storage_fee=0,
-            statistics=[(0, STAKE, STAKE, 0, 0, 0)],
+            statistics=setup_statistics(STAKE, 10_000_000 + 5),
             transactions_hash=ZERO32,
             receipts_hash=ZERO32,
             validation_difficulty=0,

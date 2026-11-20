@@ -4,6 +4,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -14,8 +15,10 @@ if str(SRC_DIR) not in sys.path:
 
 from astreum.node import Node  # noqa: E402
 from astreum.consensus.validation.node import validate_blockchain  # noqa: E402
-from astreum.communication.node import connect_node
-from astreum.communication.disconnect import disconnect_node
+from astreum.consensus.validation import node as validation_node  # noqa: E402
+from astreum.communication.node import connect_node  # noqa: E402
+from astreum.communication.disconnect import disconnect_node  # noqa: E402
+from tests.e2e.harness import STAKE, genesis_with, public  # noqa: E402
 
 
 class TestValidationResume(unittest.TestCase):
@@ -44,11 +47,18 @@ class TestValidationResume(unittest.TestCase):
             "verbose": False,
         }
 
+        # The test chain is SET UP with fee history so its first block can
+        # be priced (a raw genesis cannot price any block).
+        genesis = genesis_with(stakes={public(secret_key): STAKE})
+
         # ── Phase 1: first run, fresh genesis, produce blocks ─────────
         node = Node(config=dict(base_config))
         connect_node(node)
         try:
-            validate_blockchain(node, secret_key)
+            with mock.patch.object(
+                validation_node, "create_genesis_block", genesis
+            ):
+                validate_blockchain(node, secret_key)
 
             # Produce blocks for ~15 seconds (block_spacing is a constant 2,
             # so genesis + ~6-7 blocks in that window)

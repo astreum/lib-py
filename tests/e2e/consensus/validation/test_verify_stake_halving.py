@@ -52,6 +52,7 @@ from astreum.storage.records import get_record_from_cold_storage  # noqa: E402
 from astreum.storage.exprs import get_expr_from_local_storage, put_expr_in_hot_storage  # noqa: E402
 from astreum.node import Node  # noqa: E402
 from astreum.storage.radix import RadixTree, put_in_radix_tree  # noqa: E402
+from tests.e2e.harness import setup_statistics  # noqa: E402
 
 STAKE = 8
 
@@ -89,7 +90,7 @@ def _genesis_with_stake(node, validator_public_key, chain_id=0):
         total_base_fee=0,
         transaction_count=0,
         total_storage_fee=0,
-        statistics=[(0, STAKE, STAKE, 0, 0, 0)],
+        statistics=setup_statistics(STAKE),
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
         validation_difficulty=0,

@@ -65,10 +65,9 @@ class TestValidatorAndPeer(unittest.TestCase):
 class TestNonValidatorPeer(unittest.TestCase):
     """A node with no validation key.
 
-    BUG (all tests here): BLOCK announcements go only to validators
-    (validation/worker.py ``_announce_block``), the ping handler records no
-    block holder, and ``get_block_from_storage`` without a contact does not go
-    to the network. So a non-validator cannot load the head block.
+    A trusted peer takes the head hash from its seed and loads the block from
+    the announced holder. A verifying peer checks the chain and picks the
+    head itself.
     """
 
     def _validator(self, net):
@@ -83,7 +82,6 @@ class TestNonValidatorPeer(unittest.TestCase):
         )
         return validator
 
-    @unittest.expectedFailure
     def test_verifying_peer_follows_the_validator(self) -> None:
         with Network() as net:
             validator = self._validator(net)

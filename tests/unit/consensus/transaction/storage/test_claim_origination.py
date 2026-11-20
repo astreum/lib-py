@@ -266,7 +266,7 @@ class TestClaimOrigination(unittest.TestCase):
             self.block.total_balance,
             fee_income(self.block.receipts),
             self.block.storage_claim_count,
-            *demand_pair(self.block),
+            *demand_pair(self.node, self.block),
         )
         self.assertEqual(after[0][0] - before[0][0], booked)
 

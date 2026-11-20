@@ -4,8 +4,10 @@ import unittest
 
 from tests.e2e.harness import (
     SLOT,
+    STAKE,
     Network,
     assert_chain_links,
+    genesis_with,
     height,
     new_key,
     public,
@@ -16,8 +18,9 @@ from tests.e2e.harness import (
 class TestSoloValidator(unittest.TestCase):
     def test_chain_grows_without_gaps(self) -> None:
         key = new_key()
+        genesis = genesis_with(stakes={public(key): STAKE})
         with Network() as net:
-            node = net.validator(key)
+            node = net.validator(key, genesis=genesis)
             wait_until(
                 lambda: height(node) >= 5,
                 timeout=SLOT * 10,
@@ -30,8 +33,10 @@ class TestSoloValidator(unittest.TestCase):
         self.assertGreaterEqual(blocks[-1].height, 5)
 
     def test_average_block_time_is_under_four_seconds(self) -> None:
+        key = new_key()
+        genesis = genesis_with(stakes={public(key): STAKE})
         with Network() as net:
-            node = net.validator(new_key())
+            node = net.validator(key, genesis=genesis)
             wait_until(
                 lambda: height(node) >= 6,
                 timeout=SLOT * 12,

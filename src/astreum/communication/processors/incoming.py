@@ -153,7 +153,10 @@ def process_incoming_messages(node: "Node") -> None:
             peer_address = (addr[0], addr[1])
             if peer.address != peer_address:
                 peer.address = peer_address
-                peer.is_default_seed = (
+                # The seed relationship belongs to the peer's key, not to the
+                # source address a packet happens to come from. A seed whose
+                # replies leave from another local address keeps its flag.
+                peer.is_default_seed = peer.is_default_seed or (
                     bool(node.default_seed_ips) and addr[0] in node.default_seed_ips
                 )
 
@@ -250,10 +253,17 @@ def populate_incoming_messages(node: "Node") -> None:
                 )
         except socket.timeout:
             continue
-        except OSError:
+        except OSError as exc:
             if stop.is_set():
                 break
-            node.logger.warning("Error populating incoming queue: socket closed")
+            # A closed socket cannot recover. Without this check the loop
+            # spins on the same error and floods the log.
+            if node.socket is None or node.socket.fileno() < 0:
+                break
+            node.logger.warning("Error populating incoming queue: %s", exc)
+            # Another persistent error must not become a busy loop either.
+            if stop.wait(0.1):
+                break
         except Exception as exc:
             node.logger.warning("Error populating incoming queue: %s", exc)
 

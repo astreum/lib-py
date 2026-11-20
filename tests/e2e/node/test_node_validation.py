@@ -3,6 +3,7 @@ import socket
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -14,6 +15,8 @@ if str(SRC_DIR) not in sys.path:
 from astreum.communication.models.relay_endpoint import RelayEndpoint  # noqa: E402
 from astreum.node import Node  # noqa: E402
 from astreum.consensus.validation.node import validate_blockchain  # noqa: E402
+from astreum.consensus.validation import node as validation_node  # noqa: E402
+from tests.e2e.harness import STAKE, genesis_with, public  # noqa: E402
 from astreum.expression import Expr, ZERO32, resolve_inner_exprs  # noqa: E402
 from astreum.consensus.constants import TREASURY_ADDRESS  # noqa: E402
 from astreum.consensus.models.block import Block  # noqa: E402
@@ -48,7 +51,13 @@ class TestNodeValidation(unittest.TestCase):
         )
         try:
             secret_key = Ed25519PrivateKey.generate()
-            validate_blockchain(node, secret_key)
+            # The test chain is SET UP with fee history so its first block
+            # can be priced (a raw genesis cannot price any block).
+            genesis = genesis_with(stakes={public(secret_key): STAKE})
+            with mock.patch.object(
+                validation_node, "create_genesis_block", genesis
+            ):
+                validate_blockchain(node, secret_key)
 
             time.sleep(5)
             latest_hash = node.latest_block_hash
@@ -64,22 +73,35 @@ class TestNodeValidation(unittest.TestCase):
         node = Node()
         connect_node(node)
 
-        secret_key = Ed25519PrivateKey.generate()
-        validate_blockchain(node, secret_key)
+        try:
+            secret_key = Ed25519PrivateKey.generate()
+            # The test chain is SET UP with fee history so its first block
+            # can be priced (a raw genesis cannot price any block).
+            genesis = genesis_with(stakes={public(secret_key): STAKE})
+            with mock.patch.object(
+                validation_node, "create_genesis_block", genesis
+            ):
+                validate_blockchain(node, secret_key)
 
-        b = node.latest_block
-        self.assertIsNotNone(node.latest_block_hash)
-        self.assertIsNotNone(b)
-        self.assertEqual(b.height, 0)
-        self.assertEqual(b.previous_block_hash, ZERO32)
-        self.assertEqual(b.chain_id, 0)
-        self.assertEqual(node.latest_block_hash, get_block_expr(b).hash())
+            b = node.latest_block
+            self.assertIsNotNone(node.latest_block_hash)
+            self.assertIsNotNone(b)
+            self.assertEqual(b.height, 0)
+            self.assertEqual(b.previous_block_hash, ZERO32)
+            self.assertEqual(b.chain_id, 0)
+            self.assertEqual(node.latest_block_hash, get_block_expr(b).hash())
 
-        vk = node.config.validation_public_key_bytes
-        validator_account = b.accounts.get_account(vk, node)
-        self.assertIsNotNone(validator_account, "validator account should exist in genesis")
-        treasury_account = b.accounts.get_account(TREASURY_ADDRESS, node)
-        self.assertIsNotNone(treasury_account, "treasury account should exist in genesis")
+            vk = node.config.validation_public_key_bytes
+            validator_account = b.accounts.get_account(vk, node)
+            self.assertIsNotNone(
+                validator_account, "validator account should exist in genesis"
+            )
+            treasury_account = b.accounts.get_account(TREASURY_ADDRESS, node)
+            self.assertIsNotNone(
+                treasury_account, "treasury account should exist in genesis"
+            )
+        finally:
+            disconnect_node(node)
         
 
     def test_latest_block_loads_from_default_seed(self) -> None:
@@ -99,7 +121,13 @@ class TestNodeValidation(unittest.TestCase):
         node_b = None
         try:
             secret_key = Ed25519PrivateKey.generate()
-            validate_blockchain(node_a, secret_key)
+            # The test chain is SET UP with fee history so its first block
+            # can be priced (a raw genesis cannot price any block).
+            genesis = genesis_with(stakes={public(secret_key): STAKE})
+            with mock.patch.object(
+                validation_node, "create_genesis_block", genesis
+            ):
+                validate_blockchain(node_a, secret_key)
 
             timeout = time.time() + 10
             while time.time() < timeout:

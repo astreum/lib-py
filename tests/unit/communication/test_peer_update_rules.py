@@ -324,10 +324,12 @@ class TestIncomingAddress(unittest.TestCase):
         self._run(self._ping(), ("10.0.0.9", 6000))
         self.assertTrue(self.peer.is_default_seed)
 
-    def test_address_change_clears_default_seed(self):
+    def test_address_change_keeps_default_seed(self):
+        # The seed relationship belongs to the peer's key, not to the source
+        # address: a seed's replies can leave from another local address.
         self.peer.is_default_seed = True
         self._run(self._ping(), ("10.0.0.6", 6000))
-        self.assertFalse(self.peer.is_default_seed)
+        self.assertTrue(self.peer.is_default_seed)
 
     def test_handshake_does_not_reach_address_update(self):
         self._run(_handshake_from(self.remote, False), ("10.0.0.6", 6000))

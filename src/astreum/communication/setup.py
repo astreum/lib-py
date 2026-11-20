@@ -19,6 +19,9 @@ from astreum.communication.processors.incoming import (
 )
 from astreum.communication.processors.outgoing import process_outgoing_messages
 from astreum.communication.processors.peer import manage_peer
+from astreum.communication.processors.latest_block_discovery import (
+    discover_latest_block,
+)
 from astreum.communication.outgoing_queue import enqueue_outgoing
 from astreum.communication.models.handshake import build_handshake
 from astreum.communication.util import address_str_to_host_and_port
@@ -300,3 +303,13 @@ def communication_setup(node: "Node", config: NodeConfig):
         daemon=True,
     )
     node.claim_storage_thread.start()
+
+    # A trusted follower skips the verify worker, so it has no other way to
+    # turn the head hash its seed announces into a head block.
+    if node.config.default_seed and node.config.validation_secret_key is None:
+        node.latest_block_discovery_thread = threading.Thread(
+            target=discover_latest_block,
+            args=(node,),
+            daemon=True,
+        )
+        node.latest_block_discovery_thread.start()

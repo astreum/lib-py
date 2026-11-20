@@ -3,6 +3,7 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -13,10 +14,17 @@ if str(SRC_DIR) not in sys.path:
 
 from astreum.node import Node  # noqa: E402
 from astreum.consensus.validation.node import validate_blockchain  # noqa: E402
+from astreum.consensus.validation import node as validation_node  # noqa: E402
 from astreum.consensus.block.encoding.decode import get_block_from_storage  # noqa: E402
 from astreum.expression import ZERO32  # noqa: E402
 from astreum.communication.node import connect_node
 from astreum.communication.disconnect import disconnect_node
+from tests.e2e.harness import (  # noqa: E402
+    STAKE,
+    genesis_with,
+    public,
+    setup_statistics,
+)
 
 
 class TestGenesisChain(unittest.TestCase):
@@ -44,7 +52,13 @@ class TestGenesisChain(unittest.TestCase):
         connect_node(node)
         try:
             secret_key = Ed25519PrivateKey.generate()
-            validate_blockchain(node, secret_key)
+            # The test chain is SET UP with fee history so its first block
+            # can be priced (a raw genesis cannot price any block).
+            genesis = genesis_with(stakes={public(secret_key): STAKE})
+            with mock.patch.object(
+                validation_node, "create_genesis_block", genesis
+            ):
+                validate_blockchain(node, secret_key)
 
             # Capture genesis hash right after validate() creates it
             genesis_hash = node.latest_block_hash
@@ -101,10 +115,11 @@ class TestGenesisChain(unittest.TestCase):
                 "genesis must have accounts_hash",
             )
 
-            # Verify genesis statistics range 0
-            self.assertEqual(block.statistics, [(0, 1, 1, 0, 0, 0)])
-            self.assertEqual(block.cumulative_total_fee, 0)
-            self.assertEqual(block.cumulative_total_balance, 1)
+            # Verify the set-up genesis statistics
+            expected_stats = setup_statistics(STAKE)
+            self.assertEqual(block.statistics, expected_stats)
+            self.assertEqual(block.cumulative_total_fee, expected_stats[0][0])
+            self.assertEqual(block.cumulative_total_balance, expected_stats[0][2])
 
 
             # Verify empty transactions / receipts

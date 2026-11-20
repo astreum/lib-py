@@ -46,7 +46,8 @@ def _collect_missing_hashes(expr: Expr, resolution: int) -> list[bytes]:
         current = expr
         while current is not None and get_expr_builtin_tag(current) == "link":
             if current.tail_hash is not None:
-                missing.append(current.tail_hash)
+                if current.tail_hash != ZERO32:
+                    missing.append(current.tail_hash)
                 break
             current = current.tail
     elif resolution == RESOLUTION_FULL:
@@ -57,11 +58,15 @@ def _collect_missing_hashes(expr: Expr, resolution: int) -> list[bytes]:
                 continue
             if e.head is not None:
                 stack.append(e.head)
-            elif e.head_hash is not None:
+            elif e.head_hash is not None and e.head_hash != ZERO32:
                 missing.append(e.head_hash)
             if e.tail is not None:
                 stack.append(e.tail)
-            elif e.tail_hash is not None and not _is_builtin_type_hash(e.tail_hash):
+            elif (
+                e.tail_hash is not None
+                and e.tail_hash != ZERO32
+                and not _is_builtin_type_hash(e.tail_hash)
+            ):
                 missing.append(e.tail_hash)
     return missing
 

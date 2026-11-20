@@ -49,14 +49,8 @@ class TestValidatorRestart(unittest.TestCase):
 
 
 class TestJoinAndRejoin(unittest.TestCase):
-    """BUG (both tests): a node that misses a block never catches up.
+    """A node that joins a running chain catches up to within two blocks."""
 
-    ``handle_block`` drops a BLOCK that is not built on the node latest block.
-    The verify worker needs a block holder for the head, and the holder is
-    recorded only from a BLOCK that passed that check.
-    """
-
-    @unittest.expectedFailure
     def test_late_joiner_catches_up(self) -> None:
         key = new_key()
         genesis = genesis_with(stakes={public(key): STAKE})

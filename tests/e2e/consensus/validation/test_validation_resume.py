@@ -15,6 +15,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -25,8 +26,10 @@ if str(SRC_DIR) not in sys.path:
 
 from astreum.node import Node  # noqa: E402
 from astreum.consensus.validation.node import validate_blockchain  # noqa: E402
+from astreum.consensus.validation import node as validation_node  # noqa: E402
 from astreum.communication.node import connect_node
 from astreum.communication.disconnect import disconnect_node
+from tests.e2e.harness import STAKE, genesis_with, public  # noqa: E402
 
 
 class TestValidationResume(unittest.TestCase):
@@ -41,6 +44,9 @@ class TestValidationResume(unittest.TestCase):
     def test_resume_validation_after_restart(self) -> None:
         cold_dir = tempfile.TemporaryDirectory(prefix="astreum_cold_")
         secret_key = Ed25519PrivateKey.generate()
+        # The test chain is SET UP with fee history so its first block can
+        # be priced (a raw genesis cannot price any block).
+        genesis = genesis_with(stakes={public(secret_key): STAKE})
 
         base_config = {
             "port": self._get_free_port(),
@@ -58,7 +64,10 @@ class TestValidationResume(unittest.TestCase):
         node = Node(config=dict(base_config))
         connect_node(node)
         try:
-            validate_blockchain(node, secret_key)
+            with mock.patch.object(
+                validation_node, "create_genesis_block", genesis
+            ):
+                validate_blockchain(node, secret_key)
             time.sleep(15)
 
             saved_hash = node.latest_block_hash
@@ -91,7 +100,10 @@ class TestValidationResume(unittest.TestCase):
         node = Node(config=resume_config)
         connect_node(node)
         try:
-            validate_blockchain(node, secret_key)
+            with mock.patch.object(
+                validation_node, "create_genesis_block", genesis
+            ):
+                validate_blockchain(node, secret_key)
 
             loaded_height = node.latest_block.height
             self.assertEqual(

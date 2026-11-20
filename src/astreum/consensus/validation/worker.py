@@ -512,7 +512,7 @@ def make_validation_worker(
                     new_block.pending_exprs.append(get_radix_node_expr(trie_node))
                 storage_account.data_hash = storage_account.data.root_hash
 
-            total_transaction_fee, delta_tx_bytes = demand_pair(new_block)
+            total_transaction_fee, delta_tx_bytes = demand_pair(node, new_block)
             total_base_fee = sum(r.base_fee for r in new_block.receipts)
             transaction_count = len(new_block.receipts)
             total_storage_fee = sum(r.storage_fee for r in new_block.receipts)
