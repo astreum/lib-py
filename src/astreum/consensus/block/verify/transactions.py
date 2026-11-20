@@ -12,7 +12,7 @@ from astreum.storage.exprs import (
 from astreum.consensus.block.rate_window import update_statistics
 from astreum.consensus.block.reward import fee_income, validator_reward
 from astreum.storage.radix import RadixTree, get_from_radix_tree, put_in_radix_tree
-from astreum.consensus.models.accounts import Accounts
+from astreum.consensus.models.accounts import Accounts, compute_total_balance
 from astreum.consensus.account.model import ACCOUNT_SHAPE
 
 ZERO32 = b"\x00" * 32
@@ -20,6 +20,7 @@ from astreum.consensus.models.receipt import Receipt
 from astreum.consensus.block.create import create_block
 from astreum.consensus.block.encoding.expr import get_block_expr
 from astreum.consensus.transaction import apply_transaction_obj
+from astreum.consensus.transaction.apply import demand_pair
 from astreum.consensus.transaction.from_storage import get_transaction_from_storage
 from astreum.consensus.transaction.storage.difficulty import next_storage_difficulty
 from astreum.consensus.transaction.storage.initial import (
@@ -301,6 +302,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
 
     # The block the transactions are applied to is a real Block, as the
     # creator's is: the machine snapshots and restores it.
+    initial_balance = compute_total_balance(accounts_snapshot, node)
     work_block = create_block(
         chain_id=block.chain_id,
         previous_block_hash=block.previous_block_hash,
@@ -322,6 +324,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         accounts=accounts_snapshot,
         transactions=[],
         receipts=[],
+        total_balance=initial_balance,
         global_loaned=getattr(prev_block, "global_loaned", 0) or 0,
         global_defaulted=getattr(prev_block, "global_defaulted", 0) or 0,
         global_loan_count=getattr(prev_block, "global_loan_count", 0) or 0,
@@ -425,6 +428,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
             validator_account = create_account()
         validator_account.balance += reward_amount
         work_block.accounts.set_account(validator_key, validator_account)
+    work_block.total_balance += reward_amount
 
     # The bloom tree the transactions built must be the one the header names.
     work_block.bloom_tree.rewrite_root()
@@ -655,13 +659,14 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
     treasury_balance = treasury_account.balance or 0
 
     delta_fee = fee_income(work_block.receipts)
-    delta_stake = treasury_balance
+    delta_tx_fees, delta_tx_bytes = demand_pair(work_block)
     expected_statistics = update_statistics(
-        block.height,
         getattr(prev_block, "statistics", None),
+        work_block.total_balance,
         delta_fee,
-        delta_stake,
         work_block.storage_claim_count,
+        delta_tx_fees,
+        delta_tx_bytes,
     )
     if getattr(block, "statistics", None) != expected_statistics:
         node.logger.debug(

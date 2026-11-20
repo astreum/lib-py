@@ -163,6 +163,7 @@ class TestBlockVerify(unittest.TestCase):
             bloom_hash=None,
             expr_id=os.urandom(32),
             height=3,
+            statistics=[(1, 1, 1, 0, 0, 0)],
         )
         block = SimpleNamespace(
             expr_id=os.urandom(32),
@@ -186,7 +187,20 @@ class TestBlockVerify(unittest.TestCase):
         cell.tail = None
         accounts = mock.Mock()
         accounts.get_account.return_value = None
-        work_block = SimpleNamespace(accounts=accounts, bloom_tree=None)
+        accounts.start_supply_tracking = mock.Mock()
+        accounts.stop_supply_tracking = mock.Mock()
+        accounts.supply_snapshot = mock.Mock(return_value={})
+        accounts.supply_restore = mock.Mock()
+        accounts._cache = {}
+        accounts._trie = SimpleNamespace(root_hash=None)
+        work_block = SimpleNamespace(
+            accounts=accounts,
+            bloom_tree=None,
+            total_balance=1,
+            total_transaction_fee=0,
+            storage_claim_count=0,
+            transactions=[],
+        )
         node = SimpleNamespace(logger=mock.Mock())
 
         apply = mock.Mock()

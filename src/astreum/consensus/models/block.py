@@ -46,6 +46,7 @@ class Block:
     pending_exprs: List[Expr]
     bloom_tree: Optional["BloomTree"]
     pending_bloom_keys: set[bytes]
+    total_balance: int
     global_loaned: int
     global_defaulted: int
     global_loan_count: int
@@ -82,6 +83,7 @@ class Block:
         receipts_trie: Optional["RadixTree"] = None,
         statistics: Optional[list] = None,
         pending_exprs: Optional[List[Expr]] = None,
+        total_balance: int = 0,
         global_loaned: int = 0,
         global_defaulted: int = 0,
         global_loan_count: int = 0,
@@ -132,6 +134,7 @@ class Block:
         self.pending_bloom_keys = set()
         # Accounts whose 0|0|0|0|I element is in the bloom leaf of this block.
         self.involved_accounts: set[bytes] = set()
+        self.total_balance = total_balance
         self.global_loaned = global_loaned
         self.global_defaulted = global_defaulted
         self.global_loan_count = global_loan_count
@@ -154,6 +157,8 @@ class Block:
         }
         saved_pending_exprs = list(self.pending_exprs)
         saved_involved = set(self.accounts.involved)
+        saved_supply_balances = self.accounts.supply_snapshot()
+        saved_total_balance = self.total_balance
         saved_global_loaned = self.global_loaned
         saved_global_defaulted = self.global_defaulted
         saved_global_loan_count = self.global_loan_count
@@ -162,10 +167,12 @@ class Block:
         return (
             saved_cache,
             saved_pending_exprs,
+            saved_involved,
+            saved_supply_balances,
+            saved_total_balance,
             saved_global_loaned,
             saved_global_defaulted,
             saved_global_loan_count,
-            saved_involved,
             saved_storage_votes,
             saved_storage_claim_count,
         )
@@ -181,16 +188,20 @@ class Block:
         (
             saved_cache,
             saved_pending_exprs,
+            saved_involved,
+            saved_supply_balances,
+            saved_total_balance,
             saved_global_loaned,
             saved_global_defaulted,
             saved_global_loan_count,
-            saved_involved,
             saved_storage_votes,
             saved_storage_claim_count,
         ) = snapshot
         self.accounts._cache = saved_cache
         self.accounts.involved = saved_involved
+        self.accounts.supply_restore(saved_supply_balances)
         self.pending_exprs = saved_pending_exprs
+        self.total_balance = saved_total_balance
         self.global_loaned = saved_global_loaned
         self.global_defaulted = saved_global_defaulted
         self.global_loan_count = saved_global_loan_count
@@ -224,17 +235,17 @@ class Block:
         return 0
 
     @property
-    def cumulative_stake(self) -> int:
-        """Get the cumulative stake.
+    def cumulative_total_balance(self) -> int:
+        """Get the cumulative total balance.
 
         Args:
             None.
 
         Returns:
-            The cumulative stake from statistics.
+            The cumulative total balance from statistics.
         """
         if self.statistics:
-            return self.statistics[0][1]
+            return self.statistics[0][2]
         return 0
 
 

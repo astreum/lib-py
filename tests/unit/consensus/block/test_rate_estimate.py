@@ -14,40 +14,33 @@ from astreum.consensus.block.rate import (  # noqa: E402
     storage_fee_at_rate,
 )
 
-WINDOW_INDEX = {1: 1, 2: 2, 4: 3, 8: 4}
-
-
-def _head(fee=100, stake=200, windows=None, height=9):
-    """Build a fake head with entry 0 and entries for windows 1, 2, 4, 8."""
-    statistics = [(fee, stake, 0, 0, 0, 0)]
-    if height > 0:
-        statistics.extend([(0, 0, 0, 0, 0, 0)] * 4)
-    for window, values in (windows or {}).items():
-        statistics[WINDOW_INDEX[window]] = values
+def _head(fee=100, stake=200, height=9):
+    """Build a fake head with single-entry statistics."""
+    statistics = [(fee, stake, stake, 0, 0, 0)]
     return SimpleNamespace(
         height=height,
         statistics=statistics,
         cumulative_total_fee=fee,
-        cumulative_stake=stake,
+        cumulative_total_balance=stake,
     )
 
 
 class EstimateStorageRateTests(unittest.TestCase):
     def test_rate_rising(self):
-        head = _head(windows={4: (0, 80, 0, 10, 0, 0)})
-        self.assertEqual(estimate_storage_rate(head, 4), Fraction(5, 2))
+        head = _head()
+        self.assertEqual(estimate_storage_rate(head, 4), Fraction(2))
 
     def test_rate_falling(self):
-        head = _head(windows={4: (80, 0, 10, 0, 0, 0)})
+        head = _head()
         self.assertEqual(estimate_storage_rate(head, 4), Fraction(2))
 
     def test_rate_window_rounded_down(self):
-        head = _head(windows={4: (0, 80, 0, 10, 0, 0)})
-        self.assertEqual(estimate_storage_rate(head, 6), Fraction(5, 2))
+        head = _head()
+        self.assertEqual(estimate_storage_rate(head, 6), Fraction(2))
 
     def test_rate_window_past_chain(self):
-        head = _head(windows={8: (0, 40, 0, 20, 0, 0)})
-        self.assertEqual(estimate_storage_rate(head, 65536), Fraction(5, 2))
+        head = _head()
+        self.assertEqual(estimate_storage_rate(head, 65536), Fraction(2))
 
     def test_rate_no_window(self):
         head = _head(height=0)
@@ -55,7 +48,7 @@ class EstimateStorageRateTests(unittest.TestCase):
         self.assertEqual(estimate_storage_rate(head, 4), Fraction(2))
 
     def test_rate_then_no_fee(self):
-        head = _head(windows={4: (0, 0, 100, 0, 0, 0)})
+        head = _head()
         self.assertEqual(estimate_storage_rate(head, 4), Fraction(2))
 
     def test_rate_no_fees(self):
@@ -66,8 +59,20 @@ class EstimateStorageRateTests(unittest.TestCase):
 
 class StorageFeeAtRateTests(unittest.TestCase):
     def test_fee_at_rate(self):
-        self.assertEqual(storage_fee_at_rate(Fraction(3, 2), 10), 30)
-        self.assertEqual(storage_fee_at_rate(Fraction(1, 3), 10), 8)
+        self.assertEqual(
+            storage_fee_at_rate(Fraction(3, 2), Fraction(1, 2), 10), 60
+        )
+        self.assertEqual(
+            storage_fee_at_rate(Fraction(1, 3), Fraction(2, 5), 10), 18
+        )
+
+    def test_fee_at_rate_rejects_a_nonpositive_fee_rate(self):
+        with self.assertRaises(ValueError):
+            storage_fee_at_rate(Fraction(0), Fraction(1), 10)
+
+    def test_fee_at_rate_rejects_a_nonpositive_quote(self):
+        with self.assertRaises(ValueError):
+            storage_fee_at_rate(Fraction(1), Fraction(0), 10)
 
 
 if __name__ == "__main__":

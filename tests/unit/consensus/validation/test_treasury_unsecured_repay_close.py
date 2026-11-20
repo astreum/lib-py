@@ -57,7 +57,10 @@ FINAL = CREATION + INTERVAL * PAYMENT_COUNT  # 50
 class _UnsecuredRepayCloseTestBase(unittest.TestCase):
     def setUp(self):
         self.node = _FakeNode()
-        self.prev_block = make_previous_block(cumulative_stake=1_000_000, cumulative_fee=1000)
+        self.prev_block = make_previous_block(
+            cumulative_total_balance=1_000_000, cumulative_fee=1000,
+            total_tx_fees=1, total_tx_bytes=1_000_000,
+        )
 
     def _make_block(self, height):
         block = make_block(self.node, self.prev_block, height=height)

@@ -26,7 +26,7 @@ class TestBlockNonce(unittest.TestCase):
         total_base_fee=0,
         transaction_count=0,
             total_storage_fee=0,
-            statistics=[(1, 1, 0, 0, 0, 0)],
+            statistics=[(1, 1, 1, 0, 0, 0)],
             transactions_hash=None,
             receipts_hash=None,
             validation_difficulty=1,

@@ -67,9 +67,17 @@ class TestValidationQueue(unittest.TestCase):
             validator_account.balance = 1_000_000
             genesis.accounts.set_account(validator_pk, validator_account)
 
-            # Inflate range-0 cumulative fee so the storage-fee
-            # denominator keeps storage fees near zero.
-            genesis.statistics[0] = (10_000_000, genesis.statistics[0][1], 0, 0, 0, 0)
+            # Inflate the cumulative fee so the storage-fee denominator
+            # keeps storage fees near zero, and seed the demand pair so
+            # the measured byte price exists.
+            genesis.statistics[0] = (
+                10_000_000,
+                genesis.statistics[0][1],
+                genesis.statistics[0][2],
+                0,
+                1,
+                1_000_000,
+            )
             genesis.accounts_hash = (
                 genesis.accounts.update_trie(node) or ZERO32
             )

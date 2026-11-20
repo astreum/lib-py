@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from astreum.expression import ZERO32
 from astreum.consensus.constants import PROVIDERS_PER_RECORD
-from astreum.consensus.block.rate_window import windowed_claims
 
 
 def shared_prefix_bits(a: bytes, b: bytes) -> int:
@@ -60,15 +59,11 @@ def fair_interval(parent) -> int | None:
     if not stats:
         return None
 
-    lanes = PROVIDERS_PER_RECORD * (getattr(parent, "height", 0) or 0)
-    window = 0
-    claims = 0
-    for i in range(len(stats) - 1):
-        window = 1 << i
-        claims = windowed_claims(parent, window) or 0
-        if claims >= lanes:
-            break
-
+    height = getattr(parent, "height", 0) or 0
+    if height <= 0:
+        return None
+    claims = stats[0][3]
     if claims <= 0:
         return None
-    return lanes * window // claims
+    lanes = PROVIDERS_PER_RECORD * height
+    return lanes * height // claims

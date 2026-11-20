@@ -10,6 +10,7 @@ from astreum.consensus.block.reward import fee_income, validator_reward
 from astreum.expression import link_list_to_expr, resolve_inner_exprs, resolve_list_exprs
 from astreum.storage.exprs import put_expr_in_hot_storage
 from astreum.storage.cold import put_expr_in_cold_storage
+from astreum.consensus.models.accounts import compute_total_balance
 from astreum.consensus.models.block import Block
 from astreum.consensus.block.create import create_block
 from astreum.consensus.block.difficulty import calculate_block_difficulty
@@ -19,6 +20,7 @@ from astreum.consensus.block.encoding.decode import (
     get_previous_block_hash_local,
 )
 from astreum.consensus.transaction import Transaction, apply_transaction_obj
+from astreum.consensus.transaction.apply import demand_pair
 from astreum.consensus.account.model import ACCOUNT_SHAPE
 from astreum.consensus.block.verify.transactions import _fetch_new_nodes
 from astreum.consensus.transaction.storage.difficulty import next_storage_difficulty
@@ -380,6 +382,7 @@ def make_validation_worker(
                     "No pending validation transactions; generating empty block"
                 )
 
+            initial_balance = compute_total_balance(accounts_snapshot, node)
             new_block = create_block(
                 chain_id=getattr(node, "chain", 0),
                 previous_block_hash=latest_block_hash,
@@ -401,6 +404,7 @@ def make_validation_worker(
                 accounts=accounts_snapshot,
                 transactions=[],
                 receipts=[],
+                total_balance=initial_balance,
                 global_loaned=getattr(previous_block, "global_loaned", 0) or 0,
                 global_defaulted=getattr(previous_block, "global_defaulted", 0) or 0,
                 global_loan_count=getattr(previous_block, "global_loan_count", 0) or 0,
@@ -508,9 +512,7 @@ def make_validation_worker(
                     new_block.pending_exprs.append(get_radix_node_expr(trie_node))
                 storage_account.data_hash = storage_account.data.root_hash
 
-            total_transaction_fee = sum(
-                r.base_fee + r.execution_fee for r in new_block.receipts
-            )
+            total_transaction_fee, delta_tx_bytes = demand_pair(new_block)
             total_base_fee = sum(r.base_fee for r in new_block.receipts)
             transaction_count = len(new_block.receipts)
             total_storage_fee = sum(r.storage_fee for r in new_block.receipts)
@@ -522,20 +524,8 @@ def make_validation_worker(
 
             treasury_account = new_block.accounts.get_account(TREASURY_ADDRESS, node)
 
-            delta_fee = fee_income(new_block.receipts)
-            delta_stake = treasury_account.balance
-            new_block.statistics = update_statistics(
-                new_block.height,
-                getattr(previous_block, "statistics", None),
-                delta_fee,
-                delta_stake,
-                new_block.storage_claim_count,
-            )
-
             reward_amount = validator_reward(new_block.receipts)
-            if not new_block.receipts and queue_empty:
-                node.logger.debug("Awarding base validator reward of %d aster", reward_amount)
-            elif new_block.receipts:
+            if new_block.receipts:
                 node.logger.debug(
                     "Awarding %d aster in fees for this block (tx=%d storage=%d to the storage account)",
                     reward_amount,
@@ -543,6 +533,18 @@ def make_validation_worker(
                     total_storage_fee,
                 )
             _award_validator_reward(new_block, reward_amount)
+            new_block.total_balance += reward_amount
+
+            delta_fee = fee_income(new_block.receipts)
+            delta_tx_fees = total_transaction_fee
+            new_block.statistics = update_statistics(
+                getattr(previous_block, "statistics", None),
+                new_block.total_balance,
+                delta_fee,
+                new_block.storage_claim_count,
+                delta_tx_fees,
+                delta_tx_bytes,
+            )
 
             transactions = new_block.transactions or []
             tx_hashes = [tx.hash for tx in transactions if tx.hash]

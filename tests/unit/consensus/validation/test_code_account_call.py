@@ -127,12 +127,12 @@ class TestCodeAccountCall(unittest.TestCase):
         sender_pk, sender_key = seed_sender_account(self.block, balance=2_000_000)
         new_addr = os.urandom(32)
         prog = _parse("(0 0x" + new_addr.hex() + " 1000 '() tx.new drop)")
-        recipient, _ = self._seed_expression_account(prog, balance=5000)
+        recipient, _ = self._seed_expression_account(prog, balance=20_000)
 
         tx = create_transaction(
             chain_id=1, counter=0, sender=sender_pk, recipient=recipient,
             amount=0, code=TransactionCode.CODE_ACCOUNT_CALL,
-            data=NIL, secret_key=sender_key, cost_limit=1500,
+            data=NIL, secret_key=sender_key, cost_limit=10_000,
         )
         tx_hash = store_tx(self.node, tx)
 

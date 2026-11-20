@@ -28,7 +28,11 @@ class TestVerifyBatch(unittest.TestCase):
         """Run verify up to the record. Return (result, calls in order)."""
         calls = mock.Mock()
         prev_block = SimpleNamespace(
-            accounts_hash=os.urandom(32), bloom_hash=None, expr_id=os.urandom(32), height=3
+            accounts_hash=os.urandom(32),
+            bloom_hash=None,
+            expr_id=os.urandom(32),
+            height=3,
+            statistics=[(1, 1, 1, 0, 0, 0)],
         )
         block = SimpleNamespace(
             expr_id=os.urandom(32),
@@ -48,7 +52,20 @@ class TestVerifyBatch(unittest.TestCase):
         storage_account = SimpleNamespace(data=data, data_hash=None)
         accounts = mock.Mock()
         accounts.get_account.return_value = storage_account
-        work_block = SimpleNamespace(accounts=accounts, bloom_tree=None)
+        accounts._cache = {}
+        accounts._trie = SimpleNamespace(root_hash=None)
+        accounts.start_supply_tracking = mock.Mock()
+        accounts.stop_supply_tracking = mock.Mock()
+        accounts.supply_snapshot = mock.Mock(return_value={})
+        accounts.supply_restore = mock.Mock()
+        work_block = SimpleNamespace(
+            accounts=accounts,
+            bloom_tree=None,
+            total_balance=1,
+            total_transaction_fee=0,
+            storage_claim_count=0,
+            transactions=[],
+        )
         node = SimpleNamespace(logger=mock.Mock())
 
         def fetch(*args, **kwargs):

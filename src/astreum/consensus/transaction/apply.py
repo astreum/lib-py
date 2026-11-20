@@ -66,6 +66,28 @@ def _data_nodes(data: Expr) -> list[Expr]:
     return result
 
 
+def demand_pair(block: object) -> tuple[int, int]:
+    """Return the demand pair of *block*.
+
+    The pair is ``(total_tx_fees, total_tx_bytes)``. The fee is the
+    inclusion fee paid by each receipt: base fee plus execution fee.
+    Data fees and storage fees are not inclusion fees and are excluded.
+    The bytes are the size of the whole serialized transaction Expr,
+    signature and all.
+
+    Args:
+        block: The block whose receipts and transactions are read.
+
+    Returns:
+        ``(tx_fees, tx_bytes)`` for the block.
+    """
+    receipts = getattr(block, "receipts", None) or []
+    transactions = getattr(block, "transactions", None) or []
+    tx_fees = sum(receipt.base_fee + receipt.execution_fee for receipt in receipts)
+    tx_bytes = sum(transaction.expr().size() for transaction in transactions)
+    return tx_fees, tx_bytes
+
+
 def _apply_tx_effects(
     node: Any,
     block: object,
@@ -95,6 +117,11 @@ def _apply_tx_effects(
     if not nested:
         # Only writes made by this transaction count as involved.
         block.accounts.involved.clear()
+        block.accounts.start_supply_tracking(
+            lambda delta: setattr(
+                block, "total_balance", block.total_balance + delta
+            )
+        )
 
     sender_account = block.accounts.get_account(address=transaction.sender, node=node)
     sender_is_new = False
@@ -752,6 +779,9 @@ def _apply_tx_effects(
         if block.receipts is None:
             block.receipts = []
         block.receipts.append(receipt)
+
+    if not nested:
+        block.accounts.stop_supply_tracking()
 
     storage_fee = current_storage_fee if nested else 0
     return receipt_status, current_evaluation_fee, storage_fee, collected_logs

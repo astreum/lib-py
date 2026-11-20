@@ -55,7 +55,7 @@ class TestClaimLoop(unittest.TestCase):
         self.fair = None
         self.step = MagicMock(return_value=[_entry()])
         self.send = MagicMock(side_effect=self._send)
-        self.estimate = MagicMock(return_value=RATE)
+        self.estimate = MagicMock(return_value=(RATE, Fraction(1)))
         self.measure = MagicMock(return_value=7.0)
         self.capacity_min = None
         self.real_send = False
@@ -96,7 +96,7 @@ class TestClaimLoop(unittest.TestCase):
             patch.object(claim_mod, "measure_hash_rate", self.measure),
             patch.object(claim_mod, "iter_records_in_cold_storage", self.scan),
             patch.object(claim_mod, "fair_interval", lambda head: self.fair),
-            patch.object(claim_mod, "estimate_storage_rate", self.estimate),
+            patch.object(claim_mod, "next_storage_price", self.estimate),
             patch.object(claim_mod, "calculate_discount_rate", lambda *a, **k: 0.0),
             patch.object(claim_mod, "SLOT_DURATION_SECONDS", 0),
         ]

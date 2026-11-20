@@ -187,7 +187,7 @@ def genesis_with(
         total_base_fee=0,
         transaction_count=0,
             total_storage_fee=0,
-            statistics=[(1, total, 0, 0, 0, 0)],
+            statistics=[(0, total, total, 0, 0, 0)],
             transactions_hash=ZERO32,
             receipts_hash=ZERO32,
             validation_difficulty=0,

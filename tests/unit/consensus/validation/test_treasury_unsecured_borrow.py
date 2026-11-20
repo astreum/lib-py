@@ -23,7 +23,7 @@ if str(HELPERS_DIR) not in sys.path:
 
 from astreum.consensus.transaction import apply_transaction, create_transaction
 from astreum.consensus.transaction.code import TransactionCode
-from astreum.consensus.block.rate_window import windowed_rate_fraction
+from astreum.consensus.block.rate_window import all_time_rate_fraction
 from astreum.consensus.transaction.treasury.discount import (
     calculate_discounted_amount,
 )
@@ -62,15 +62,14 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
     def setUp(self):
         self.node = _FakeNode()
         self.prev_block = make_previous_block(
-            cumulative_stake=STAKE, cumulative_fee=CTF,
+            cumulative_total_balance=STAKE, total_balance=STAKE,
+            cumulative_fee=CTF, total_tx_fees=1, total_tx_bytes=1_000_000,
         )
-        entries = self.prev_block.height.bit_length() or 1
-        self.prev_block.statistics = [(CTF, STAKE, 0, 0, 0, 0)] * max(entries, 5)
         self.block = make_block(self.node, self.prev_block, height=1)
         seed_storage_account(self.block)
 
     def _discounted_amount(self, payment_amount):
-        rate_frac = windowed_rate_fraction(self.block, DURATION)
+        rate_frac = all_time_rate_fraction(self.block)
         return calculate_discounted_amount(
             payment_amount=payment_amount,
             payment_interval_blocks=INTERVAL,

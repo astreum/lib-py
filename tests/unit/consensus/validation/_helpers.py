@@ -158,11 +158,14 @@ def make_previous_block(
     chain_id: int = 1,
     timestamp: int = 0,
     cumulative_fee: int = 1,
-    cumulative_stake: int = 1,
+    cumulative_total_balance: int = 1,
+    total_balance: int = 1,
+    total_tx_fees: int = 1,
+    total_tx_bytes: int = 1,
     height: int = 0,
     validation_difficulty: int = 1,
 ) -> Block:
-    """Block #0 with controllable cumulative fee and stake in statistics range 0."""
+    """Block #0 with controllable cumulative fee and balance in statistics."""
     return create_block(
         chain_id=chain_id,
         previous_block_hash=ZERO32,
@@ -178,7 +181,16 @@ def make_previous_block(
         receipts_hash=ZERO32,
         validation_difficulty=validation_difficulty,
         validator_public_key_bytes=os.urandom(32),
-        statistics=[(cumulative_fee, cumulative_stake, 0, 0, 0, 0)],
+        statistics=[
+            (
+                cumulative_fee,
+                total_balance,
+                cumulative_total_balance,
+                0,
+                total_tx_fees,
+                total_tx_bytes,
+            )
+        ],
     )
 
 
@@ -210,6 +222,7 @@ def make_block(
     block.transactions = []
     block.receipts = []
     block.bloom_tree = BloomTree()
+    block.total_balance = prev_block.statistics[0][1] if prev_block.statistics else 0
     return block
 
 

@@ -35,7 +35,7 @@ def _make_block(**overrides):
         total_base_fee=0,
         transaction_count=0,
         total_storage_fee=0,
-        statistics=[(1, 1, 0, 0, 0, 0)],
+        statistics=[(1, 1, 1, 0, 0, 0)],
         transactions_hash=b"t" * 32,
         receipts_hash=b"r" * 32,
         validation_difficulty=1,

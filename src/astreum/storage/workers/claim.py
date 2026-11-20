@@ -9,7 +9,7 @@ from blake3 import blake3
 
 from astreum.consensus.block.rate import (
     calculate_discount_rate,
-    estimate_storage_rate,
+    next_storage_price,
     storage_fee_at_rate,
 )
 from astreum.consensus.block.base_fee import estimate_transaction_base_fee
@@ -355,21 +355,21 @@ def _send_batch(
     head,
     entries: list[Entry],
     counter: int | None,
-    rate: Fraction,
+    price: tuple[Fraction, Fraction],
 ) -> tuple[InFlight | None, int]:
     """Build one claim transaction and send it when it pays.
 
-    The batch goes out only when its payouts, less the cost at ``rate``, reach
-    ``node.config.storage_claim_min_profit``. The send height, and the counter
-    when ``counter`` is None, come from ``node.latest_block`` at the send, not
-    from ``head``, because the PoW can take many blocks.
+    The batch goes out only when its payouts, less the cost at ``price``,
+    reach ``node.config.storage_claim_min_profit``. The send height, and the
+    counter when ``counter`` is None, come from ``node.latest_block`` at the
+    send, not from ``head``, because the PoW can take many blocks.
 
     Args:
         node: A Node instance for sending transactions.
         head: The latest block when the pass began, used for the payout.
         entries: The claim entries with their payouts.
         counter: The transaction counter, or None to read it at the send height.
-        rate: The storage rate used for the cost.
+        price: The ``(fee_rate, quote)`` pair used for the cost.
 
     Returns:
         The in-flight record, or None if the batch is not worth sending or the
@@ -392,8 +392,8 @@ def _send_batch(
         tx_bytes = _tree_bytes(tx.expr())
         cost = (
             node.storage_claim_bid
-            + storage_fee_at_rate(rate, tx_bytes)
-            + storage_fee_at_rate(rate, _RECEIPT_OVERHEAD_BYTES)
+            + storage_fee_at_rate(*price, tx_bytes)
+            + storage_fee_at_rate(*price, _RECEIPT_OVERHEAD_BYTES)
         )
         total_payout = sum(entry[5] for entry in entries)
         if total_payout - cost < node.config.storage_claim_min_profit:
@@ -425,7 +425,7 @@ def _claim_step(
     ids: list[bytes],
     queue: ClaimQueue,
     held: dict[bytes, tuple[int, int]],
-    rate: Fraction,
+    price: tuple[Fraction, Fraction],
     bytes_per_claim: int,
     should_stop: Callable[[], bool],
 ) -> list[Entry]:
@@ -443,7 +443,7 @@ def _claim_step(
         ids: The storage ids to look at.
         queue: The claim queue.
         held: ``storage_id -> (new_size, shared prefix bits)`` for each held lane.
-        rate: The storage rate used for the cost.
+        price: The ``(fee_rate, quote)`` pair used for the cost.
         bytes_per_claim: The bytes one claim adds to a transaction.
         should_stop: Returns True to stop the PoW.
 
@@ -454,7 +454,7 @@ def _claim_step(
     band = node.storage_claim_band
     interval = fair_interval(head)
     retry = head.height + (interval or 1)
-    cost = claim_cost(rate, node.storage_claim_bid, bytes_per_claim, band)
+    cost = claim_cost(*price, node.storage_claim_bid, bytes_per_claim, band)
     records: list[tuple[bytes, StorageRecord]] = []
     for storage_id in ids:
         record = None
@@ -538,7 +538,7 @@ def claim_storage(node: Node) -> None:
     bytes_per_claim = 0
     tree_head = None
     storage_tree = None
-    storage_rate: Fraction | None = None
+    storage_price: tuple[Fraction, Fraction] | None = None
 
     while not stop.is_set():
         head = node.latest_block
@@ -551,9 +551,11 @@ def claim_storage(node: Node) -> None:
             if head is not tree_head:
                 account = head.accounts.get_account(STORAGE_ADDRESS, node)
                 try:
-                    head_rate = estimate_storage_rate(head, node.config.storage_claim_fee_window)
+                    head_price = next_storage_price(head)
+                    if head_price[1] <= 0:
+                        head_price = None
                 except ValueError:
-                    head_rate = None
+                    head_price = None
                 try:
                     node.storage_claim_bid = estimate_transaction_base_fee(node, head)
                 except Exception:
@@ -563,9 +565,9 @@ def claim_storage(node: Node) -> None:
                     )
                     node.storage_claim_bid = 1
                 storage_tree = account.data if account is not None else None
-                storage_rate = head_rate
+                storage_price = head_price
                 tree_head = head
-            if storage_rate is None:
+            if storage_price is None:
                 stop.wait(SLOT_DURATION_SECONDS)
                 continue
 
@@ -603,7 +605,7 @@ def claim_storage(node: Node) -> None:
                     node.storage_claim_band = band
                     lost = in_flight
                     in_flight, tx_bytes = _send_batch(
-                        node, head, lost.entries, lost.counter, storage_rate
+                        node, head, lost.entries, lost.counter, storage_price
                     )
                     if tx_bytes:
                         bytes_per_claim = tx_bytes // len(lost.entries)
@@ -618,7 +620,7 @@ def claim_storage(node: Node) -> None:
                 except ValueError:
                     discount_rate = 0.0
                 cost = claim_cost(
-                    storage_rate, node.storage_claim_bid, bytes_per_claim, band
+                    *storage_price, node.storage_claim_bid, bytes_per_claim, band
                 )
                 items = [
                     (storage_id, lane_value(new_size, fair, discount_rate, cost), prefix_bits)
@@ -638,7 +640,7 @@ def claim_storage(node: Node) -> None:
                 popped,
                 queue,
                 held,
-                storage_rate,
+                storage_price,
                 bytes_per_claim,
                 stop.is_set,
             )
@@ -647,7 +649,9 @@ def claim_storage(node: Node) -> None:
                 continue
             groups = _split_claims(entries)
             pending = [entry for group in groups[1:] for entry in group]
-            in_flight, tx_bytes = _send_batch(node, head, groups[0], None, storage_rate)
+            in_flight, tx_bytes = _send_batch(
+                node, head, groups[0], None, storage_price
+            )
             if tx_bytes:
                 bytes_per_claim = tx_bytes // len(groups[0])
             if in_flight is None:

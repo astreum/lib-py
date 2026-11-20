@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from astreum.consensus.block.rate_window import windowed_rate_fraction  # noqa: F401
-
 
 def calculate_discounted_amount(
     *,

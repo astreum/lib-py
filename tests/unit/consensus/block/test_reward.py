@@ -8,6 +8,7 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from astreum.consensus.block.rate_window import update_statistics  # noqa: E402
 from astreum.consensus.block.reward import fee_income, validator_reward  # noqa: E402
 
 
@@ -22,8 +23,8 @@ def _receipt(base_fee=0, execution_fee=0, data_fee=0, storage_fee=0):
 
 
 class TestValidatorReward(unittest.TestCase):
-    def test_an_empty_block_pays_one(self):
-        self.assertEqual(validator_reward([]), 1)
+    def test_an_empty_block_pays_nothing(self):
+        self.assertEqual(validator_reward([]), 0)
 
     def test_the_reward_is_the_transaction_and_data_fees(self):
         receipts = [
@@ -33,12 +34,19 @@ class TestValidatorReward(unittest.TestCase):
         self.assertEqual(validator_reward(receipts), 3 + 5 + 2)
 
     def test_the_storage_fee_is_not_paid_to_the_validator(self):
-        self.assertEqual(validator_reward([_receipt(storage_fee=100)]), 1)
+        self.assertEqual(validator_reward([_receipt(storage_fee=100)]), 0)
 
 
 class TestFeeIncome(unittest.TestCase):
-    def test_an_empty_block_adds_one(self):
-        self.assertEqual(fee_income([]), 1)
+    def test_an_empty_block_adds_nothing(self):
+        self.assertEqual(fee_income([]), 0)
+
+    def test_an_empty_block_leaves_every_statistics_delta_at_zero(self):
+        previous = [(7, 100, 200, 3, 11, 500)]
+        statistics = update_statistics(previous, 100, fee_income([]), 0, 0, 0)
+        # Only the cumulative balance advances: it adds the supply level of
+        # this block. The fee, claim, tx-fee, and tx-byte counters stand still.
+        self.assertEqual(statistics[0], (7, 100, 300, 3, 11, 500))
 
     def test_fee_income_is_the_reward_plus_the_storage_fee(self):
         receipts = [

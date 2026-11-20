@@ -1,21 +1,36 @@
 from __future__ import annotations
 
 from fractions import Fraction
+from types import SimpleNamespace
 
-from astreum.consensus.block.rate_window import windowed_rate_fraction
+from astreum.consensus.block.rate_window import all_time_rate_fraction
 from astreum.consensus.constants import PROVIDERS_PER_RECORD
+
+# Fixed-point scale for the bootstrap power ``(1 + r_bar)^(-h)``. The
+# quote needs one power at read time; the scale and the power method are
+# precision choices, not prices. Exponentiation by squaring truncates
+# every product back to the scale, so the stored power is a lower bound
+# on the exact power. That lifts the quote above the closed form by a
+# negligible relative amount: the quote never falls below the closed
+# form and never exceeds ``r_bar``. The difference stays within a
+# relative 1e-18 until the power underflows, where the quote saturates
+# at ``r_bar``.
+QUOTE_POWER_SCALE = 10**18
 
 
 def calculate_discount_rate(block: object, node=None, range_blocks: int = 0) -> float:
-    """Calculate the discount rate over a window of *range_blocks*.
+    """Calculate the all-time settlement ratio of *block*.
+
+    The ratio is ``r_bar = total_fees / cumulative_total_balance`` from
+    entry 0 of the previous block's statistics tuple.
 
     Args:
         block: The block to calculate from.
         node: Optional node for storage access.
-        range_blocks: Window size in blocks (0 for all-time).
+        range_blocks: Ignored; the all-time ratio is the only rate.
 
     Returns:
-        The discount rate as a float.
+        The settlement ratio as a float.
 
     Raises:
         ValueError: If rate fraction unavailable.
@@ -24,7 +39,7 @@ def calculate_discount_rate(block: object, node=None, range_blocks: int = 0) -> 
         from astreum.consensus.block.previous import get_previous_block
         block.previous_block = get_previous_block(node, block)
 
-    rate_fraction = windowed_rate_fraction(block, range_blocks)
+    rate_fraction = all_time_rate_fraction(block)
     if rate_fraction is None:
         raise ValueError(
             f"rate fraction not available for range_blocks={range_blocks}"
@@ -33,8 +48,112 @@ def calculate_discount_rate(block: object, node=None, range_blocks: int = 0) -> 
     return numerator / denominator
 
 
+def calculate_quote_rate(block: object) -> Fraction:
+    """Return the storage quote for *block*'s height.
+
+    The quote is ``r_bar * (1 - (1 + r_bar)^(-h))`` with ``r_bar`` the
+    all-time settlement ratio from the previous block's tuple and
+    ``h = block.height``. Nothing is stored: the quote is derived at
+    read time from the tuple and the height.
+
+    The bootstrap power is computed in fixed point through
+    exponentiation by squaring. The scale is lifted so that
+    ``scale * r_bar`` is about ``QUOTE_POWER_SCALE``, which stops
+    truncation of the base from swamping the exponent ``h * r_bar`` when
+    the ratio is small. Every product is truncated back to the scale, so
+    the stored power is a lower bound on the exact power. That lifts the
+    quote above the closed form by a negligible relative amount: the
+    quote never falls below the closed form and never exceeds ``r_bar``.
+
+    Args:
+        block: The block whose height and previous tuple are read.
+
+    Returns:
+        The quote as a Fraction. It is zero at genesis and whenever the
+        previous tuple is unavailable or its fee total is zero.
+    """
+    rate_fraction = all_time_rate_fraction(block)
+    if rate_fraction is None:
+        return Fraction(0)
+
+    total_fees, cumulative_total_balance = rate_fraction
+    height = int(getattr(block, "height", 0))
+    if height <= 0 or total_fees <= 0:
+        return Fraction(0)
+
+    scale = QUOTE_POWER_SCALE
+    if total_fees < cumulative_total_balance:
+        # Lift the scale so that ``scale * r_bar`` is about the base scale.
+        scale = (scale * cumulative_total_balance) // total_fees
+
+    # (1 + r_bar)^(-h) as an integer scaled by *scale*.
+    power = scale
+    base = (cumulative_total_balance * scale) // (
+        cumulative_total_balance + total_fees
+    )
+    remaining = height
+    while remaining:
+        if remaining & 1:
+            power = (power * base) // scale
+        base = (base * base) // scale
+        remaining >>= 1
+
+    return Fraction(
+        total_fees * (scale - power),
+        cumulative_total_balance * scale,
+    )
+
+
+def calculate_fee_rate(block: object) -> Fraction:
+    """Return the measured byte price of *block*.
+
+    The price is ``fee_rate = total_tx_fees / total_tx_bytes`` from
+    entry 0 of the previous block's statistics tuple. The pair counts
+    inclusion fees only: the base fee plus the execution fee of every
+    receipt. Storage fees are not demand and are excluded.
+
+    Args:
+        block: The block with a ``previous_block`` tuple.
+
+    Returns:
+        The measured price as a Fraction.
+
+    Raises:
+        ValueError: If the previous block or its statistics are
+            unavailable, or if either pair total is zero. An empty pair
+            has no price.
+    """
+    previous_block = getattr(block, "previous_block", None)
+    if previous_block is None:
+        raise ValueError(
+            "previous block is required for the measured byte price"
+        )
+
+    stats = getattr(previous_block, "statistics", None)
+    if not stats:
+        raise ValueError(
+            "previous block statistics are required for the measured byte price"
+        )
+
+    total_tx_fees, total_tx_bytes = stats[0][4], stats[0][5]
+    if total_tx_fees <= 0:
+        raise ValueError(
+            "previous block total_tx_fees must be greater than zero"
+        )
+    if total_tx_bytes <= 0:
+        raise ValueError(
+            "previous block total_tx_bytes must be greater than zero"
+        )
+    return Fraction(total_tx_fees, total_tx_bytes)
+
+
 def calculate_storage_fee(block: object, total_bytes: int) -> int:
-    """Calculate storage fee from the previous block.
+    """Calculate the storage fee at the measured byte price.
+
+    The fee is ``2 * ceil(total_bytes * fee_rate / r_q)`` where
+    ``fee_rate`` is the demand pair from the previous block and ``r_q``
+    is the quote for the block's height. The factor of two covers
+    ``PROVIDERS_PER_RECORD`` copies of the data.
 
     Args:
         block: The block to calculate from.
@@ -45,69 +164,96 @@ def calculate_storage_fee(block: object, total_bytes: int) -> int:
         copies of the data.
 
     Raises:
-        ValueError: If previous block fees are invalid.
+        ValueError: If the previous block quote is zero or the demand
+            pair has no price. The fee is never invented.
     """
-    previous_block = block.previous_block
+    previous_block = getattr(block, "previous_block", None)
     if previous_block is None:
         # TODO: return None instead of 0, propagate None through
         # add_pending_storage_contract caller chain
         return 0
 
-    numerator = total_bytes * int(previous_block.cumulative_stake)
-    denominator = int(previous_block.cumulative_total_fee)
-    if denominator <= 0:
-        raise ValueError("previous block cumulative total fees must be greater than zero")
-
-    return ((numerator + denominator - 1) // denominator) * PROVIDERS_PER_RECORD
+    quote = calculate_quote_rate(block)
+    if quote <= 0:
+        raise ValueError(
+            "previous block cumulative total fees must be greater than zero"
+        )
+    fee_rate = calculate_fee_rate(block)
+    return storage_fee_at_rate(fee_rate, quote, total_bytes)
 
 
 def estimate_storage_rate(head: object, window: int) -> Fraction:
-    """Estimate the storage rate paid by a transaction included within *window* blocks.
+    """Return the current all-time storage rate.
+
+    Windowed estimation has been removed with the single-entry statistics
+    change; the all-time rate is the only rate available.
 
     Args:
         head: The head block to estimate from.
-        window: Inclusion window in blocks. It is rounded down to a power of
-            two and limited to the largest window in ``head.statistics``.
+        window: Inclusion window in blocks (ignored).
 
     Returns:
-        The current rate plus any growth of the rate over the window.
+        The all-time storage rate as ``cumulative_total_balance / cumulative_total_fee``.
 
     Raises:
         ValueError: If the head cumulative total fee is not greater than zero.
     """
     cumulative_fee = int(head.cumulative_total_fee)
-    cumulative_stake = int(head.cumulative_stake)
+    cumulative_total_balance = int(head.cumulative_total_balance)
     if cumulative_fee <= 0:
         raise ValueError("head cumulative total fees must be greater than zero")
 
-    rate_now = Fraction(cumulative_stake, cumulative_fee)
-    if len(head.statistics) < 2:
-        return rate_now
-
-    k = min(1 << (window.bit_length() - 1), 1 << (len(head.statistics) - 2))
-    prev_fee, prev_stake, curr_fee, curr_stake = head.statistics[k.bit_length()][:4]
-    remaining = k - 1 - head.height % k
-    win_fee = curr_fee + prev_fee * remaining // k
-    win_stake = curr_stake + prev_stake * remaining // k
-
-    then_fee = cumulative_fee - win_fee
-    if then_fee <= 0:
-        return rate_now
-
-    rate_then = Fraction(cumulative_stake - win_stake, then_fee)
-    return rate_now + max(Fraction(0), rate_now - rate_then)
+    return Fraction(cumulative_total_balance, cumulative_fee)
 
 
-def storage_fee_at_rate(rate: Fraction, walk_size: int) -> int:
-    """Calculate the storage fee for *walk_size* bytes at *rate*.
+def storage_fee_at_rate(
+    fee_rate: Fraction, quote: Fraction, walk_size: int
+) -> int:
+    """Calculate the storage fee for *walk_size* bytes.
+
+    The fee is ``2 * ceil(walk_size * fee_rate / quote)``. The division
+    is exact rational arithmetic, so a byte count on a ceiling boundary
+    is not rounded up by float error.
 
     Args:
-        rate: The storage rate as stake per fee.
+        fee_rate: The measured byte price, fee per byte.
+        quote: The storage quote ``r_q``.
         walk_size: Total bytes to store.
 
     Returns:
         The storage fee in units. The fee covers ``PROVIDERS_PER_RECORD``
         copies of the data.
+
+    Raises:
+        ValueError: If the fee rate or the quote is not positive.
     """
-    numerator = walk_size * rate.numerator
-    return ((numerator + rate.denominator - 1) // rate.denominator) * PROVIDERS_PER_RECORD
+    if fee_rate <= 0:
+        raise ValueError("fee rate must be greater than zero")
+    if quote <= 0:
+        raise ValueError("quote must be greater than zero")
+
+    numerator = walk_size * fee_rate.numerator * quote.denominator
+    denominator = fee_rate.denominator * quote.numerator
+    return ((numerator + denominator - 1) // denominator) * PROVIDERS_PER_RECORD
+
+
+def next_storage_price(head: object) -> tuple[Fraction, Fraction]:
+    """Return the storage price that applies to the block after *head*.
+
+    The storage fee of the next block reads *head* as its previous
+    block and uses ``head.height + 1`` for the quote.
+
+    Args:
+        head: The latest block.
+
+    Returns:
+        ``(fee_rate, quote)`` for the next block.
+
+    Raises:
+        ValueError: If the head has no measured demand pair.
+    """
+    next_block = SimpleNamespace(
+        height=int(getattr(head, "height", 0) or 0) + 1,
+        previous_block=head,
+    )
+    return calculate_fee_rate(next_block), calculate_quote_rate(next_block)

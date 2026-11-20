@@ -7,33 +7,38 @@ from astreum.consensus.models.block import Block
 def _statistics_to_expr(statistics: list | None) -> Expr:
     """Encode block statistics into a linked-list S-expression.
 
-    In memory, entry 0 is ``(fee, stake, claims, 0, 0, 0)`` (all-time
-    cumulative, never rotates) and entry N is ``(prev_fee, prev_stake,
-    curr_fee, curr_stake, prev_claims, curr_claims)`` for pow2-sized block
-    windows.
-
-    Encoded as:
-    - entry 0: ``(fee, stake, claims)``
-    - entry N: ``(prev_fee, prev_stake, curr_fee, curr_stake, prev_claims, curr_claims)``
+    Statistics is a single-entry list containing the 6-tuple
+    ``(total_fees, total_balance, cumulative_total_balance,
+    total_claims, total_tx_fees, total_tx_bytes)``. Empty input encodes as NIL.
 
     Args:
         statistics: The statistics list.
 
     Returns:
         The encoded expression.
+
+    Raises:
+        ValueError: If statistics contains more than one entry.
     """
     if not statistics:
         return NIL
-    expr = NIL
-    for i in range(len(statistics) - 1, -1, -1):
-        if i == 0:
-            fee, stake, claims = statistics[i][:3]
-            entry = link(int_(fee), link(int_(stake), link(int_(claims), NIL)))
-        else:
-            pf, ps, cf, cs, pc, cc = statistics[i]
-            entry = link(int_(pf), link(int_(ps), link(int_(cf), link(int_(cs), link(int_(pc), link(int_(cc), NIL))))))
-        expr = link(entry, expr)
-    return expr
+    if len(statistics) > 1:
+        raise ValueError("statistics must contain at most one entry")
+    fee, total_balance, cumulative_total_balance, claims, tx_fees, tx_bytes = statistics[0]
+    entry = link(
+        int_(fee),
+        link(
+            int_(total_balance),
+            link(
+                int_(cumulative_total_balance),
+                link(
+                    int_(claims),
+                    link(int_(tx_fees), link(int_(tx_bytes), NIL)),
+                ),
+            ),
+        ),
+    )
+    return link(entry, NIL)
 
 
 def block_to_expr(block: Block) -> Expr:

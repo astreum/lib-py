@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from astreum.expression import Expr, ZERO32
 from astreum.storage.pointers import read_field
@@ -8,9 +8,71 @@ from astreum.storage.radix import (
     RadixTree,
     get_radix_node_expr,
     get_from_radix_tree_with_block,
+    get_all_from_radix_tree,
     put_in_radix_tree,
 )
 from astreum.consensus.account import Account
+
+
+def compute_total_balance(accounts: "Accounts", node: Any) -> int:
+    """Return the sum of balances across all accounts in *accounts*.
+
+    Accounts present in the in-memory cache are used directly. Accounts
+    only present in the backing trie are enumerated and parsed to extract
+    their balance.
+
+    Args:
+        accounts: The Accounts instance to sum.
+        node: A node for trie access.
+
+    Returns:
+        The total balance as an integer.
+    """
+    total = 0
+    for account in accounts._cache.values():
+        total += account.balance
+
+    root_hash = accounts._trie.root_hash
+    if root_hash is None or root_hash == ZERO32:
+        return total
+
+    from astreum.expression import (
+        get_expr_tag,
+        get_expr_value,
+        resolve_list_exprs,
+    )
+
+    cached_addresses = set(accounts._cache)
+    for address, account_expr in get_all_from_radix_tree(
+        accounts._trie, node
+    ).items():
+        if address in cached_addresses:
+            continue
+        nodes, missed = resolve_list_exprs(
+            node,
+            account_expr,
+            contact=accounts.contact,
+            block_hash=accounts.block_hash,
+        )
+        if missed:
+            raise ValueError(
+                "unable to resolve account expression for supply scan "
+                f"(missed={[h.hex()[:8] for h in missed]})"
+            )
+        if len(nodes) != 5:
+            raise ValueError(
+                f"invalid account entry length (got={len(nodes)}, expected=5)"
+            )
+        balance_node = nodes[4]
+        if (
+            get_expr_tag(balance_node, node, accounts.contact, accounts.block_hash)
+            != "int"
+        ):
+            raise ValueError("account balance is not an int")
+        total += get_expr_value(
+            balance_node, node, accounts.contact, accounts.block_hash
+        )
+    return total
 
 
 class Accounts:
@@ -33,6 +95,10 @@ class Accounts:
         # Addresses passed to set_account during the current top-level
         # transaction. The transaction apply step filters it.
         self.involved: set[bytes] = set()
+        # Optional callback used to track total supply changes. When set,
+        # balance changes recorded through set_account are reported as deltas.
+        self._supply_callback: Optional[Callable[[int], None]] = None
+        self._supply_balances: Dict[bytes, int] = {}
 
     @property
     def root_hash(self) -> Optional[bytes]:
@@ -108,6 +174,8 @@ class Accounts:
         )
         account._loaded = account.state_key()
         self._cache[address] = account
+        if self._supply_callback is not None and address not in self._supply_balances:
+            self._supply_balances[address] = account.balance
         return account
 
     def set_account(self, address: bytes, account: Account) -> None:
@@ -121,6 +189,57 @@ class Accounts:
         """
         self._cache[address] = account
         self.involved.add(address)
+        if self._supply_callback is not None:
+            old_balance = self._supply_balances.get(address, 0)
+            delta = account.balance - old_balance
+            if delta != 0:
+                self._supply_callback(delta)
+            self._supply_balances[address] = account.balance
+
+    def start_supply_tracking(self, callback: Callable[[int], None]) -> None:
+        """Start tracking balance changes as supply deltas.
+
+        Existing cached accounts are seeded as baselines so that the first
+        ``set_account`` for a cached account reports only the net change,
+        not the account's entire balance.
+
+        Args:
+            callback: Called with the signed balance change each time
+                ``set_account`` records a new balance for an address.
+
+        Returns: None
+        """
+        self._supply_callback = callback
+        self._supply_balances = {
+            address: account.balance for address, account in self._cache.items()
+        }
+
+    def stop_supply_tracking(self) -> None:
+        """Stop tracking balance changes.
+
+        Returns: None
+        """
+        self._supply_callback = None
+        self._supply_balances = {}
+
+    def supply_snapshot(self) -> Dict[bytes, int]:
+        """Return a copy of the recorded supply balances.
+
+        Returns:
+            A mapping from address to the balance recorded when tracking
+            started or when the account was first loaded.
+        """
+        return dict(self._supply_balances)
+
+    def supply_restore(self, snapshot: Dict[bytes, int]) -> None:
+        """Restore the recorded supply balances.
+
+        Args:
+            snapshot: The snapshot returned by ``supply_snapshot``.
+
+        Returns: None
+        """
+        self._supply_balances = snapshot
 
     def update_trie(self, node: Any) -> Optional[bytes]:
         """Update the trie with cached accounts.

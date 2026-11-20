@@ -161,6 +161,10 @@ def get_block_from_storage(
             raise ValueError(
                 f"unable to resolve statistics (missed={[h.hex()[:8] for h in missed]})"
             )
+        if len(stat_nodes) > 1:
+            raise ValueError(
+                f"statistics must contain at most one entry (got={len(stat_nodes)})"
+            )
         statistics = []
         for j, entry_node in enumerate(stat_nodes):
             if entry_node is NIL:
@@ -170,10 +174,7 @@ def get_block_from_storage(
                 raise ValueError(
                     f"unable to resolve statistics entry {j} (missed={[h.hex()[:8] for h in missed]})"
                 )
-            if j == 0 and len(int_nodes) == 3:
-                fee, stake, claims = (get_expr_value(n, astreum_node, contact, block_hash) for n in int_nodes)
-                statistics.append((fee, stake, claims, 0, 0, 0))
-            elif j > 0 and len(int_nodes) == 6:
+            if len(int_nodes) == 6:
                 statistics.append(tuple(get_expr_value(n, astreum_node, contact, block_hash) for n in int_nodes))
             else:
                 raise ValueError(

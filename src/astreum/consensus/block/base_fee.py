@@ -17,11 +17,11 @@ def mean_base_fee_per_transaction(block: Any) -> int:
         block: The block to read.
 
     Returns:
-        The mean base fee in aster, or 1 when the block has no transactions.
+        The mean base fee in aster, or 0 when the block has no transactions.
     """
     count = block.transaction_count
     if not count:
-        return 1
+        return 0
     return block.total_base_fee // count
 
 

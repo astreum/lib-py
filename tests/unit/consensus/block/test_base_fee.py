@@ -27,8 +27,8 @@ def _block(height, total_base_fee, transaction_count):
 
 
 class TestMeanBaseFeePerTransaction(unittest.TestCase):
-    def test_an_empty_block_returns_one(self):
-        self.assertEqual(mean_base_fee_per_transaction(_block(5, 0, 0)), 1)
+    def test_an_empty_block_returns_zero(self):
+        self.assertEqual(mean_base_fee_per_transaction(_block(5, 0, 0)), 0)
 
     def test_the_mean_of_the_paid_bids(self):
         self.assertEqual(mean_base_fee_per_transaction(_block(5, 10, 4)), 2)

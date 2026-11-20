@@ -13,10 +13,10 @@ from astreum.machine import tokenize, parse
 from astreum.machine.main import Machine
 from astreum.crypto.bloom_tree import BloomTree
 from astreum.crypto.bloom_search.variants import make_search_variants
+from astreum.consensus.block.rate import calculate_storage_fee
 from astreum.consensus.transaction.bloom.pending import finalize_pending_bloom_inserts
 from astreum.consensus.models.receipt import STATUS_SUCCESS, STATUS_FAILED
 from astreum.expression.helpers import get_expr_builtin_tag
-from astreum.consensus.constants import PROVIDERS_PER_RECORD
 
 
 def _make_tx(hash_val=None, sender=None, recipient=None):
@@ -32,11 +32,11 @@ def _make_tx(hash_val=None, sender=None, recipient=None):
 
 def _make_block(height=100, previous_block=None):
     if previous_block is None:
-        prev_stats = (1_000_000, 1_000_000, 0, 0, 0, 0)
+        prev_stats = (1_000_000, 1_000_000, 1_000_000, 0, 1, 1)
         previous_block = type('Prev', (), {
             'statistics': [prev_stats],
             'cumulative_total_fee': prev_stats[0],
-            'cumulative_stake': prev_stats[1],
+            'cumulative_total_balance': prev_stats[2],
         })()
     block = type('Block', (), {
         'height': height,
@@ -206,8 +206,8 @@ class TestFinalizePendingBloomInserts(unittest.TestCase):
         self.assertEqual(tx.pending_bloom_inserts, set())
         self.assertIn(k1, block.pending_bloom_keys)
         self.assertIn(k2, block.pending_bloom_keys)
-        # 2 keys * 8 bytes per key, for each provider of the record
-        self.assertEqual(fee, 2 * 8 * PROVIDERS_PER_RECORD)
+        # 2 keys * 8 bytes per key, at the measured byte price
+        self.assertEqual(fee, calculate_storage_fee(block, 2 * 8))
 
     def test_failed_clears_without_mutation(self):
         tx = _make_tx()
@@ -238,8 +238,9 @@ class TestFinalizePendingBloomInserts(unittest.TestCase):
             tx.pending_bloom_inserts |= _variant_hashes(tx, k)
         block = _make_block()
         fee = finalize_pending_bloom_inserts(None, block, tx, STATUS_SUCCESS)
-        # 4 keys * 8 bytes per key, for each provider of the record
-        self.assertEqual(fee, 4 * 8 * PROVIDERS_PER_RECORD)
+        # 4 keys * 8 bytes per key, at the measured byte price
+        self.assertEqual(fee, calculate_storage_fee(block, 4 * 8))
+        self.assertGreater(fee, calculate_storage_fee(block, 2 * 8))
 
 
 if __name__ == "__main__":

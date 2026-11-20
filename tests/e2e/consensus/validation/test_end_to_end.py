@@ -188,7 +188,7 @@ class Fixture:
         total_base_fee=0,
         transaction_count=0,
             total_storage_fee=0,
-            statistics=[(1, STAKE, 0, 0, 0, 0)],
+            statistics=[(0, STAKE, STAKE, 0, 0, 0)],
             transactions_hash=ZERO32,
             receipts_hash=ZERO32,
             validation_difficulty=0,
@@ -612,7 +612,7 @@ class TestEndToEnd(unittest.TestCase):
     def _fees(self, block):
         receipts = [receipt(self.node, block, h) for h in tx_hashes(self.node, block)]
         paid = sum(r.base_fee + r.execution_fee + r.data_fee for r in receipts)
-        return max(paid, 1), sum(r.storage_fee for r in receipts)
+        return paid, sum(r.storage_fee for r in receipts)
 
     def test_the_fee_total_grows_by_each_blocks_fee_income(self) -> None:
         for parent, block in zip(self.chain, self.chain[1:]):
@@ -642,11 +642,12 @@ class TestEndToEnd(unittest.TestCase):
         stats = block.statistics
         # The old rule added nothing for an empty block.
         block.statistics = update_statistics(
-            block.height,
             parent.statistics,
+            block.total_balance,
             0,
-            block.cumulative_stake - parent.cumulative_stake,
-            stats[0][2] - parent.statistics[0][2],
+            stats[0][3] - parent.statistics[0][3],
+            0,
+            0,
         )
         try:
             ok, reason = verify_block_transactions(self.node, block)
@@ -658,8 +659,8 @@ class TestEndToEnd(unittest.TestCase):
     def test_every_block_keeps_storage_difficulty_zero(self) -> None:
         for block in self.chain:
             self.assertEqual(block.storage_difficulty, 0, f"height {block.height}")
-        self.assertEqual(self.chain[0].statistics[0][2], 0)
-        self.assertEqual(self.chain[-1].statistics[0][2], 1)
+        self.assertEqual(self.chain[0].statistics[0][3], 0)
+        self.assertEqual(self.chain[-1].statistics[0][3], 1)
 
     def test_a_block_with_a_wrong_storage_difficulty_is_rejected(self) -> None:
         block = self.chain[2]

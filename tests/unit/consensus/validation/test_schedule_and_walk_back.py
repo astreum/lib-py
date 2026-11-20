@@ -115,7 +115,13 @@ class TestWorkerLoop(unittest.TestCase):
         node = _node(head=last_good)
         node.config = SimpleNamespace(validation_public_key_bytes=self.KEY)
         node._validation_stop_event = threading.Event()
-        parent = SimpleNamespace(timestamp=500, height=2, accounts_hash=_h(0x0A), expr_id=head)
+        parent = SimpleNamespace(
+            timestamp=500,
+            height=2,
+            accounts_hash=_h(0x0A),
+            expr_id=head,
+            statistics=[(1, 1, 1, 0, 0, 0)],
+        )
         draws = []
 
         def draw(*args, **kwargs):
@@ -188,6 +194,7 @@ class TestWorkerBatchFetch(unittest.TestCase):
             accounts_hash=self.ACCOUNTS_ROOT,
             expr_id=head,
             bloom_hash=ZERO32,
+            statistics=[(1, 1, 1, 0, 0, 0)],
         )
         storage_account = SimpleNamespace(
             data=SimpleNamespace(root_hash=self.STORAGE_ROOT, root_block=self.STORAGE_BLOCK)
@@ -197,7 +204,15 @@ class TestWorkerBatchFetch(unittest.TestCase):
             transactions=[],
             receipts=[],
             pending_exprs=[],
-            accounts=SimpleNamespace(get_account=lambda *a, **k: storage_account),
+            accounts=SimpleNamespace(
+                get_account=lambda *a, **k: storage_account,
+                _cache={},
+                _trie=SimpleNamespace(root_hash=None),
+                start_supply_tracking=lambda cb: None,
+                stop_supply_tracking=lambda: None,
+                supply_snapshot=lambda: {},
+                supply_restore=lambda snap: None,
+            ),
         )
         calls = []
 
@@ -207,7 +222,7 @@ class TestWorkerBatchFetch(unittest.TestCase):
         def draw(*args, **kwargs):
             calls.append(("draw", args))
             self.draw_kwargs = kwargs
-            return self.KEY, mock.Mock()
+            return self.KEY, new_block.accounts
 
         def walk(*args, **kwargs):
             calls.append(("walk", args))
@@ -313,6 +328,7 @@ class TestWorkerBuildTime(unittest.TestCase):
             bloom_hash=ZERO32,
             validation_difficulty=1,
             storage_difficulty=0,
+            statistics=[(1, 1, 1, 0, 0, 0)],
         )
         account = SimpleNamespace(
             data=SimpleNamespace(root_hash=_h(0x0B), root_block=_h(0x0C), nodes={}),
@@ -328,12 +344,17 @@ class TestWorkerBuildTime(unittest.TestCase):
             bloom_hash=ZERO32,
             storage_claim_count=0,
             storage_votes=0,
+            total_balance=1,
             accounts=SimpleNamespace(
                 get_account=lambda *a, **k: account,
                 pending_exprs=[],
                 update_trie=lambda _node: _h(0x0E),
-                _trie=SimpleNamespace(nodes={}),
+                _trie=SimpleNamespace(nodes={}, root_hash=None),
                 _cache={},
+                start_supply_tracking=lambda cb: None,
+                stop_supply_tracking=lambda: None,
+                supply_snapshot=lambda: {},
+                supply_restore=lambda snap: None,
             ),
         )
         clock = [100.0]
@@ -363,7 +384,7 @@ class TestWorkerBuildTime(unittest.TestCase):
 
         def draw(*args, **kwargs):
             targets.append(kwargs["target_time"])
-            return (scheduled or self.KEY), mock.Mock()
+            return (scheduled or self.KEY), new_block.accounts
 
         def search(**kwargs):
             clock[0] += self.BUILD_SECONDS

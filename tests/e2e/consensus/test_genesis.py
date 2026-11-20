@@ -102,9 +102,9 @@ class TestGenesisChain(unittest.TestCase):
             )
 
             # Verify genesis statistics range 0
-            self.assertEqual(block.statistics, [(1, 1, 0, 0, 0, 0)])
-            self.assertEqual(block.cumulative_total_fee, 1)
-            self.assertEqual(block.cumulative_stake, 1)
+            self.assertEqual(block.statistics, [(0, 1, 1, 0, 0, 0)])
+            self.assertEqual(block.cumulative_total_fee, 0)
+            self.assertEqual(block.cumulative_total_balance, 1)
 
 
             # Verify empty transactions / receipts

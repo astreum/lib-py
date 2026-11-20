@@ -25,11 +25,8 @@ NEAR16 = b"\x00\x00\xff" + b"\x00" * 29
 NEAR8 = b"\x00\xff" + b"\x00" * 30
 
 
-def _parent(height, prev_claims):
-    stats = [(0, 0, 0, 0, 0, 0)]
-    for claims in prev_claims:
-        stats.append((0, 0, 0, 0, claims, 0))
-    return SimpleNamespace(height=height, statistics=stats)
+def _parent(height, claims):
+    return SimpleNamespace(height=height, statistics=[(0, 0, 0, claims, 0, 0)])
 
 
 class StorageDifficultyTests(unittest.TestCase):
@@ -99,18 +96,19 @@ class StorageDifficultyTests(unittest.TestCase):
             parent_storage_difficulty(SimpleNamespace(previous_block=previous)), 6
         )
 
-    def test_fair_interval_smallest_full_window(self):
-        self.assertEqual(fair_interval(_parent(8, [2, 4, 8, 16])), 8)
+    def test_fair_interval_with_all_time_claims(self):
+        self.assertEqual(fair_interval(_parent(8, 16)), 8)
 
-    def test_fair_interval_picks_first_full(self):
-        self.assertEqual(fair_interval(_parent(8, [2, 4, 20, 40])), 3)
+    def test_fair_interval_rounds_down(self):
+        self.assertEqual(fair_interval(_parent(8, 40)), 3)
 
-    def test_fair_interval_largest_when_none_full(self):
-        self.assertEqual(fair_interval(_parent(8, [1, 2, 4, 10])), 12)
+    def test_fair_interval_small_claim_rate(self):
+        self.assertEqual(fair_interval(_parent(8, 10)), 12)
 
     def test_fair_interval_none(self):
-        self.assertIsNone(fair_interval(_parent(8, [0, 0, 0, 0])))
+        self.assertIsNone(fair_interval(_parent(8, 0)))
         self.assertIsNone(fair_interval(None))
+        self.assertIsNone(fair_interval(_parent(0, 10)))
 
 
 if __name__ == "__main__":
