@@ -17,6 +17,7 @@ from astreum.consensus.transaction.treasury.record import (
     TreasuryUserRecord,
 )
 from astreum.consensus.transaction.treasury.utils import (
+    _overdue_blocks,
     _release_guarantees,
     _trie_exprs,
 )
@@ -80,152 +81,81 @@ def handle_treasury_close(
         root_block=user_record.loans_root_block,
     )
     loan = load_loan_record(node, loans_trie, loan_transaction_id, contact=block.contact)
-    if loan is None or loan.next_payment_block_number == 0:
+    if loan is None or loan.paid_until_block == 0:
+        return STATUS_FAILED
+    if loan.payment_amount <= 0:
+        return STATUS_FAILED
+    if loan.paid_until_block < loan.creation_block_number:
         return STATUS_FAILED
 
-    total_payment_count = loan.payment_count
-    if total_payment_count <= 0:
-        return STATUS_FAILED
+    current_height = _current_height(block)
+    overdue_blocks = _overdue_blocks(loan=loan, current_height=current_height)
 
-    current_block_number = _current_height(block)
-    final_payment_block_number = (
-        loan.creation_block_number
-        + loan.payment_interval_blocks * loan.payment_count
-    )
-
-    if loan.loan_type == LoanType.UNSECURED:
-        # Overdue installments are written off (defaulted), never
-        # "caught up" at face value the way SECURED loans are below.
-        missed_delta = 0
-        next_payment = loan.next_payment_block_number
-        while next_payment != 0 and next_payment < current_block_number:
-            missed_delta += 1
-            if next_payment == final_payment_block_number:
-                next_payment = 0
-            else:
-                next_payment += loan.payment_interval_blocks
-
-        if next_payment == 0:
-            paid_after = total_payment_count
-        else:
-            if loan.payment_interval_blocks <= 0:
-                return STATUS_FAILED
-            paid_after = (
-                (next_payment - loan.creation_block_number)
-                // loan.payment_interval_blocks
-            ) - 1
-
-        remaining_count = total_payment_count - paid_after
-        remaining_principal = (
-            loan.discounted_amount * remaining_count // total_payment_count
-            if remaining_count > 0
-            else 0
-        )
-        total_cost = remaining_principal
-        write_off_amount = missed_delta * loan.payment_amount
-
-        if remaining_count <= 0:
-            # Every installment was overdue and written off — nothing left
-            # to charge. Refund the submitted amount (fees still apply).
-            sender_account = block.accounts.get_account(address=transaction.sender, node=node)
-            if sender_account is None:
-                return STATUS_FAILED
-            sender_account.balance += transaction.amount
-            block.accounts.set_account(transaction.sender, sender_account)
-            credit_treasury = False
-            refund_to_sender = 0
-        else:
-            if total_cost <= 0 or transaction.amount < total_cost:
-                return STATUS_FAILED
-            credit_treasury = True
-            refund_to_sender = transaction.amount - total_cost
-    else:
-        missed_delta = 0
+    if loan.loan_type == LoanType.SECURED:
+        # A secured loan pays its arrears at face value; they are interest.
+        catchup_amount = overdue_blocks * loan.payment_amount
         write_off_amount = 0
+        missed_delta = 0
+        interest_delta = catchup_amount
+        total_cost = loan.discounted_amount + catchup_amount
+    else:
+        # An unsecured loan's arrears are written off, never collected.
         catchup_amount = 0
-        next_payment = loan.next_payment_block_number
+        write_off_amount = overdue_blocks * loan.payment_amount
+        missed_delta = overdue_blocks
+        interest_delta = 0
+        total_cost = loan.discounted_amount
 
-        while next_payment > 0 and next_payment <= current_block_number:
-            catchup_amount += loan.payment_amount
-            next_payment += loan.payment_interval_blocks
-            if next_payment > final_payment_block_number:
-                next_payment = 0
-                break
+    if transaction.amount < total_cost:
+        return STATUS_FAILED
+    refund_to_sender = transaction.amount - total_cost
 
-        remaining_principal = 0
-
-        if next_payment > 0:
-            if loan.payment_interval_blocks <= 0:
-                return STATUS_FAILED
-            paid_after = (
-                (next_payment - loan.creation_block_number)
-                // loan.payment_interval_blocks
-            ) - 1
-            remaining_count = total_payment_count - paid_after
-            if remaining_count <= 0:
-                return STATUS_FAILED
-            remaining_principal = loan.discounted_amount * remaining_count // total_payment_count
-
-        total_cost = catchup_amount + remaining_principal
-        if total_cost <= 0 or transaction.amount < total_cost:
+    if refund_to_sender:
+        sender_account = block.accounts.get_account(address=transaction.sender, node=node)
+        if sender_account is None:
             return STATUS_FAILED
-        credit_treasury = True
-        refund_to_sender = 0
+        sender_account.balance += refund_to_sender
+        block.accounts.set_account(transaction.sender, sender_account)
+
+    if loan.owner == TREASURY_ADDRESS:
+        # The treasury keeps the principal and, being the owner, the catch-up.
+        treasury_account.balance += total_cost
+    elif loan.loan_type == LoanType.SECURED:
+        # The principal always returns to the treasury; the loan owner
+        # receives only the catch-up interest.
+        treasury_account.balance += loan.discounted_amount
+        if catchup_amount:
+            owner_account = block.accounts.get_account(address=loan.owner, node=node)
+            if owner_account is None:
+                return STATUS_FAILED
+            owner_account.balance += catchup_amount
+            block.accounts.set_account(loan.owner, owner_account)
+    else:
+        owner_account = block.accounts.get_account(address=loan.owner, node=node)
+        if owner_account is None:
+            return STATUS_FAILED
+        owner_account.balance += total_cost
+        block.accounts.set_account(loan.owner, owner_account)
 
     updated_loan = replace(
         loan,
-        next_payment_block_number=0,
+        paid_until_block=0,
         missed_count=loan.missed_count + missed_delta,
     )
     updated_loan_head = updated_loan.expr().hash()
     put_in_radix_tree(loans_trie, node, loan_transaction_id, updated_loan_head)
     loan_exprs, _ = resolve_inner_exprs(node, updated_loan.expr(), contact=block.contact)
 
-    if loan.loan_type == LoanType.UNSECURED:
-        updated_user_record = replace(
-            user_record,
-            loans_root_hash=loans_trie.root_hash or ZERO32,
-            loans_root_block=loans_trie.root_block,
-            defaulted=user_record.defaulted + write_off_amount,
-        )
-    else:
-        stake_excess = transaction.amount - total_cost
-        updated_user_record = replace(
-            user_record,
-            balance=user_record.balance + stake_excess,
-            loans_root_hash=loans_trie.root_hash or ZERO32,
-            loans_root_block=loans_trie.root_block,
-        )
+    updated_user_record = replace(
+        user_record,
+        loans_root_hash=loans_trie.root_hash or ZERO32,
+        loans_root_block=loans_trie.root_block,
+        total_interest_paid=user_record.total_interest_paid + interest_delta,
+        defaulted=user_record.defaulted + write_off_amount,
+    )
     updated_user_record_head = updated_user_record.expr().hash()
     put_in_radix_tree(treasury_account.data, node, transaction.sender, updated_user_record_head)
     treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
-
-    if loan.loan_type == LoanType.UNSECURED:
-        if credit_treasury:
-            if loan.owner == TREASURY_ADDRESS:
-                treasury_account.balance += total_cost
-            else:
-                owner_account = block.accounts.get_account(address=loan.owner, node=node)
-                if owner_account is None:
-                    return STATUS_FAILED
-                owner_account.balance += total_cost
-                block.accounts.set_account(loan.owner, owner_account)
-    else:
-        if credit_treasury:
-            if loan.owner == TREASURY_ADDRESS:
-                treasury_account.balance += transaction.amount
-            else:
-                owner_account = block.accounts.get_account(address=loan.owner, node=node)
-                if owner_account is None:
-                    return STATUS_FAILED
-                owner_account.balance += transaction.amount
-                block.accounts.set_account(loan.owner, owner_account)
-
-    if loan.loan_type == LoanType.UNSECURED and refund_to_sender:
-        sender_account = block.accounts.get_account(address=transaction.sender, node=node)
-        if sender_account is not None:
-            sender_account.balance += refund_to_sender
-            block.accounts.set_account(transaction.sender, sender_account)
 
     user_record_exprs, _ = resolve_inner_exprs(node, updated_user_record.expr(), contact=block.contact)
     pending_exprs = loan_exprs + _trie_exprs(loans_trie) + user_record_exprs

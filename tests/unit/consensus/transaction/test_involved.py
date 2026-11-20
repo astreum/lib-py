@@ -255,10 +255,11 @@ class TestInvolved(_Base):
         self.block.accounts.set_account(owner, create_account(balance=0))
         sender_pk, sender_key = seed_sender_account(self.block, balance=100_000_000)
         loan_tx_id = os.urandom(32)
+        # TODO(Plan 2 Task 3): tune this fixture to the perpetual repay rules.
         loan = TreasuryLoanRecord(
             creation_block_number=0, loan_type=LoanType.SECURED,
-            discounted_amount=450, payment_amount=100, payment_interval_blocks=10,
-            next_payment_block_number=10, payment_count=5, owner=owner,
+            discounted_amount=400, payment_amount=100, paid_until_block=2,
+            owner=owner,
         )
         treasury = seed_treasury_account(self.node, self.block, treasury_balance=100_000)
         seed_user_with_loan(

@@ -17,8 +17,7 @@ from astreum.consensus.constants import TREASURY_ADDRESS
 
 
 BORROW_REQUEST_VERSION = 1
-BORROW_REQUEST_SIZE = 18
-U64_SIZE = 8
+BORROW_REQUEST_SIZE = 2
 
 
 # The record of an account in the treasury data trie: balance, loans root,
@@ -142,6 +141,8 @@ class TreasuryUserRecord:
             node: Storage node used to resolve any hash-only sub-exprs.
             head_hash: The 32-byte hash of the record's `link`-list head, as
                 produced by `to_expr`/`expr`.
+            contact: The node contact used to resolve hash-only sub-exprs,
+                or `None` to use the node's default contact.
             block_hash: The block whose record holds the record's cells. Its
                 provider is asked for them, and a trie root held by a plain
                 hash is in it. A root written as a stored ref names its own.
@@ -229,9 +230,17 @@ def load_loan_record(
 
 @dataclass(frozen=True)
 class TreasuryBorrowRequest:
+    """A perpetual borrow request.
+
+    The request carries only the loan type. The principal is
+    ``transaction.amount`` and guarantees, when the loan is unsecured, are the
+    transaction data's guarantee refs. There is no interval and no count.
+
+    Attributes:
+        loan_type: `SECURED` or `UNSECURED`.
+    """
+
     loan_type: LoanType
-    payment_interval_blocks: int
-    payment_count: int
 
 
 def _claimed_guarantees_to_expr(claimed_guarantees: list[tuple[bytes, bytes, int]]) -> Expr:
@@ -304,31 +313,38 @@ def _claimed_guarantees_from_expr(
 
 @dataclass
 class TreasuryLoanRecord:
-    """A treasury loan record.
+    """A perpetual treasury loan record.
+
+    The loan has no fixed term or payment count. It carries a per-block
+    ``payment_amount`` and tracks how far it is paid through with
+    ``paid_until_block``.
 
     Attributes:
+        creation_block_number: Block at which the loan was originated.
+        loan_type: `SECURED` or `UNSECURED`.
+        discounted_amount: Principal ``L`` the treasury paid out. No
+            discount applies to the perpetual shape.
+        payment_amount: Payment owed per block.
+        paid_until_block: Last block through which the loan is paid.
+            Equal to ``creation_block_number`` at origination and ``0``
+            once the loan is closed.
         claimed_guarantees: `(guarantor_address, guarantee_transaction_id, guarantee_amount)`
-            triples this loan claimed at origination, needed at loan-end to
-            credit each backing guarantor's `guaranteed` back
-            (`treasury/repay.py`/`treasury/close.py`). Empty for `SECURED`
+            triples this loan claimed at origination. Empty for `SECURED`
             loans.
         insurance_fee: The calculated fee the Treasury deducted at
             origination. `0` for `SECURED` loans.
-        missed_count: Cumulative count of installments permanently written
-            off on this loan (`treasury/repay.py`/`treasury/close.py`).
-            Always `0` for `SECURED` loans, which have no write-off path.
+        missed_count: Cumulative count of overdue blocks written off on
+            this loan. Always `0` for `SECURED` loans, which have no
+            write-off path.
         owner: Current loan owner (32-byte address). The Treasury initially.
-            Applies to both SECURED and UNSECURED loans. Bought loans are
-            transferred to the buyer.
+            Bought loans are transferred to the buyer.
     """
 
     creation_block_number: int
     loan_type: LoanType
     discounted_amount: int
     payment_amount: int
-    payment_interval_blocks: int
-    next_payment_block_number: int
-    payment_count: int
+    paid_until_block: int
     claimed_guarantees: list[tuple[bytes, bytes, int]] = field(default_factory=list)
     insurance_fee: int = 0
     missed_count: int = 0
@@ -342,7 +358,8 @@ class TreasuryLoanRecord:
             None.
 
         Returns:
-            The expression representation.
+            The expression representation, with the nine fields in the
+            order of the Data Model.
         """
         if self._expr is not None:
             return self._expr
@@ -350,12 +367,10 @@ class TreasuryLoanRecord:
         detail = link(int_(self.missed_count), detail)
         detail = link(int_(self.insurance_fee), detail)
         detail = link(_claimed_guarantees_to_expr(self.claimed_guarantees), detail)
-        detail = link(int_(self.payment_interval_blocks), detail)
+        detail = link(int_(self.paid_until_block), detail)
         detail = link(int_(self.payment_amount), detail)
-        detail = link(int_(self.next_payment_block_number), detail)
-        detail = link(int_(int(self.loan_type)), detail)
-        detail = link(int_(self.payment_count), detail)
         detail = link(int_(self.discounted_amount), detail)
+        detail = link(int_(int(self.loan_type)), detail)
         detail = link(int_(self.creation_block_number), detail)
         return detail
 
@@ -377,6 +392,21 @@ class TreasuryLoanRecord:
     def from_storage(
         cls, node: Any, head_hash: bytes, contact=None, block_hash=None
     ) -> TreasuryLoanRecord | None:
+        """Decode a `TreasuryLoanRecord` from its stored `Expr` encoding.
+
+        Args:
+            node: Storage node used to resolve any hash-only sub-exprs.
+            head_hash: The 32-byte hash of the record's `link`-list head, as
+                produced by `to_expr`/`expr`.
+            contact: The node contact used to resolve hash-only sub-exprs,
+                or `None` to use the node's default contact.
+            block_hash: The block whose record holds the record's cells.
+
+        Returns:
+            The decoded `TreasuryLoanRecord`, or `None` if *head_hash* is
+            empty/`ZERO32`, unresolvable, or does not decode to exactly
+            nine fields. The old fixed-term shapes are rejected.
+        """
         if not head_hash or head_hash == ZERO32:
             return None
         scope = {} if block_hash is None else {"block_hash": block_hash}
@@ -386,21 +416,19 @@ class TreasuryLoanRecord:
         nodes, missed = resolve_list_exprs(node, header, contact=contact, **scope)
         if missed:
             return None
-        if len(nodes) != 11:
+        if len(nodes) != 9:
             return None
         int_fields: list[int] = []
         claimed_guarantees: list[tuple[bytes, bytes, int]] = []
-        insurance_fee = 0
-        missed_count = 0
         owner = TREASURY_ADDRESS
         for i, n in enumerate(nodes):
-            if i == 7:
+            if i == 5:
                 decoded = _claimed_guarantees_from_expr(node, n, contact, block_hash)
                 if decoded is None:
                     return None
                 claimed_guarantees = decoded
                 continue
-            if i == 10:
+            if i == 8:
                 if get_expr_builtin_tag(n) != "bytes":
                     return None
                 owner = n.value
@@ -409,32 +437,28 @@ class TreasuryLoanRecord:
                 int_fields.append(get_expr_value(n, node, contact, block_hash))
             else:
                 return None
-        if len(int_fields) != 9:
+        if len(int_fields) != 7:
             return None
-        insurance_fee = int_fields[7]
-        missed_count = int_fields[8]
         try:
-            loan_type = LoanType(int_fields[3])
+            loan_type = LoanType(int_fields[1])
         except ValueError:
             return None
         return cls(
             creation_block_number=int_fields[0],
             loan_type=loan_type,
-            discounted_amount=int_fields[1],
-            payment_count=int_fields[2],
-            next_payment_block_number=int_fields[4],
-            payment_amount=int_fields[5],
-            payment_interval_blocks=int_fields[6],
+            discounted_amount=int_fields[2],
+            payment_amount=int_fields[3],
+            paid_until_block=int_fields[4],
             claimed_guarantees=claimed_guarantees,
-            insurance_fee=insurance_fee,
-            missed_count=missed_count,
+            insurance_fee=int_fields[5],
+            missed_count=int_fields[6],
             owner=owner,
         )
 
 
 @dataclass
 class TreasuryGuarantee:
-    """A guarantor's posted, fixed-size, fixed-duration, fixed-price guarantee.
+    """A guarantor's posted, fixed-size, fixed-price guarantee.
 
     ``claimed_by`` is ``ZERO32`` while available (stored as a `bytes` value),
     or the
@@ -443,7 +467,6 @@ class TreasuryGuarantee:
 
     Attributes:
         amount: Exact capacity this guarantee covers. Must be `> 0`.
-        duration: Term in blocks. Must be `> 0` and a power of 2.
         price: Flat fee paid to the guarantor, in ASTR, in full, at claim time.
             Must be `>= 0`.
         expiry: Block height after which an unclaimed guarantee can never be
@@ -454,7 +477,6 @@ class TreasuryGuarantee:
     """
 
     amount: int
-    duration: int
     price: int
     expiry: int
     claimed_by: bytes = ZERO32
@@ -468,14 +490,13 @@ class TreasuryGuarantee:
 
         Returns:
             A `link`-list `Expr` of the guarantee's fields in storage order:
-            ``[amount, duration, price, expiry, claimed_by]``.
+            ``[amount, price, expiry, claimed_by]``.
         """
         if self._expr is not None:
             return self._expr
         detail: Expr = link(bytes_(self.claimed_by), NIL)
         detail = link(int_(self.expiry), detail)
         detail = link(int_(self.price), detail)
-        detail = link(int_(self.duration), detail)
         detail = link(int_(self.amount), detail)
         return detail
 
@@ -503,12 +524,15 @@ class TreasuryGuarantee:
             node: Storage node used to resolve any hash-only sub-exprs.
             head_hash: The 32-byte hash of the guarantee's `link`-list head, as
                 produced by `to_expr`/`expr`.
+            contact: The node contact used to resolve hash-only sub-exprs,
+                or `None` to use the node's default contact.
             block_hash: The block whose record holds the guarantee's cells.
 
         Returns:
             The decoded `TreasuryGuarantee`, or `None` if *head_hash* is
-            empty/`ZERO32`, unresolvable, or doesn't decode to exactly five
-            fields of the expected shape.
+            empty/`ZERO32`, unresolvable, or doesn't decode to exactly four
+            fields of the expected shape. The old five-field shape (which
+            carried `duration`) is rejected.
         """
         if not head_hash or head_hash == ZERO32:
             return None
@@ -519,7 +543,7 @@ class TreasuryGuarantee:
         nodes, missed = resolve_list_exprs(node, header, contact=contact, **scope)
         if missed:
             return None
-        if len(nodes) != 5:
+        if len(nodes) != 4:
             return None
         fields = []
         for n in nodes:
@@ -530,46 +554,47 @@ class TreasuryGuarantee:
                 fields.append(n.value)
             else:
                 return None
-        if len(fields) != 5:
+        if len(fields) != 4:
             return None
         return cls(
             amount=fields[0],
-            duration=fields[1],
-            price=fields[2],
-            expiry=fields[3],
-            claimed_by=fields[4],
+            price=fields[1],
+            expiry=fields[2],
+            claimed_by=fields[3],
         )
 
 
 def encode_borrow_request(request: TreasuryBorrowRequest) -> bytes:
-    """Encode a borrow request.
+    """Encode a perpetual borrow request.
+
+    The payload is ``[version, loan_type]``. The principal and guarantee refs
+    are transaction fields, so the request carries no interval or count.
 
     Args:
         request: The borrow request.
 
     Returns:
-        The encoded bytes.
-    """
-    if request.payment_interval_blocks <= 0:
-        raise ValueError("payment_interval_blocks must be positive")
-    if request.payment_count <= 0:
-        raise ValueError("payment_count must be positive")
+        The two-byte encoded request.
 
-    return (
-        bytes([BORROW_REQUEST_VERSION, request.loan_type])
-        + request.payment_interval_blocks.to_bytes(U64_SIZE, "little", signed=False)
-        + request.payment_count.to_bytes(U64_SIZE, "little", signed=False)
-    )
+    Raises:
+        ValueError: If ``request.loan_type`` is not a `LoanType` member.
+    """
+    try:
+        loan_type = LoanType(request.loan_type)
+    except ValueError as exc:
+        raise ValueError("loan_type must be SECURED or UNSECURED") from exc
+    return bytes([BORROW_REQUEST_VERSION, int(loan_type)])
 
 
 def decode_borrow_request(payload: bytes) -> TreasuryBorrowRequest | None:
-    """Decode a borrow request.
+    """Decode a perpetual borrow request.
 
     Args:
         payload: The payload bytes.
 
     Returns:
-        The borrow request or None.
+        The borrow request or None if the payload is the wrong size, the
+        version differs, or the loan type is unknown.
     """
     payload_bytes = payload
     if len(payload_bytes) != BORROW_REQUEST_SIZE:
@@ -582,21 +607,4 @@ def decode_borrow_request(payload: bytes) -> TreasuryBorrowRequest | None:
     except ValueError:
         return None
 
-    payment_interval_blocks = int.from_bytes(
-        payload_bytes[2 : 2 + U64_SIZE],
-        "little",
-        signed=False,
-    )
-    payment_count = int.from_bytes(
-        payload_bytes[2 + U64_SIZE : BORROW_REQUEST_SIZE],
-        "little",
-        signed=False,
-    )
-    if payment_interval_blocks <= 0 or payment_count <= 0:
-        return None
-
-    return TreasuryBorrowRequest(
-        loan_type=loan_type,
-        payment_interval_blocks=payment_interval_blocks,
-        payment_count=payment_count,
-    )
+    return TreasuryBorrowRequest(loan_type=loan_type)

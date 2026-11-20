@@ -491,13 +491,11 @@ class TestTreasuryRefs(unittest.TestCase):
             loan_type=0,
             discounted_amount=5,
             payment_amount=1,
-            payment_interval_blocks=1,
-            next_payment_block_number=2,
-            payment_count=5,
+            paid_until_block=2,
             owner=b"\x55" * 32,
             claimed_guarantees=[(b"\x66" * 32, b"\x77" * 32, 3)],
         )
-        guarantee = TreasuryGuarantee(amount=1, duration=1, price=0, expiry=9, claimed_by=b"\x88" * 32)
+        guarantee = TreasuryGuarantee(amount=1, price=0, expiry=9, claimed_by=b"\x88" * 32)
         for record in (loan, guarantee):
             expr = record.expr()
             store_expr_tree(node, expr)

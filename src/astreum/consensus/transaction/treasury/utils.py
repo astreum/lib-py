@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from astreum.storage.radix import RadixTree, get_from_radix_tree, get_radix_node_expr, put_in_radix_tree
+from astreum.storage.radix import RadixTree, get_radix_node_expr, put_in_radix_tree
 from astreum.expression import Expr, ZERO32, resolve_inner_exprs
-from astreum.consensus.transaction.treasury.record import TreasuryLoanRecord, TreasuryUserRecord, load_user_record
+from astreum.consensus.transaction.treasury.record import TreasuryLoanRecord, load_user_record
 from astreum.expression.helpers import get_expr_builtin_tag
 
 
@@ -47,58 +47,25 @@ def _trie_exprs(trie: RadixTree) -> list:
     return emitted
 
 
-def _paid_payment_count(loan: TreasuryLoanRecord) -> int | None:
-    """Count paid payments for a loan.
+def _overdue_blocks(*, loan: TreasuryLoanRecord, current_height: int) -> int:
+    """Return the number of unpaid blocks after the settled pointer.
+
+    Convention: ``paid_until_block`` is the last block whose payment is
+    settled. Every block after it is due, so at
+    ``paid_until_block == current_height`` the loan is exactly current
+    (zero overdue), and at ``paid_until_block == current_height - 1`` it
+    has one block of arrears. A prepaid pointer (greater than
+    ``current_height``) has no arrears. This is the plan's
+    ``max(0, current_height - paid_until_block)``.
 
     Args:
-        loan: The loan record.
+        loan: The open loan record.
+        current_height: The block height the transaction runs in.
 
     Returns:
-        The count or None if invalid.
+        The count of overdue blocks, never negative.
     """
-    if loan.next_payment_block_number == 0:
-        return loan.payment_count
-    if loan.payment_interval_blocks <= 0:
-        return None
-    paid_span = loan.next_payment_block_number - loan.creation_block_number
-    if paid_span <= 0 or paid_span % loan.payment_interval_blocks != 0:
-        return None
-    return (paid_span // loan.payment_interval_blocks) - 1
-
-
-def _remaining_payment_count(loan: TreasuryLoanRecord) -> int | None:
-    """Count remaining payments for a loan.
-
-    Args:
-        loan: The loan record.
-
-    Returns:
-        The count or None if invalid.
-    """
-    total_payment_count = loan.payment_count
-    paid_payment_count = _paid_payment_count(loan)
-    if total_payment_count is None or paid_payment_count is None:
-        return None
-    remaining = total_payment_count - paid_payment_count
-    if remaining < 0:
-        return None
-    return remaining
-
-
-def _interest_paid_delta(
-    *,
-    loan: TreasuryLoanRecord,
-    paid_before: int,
-    paid_after: int,
-    total_payment_count: int,
-) -> int | None:
-    scheduled_total = loan.payment_amount * total_payment_count
-    total_interest = scheduled_total - loan.discounted_amount
-    if total_interest < 0:
-        return None
-    interest_before = total_interest * paid_before // total_payment_count
-    interest_after = total_interest * paid_after // total_payment_count
-    return interest_after - interest_before
+    return max(0, current_height - loan.paid_until_block)
 
 
 def _release_guarantees(
@@ -106,16 +73,24 @@ def _release_guarantees(
     treasury_account,
     loan: TreasuryLoanRecord,
 ) -> list[Expr]:
-    """Return each backing guarantor's proportional share of guarantee at loan-end.
+    """Release a closed loan's backing guarantees, net of its written-off losses.
 
-    Called once a loan's ``next_payment_block_number`` reaches ``0``
-    (whether via a clean payoff, a close, or a full write-off). For every
-    ``(guarantor_address, guarantee_transaction_id, guarantee_amount)`` this loan claimed at
-    origination, credits that guarantor's ``guaranteed`` back by
-    ``guarantee_amount * paid_count // payment_count``, where ``paid_count =
-    payment_count - loan.missed_count``. The remainder stays in
-    ``guaranteed`` permanently as the guarantor's loss on this loan. A no-op
-    for `SECURED` loans (`claimed_guarantees` is always empty for those).
+    Called once a loan's ``paid_until_block`` reaches ``0``. The guarantee
+    covers the loan's arrears up to ``guarantee.amount``. The loan's
+    permanent loss is its written-off arrears,
+    ``loan.missed_count * loan.payment_amount``, capped at the total of the
+    guarantees backing it. That loss is split across the claimed guarantees in
+    proportion to their amounts. The loss share floors under integer division,
+    so the few-unit remainder of the write-off is released too and the
+    retained loss can end slightly below the written-off amount. Each
+    guarantor's ``guaranteed`` is reduced by its released amount, so:
+
+    - no write-off (a clean close) releases the full guarantee;
+    - a partial write-off releases the guarantee minus its share of the loss;
+    - a write-off at or above the total guarantee releases nothing.
+
+    A no-op for `SECURED` loans (`claimed_guarantees` is always empty for
+    those).
 
     Args:
         node: Storage node used to resolve and persist trie/expr data.
@@ -123,20 +98,31 @@ def _release_guarantees(
             holds every guarantor's `TreasuryUserRecord`, keyed by guarantor
             address. Mutated in place (multiple guarantors' slots may be
             written in one call). ``data_hash`` is refreshed before return.
-        loan: The loan that just reached full payoff/close/write-off, with
-            its *final* ``missed_count`` already applied.
+        loan: The loan that just closed, with its *final* ``missed_count``
+            already applied.
 
     Returns:
         Pending exprs for every updated guarantor record, to be extended onto
         the caller's own pending-expr list.
     """
-    if not loan.claimed_guarantees or loan.payment_count <= 0:
+    if not loan.claimed_guarantees:
         return []
 
-    paid_count = max(0, loan.payment_count - loan.missed_count)
+    total_guarantee = sum(
+        guarantee_amount
+        for _guarantor_address, _guarantee_transaction_id, guarantee_amount
+        in loan.claimed_guarantees
+    )
+    if total_guarantee <= 0:
+        return []
+
+    written_off = max(0, loan.missed_count) * max(0, loan.payment_amount)
+    lost_total = min(total_guarantee, written_off)
+
     returned_by_guarantor: dict[bytes, int] = {}
     for guarantor_address, _guarantee_transaction_id, guarantee_amount in loan.claimed_guarantees:
-        returned = guarantee_amount * paid_count // loan.payment_count
+        loss = lost_total * guarantee_amount // total_guarantee
+        returned = guarantee_amount - loss
         returned_by_guarantor[guarantor_address] = returned_by_guarantor.get(guarantor_address, 0) + returned
 
     pending_exprs: list[Expr] = []

@@ -13,11 +13,7 @@ from astreum.consensus.transaction.treasury.record import (
     TreasuryLoanRecord,
     TreasuryUserRecord,
 )
-from astreum.consensus.transaction.treasury.utils import (
-    _interest_paid_delta,
-    _paid_payment_count,
-    _trie_exprs,
-)
+from astreum.consensus.transaction.treasury.utils import _trie_exprs
 
 
 def _apply_treasury_loan_payment(
@@ -33,60 +29,38 @@ def _apply_treasury_loan_payment(
     loan: TreasuryLoanRecord,
     amount: int,
 ) -> TreasuryUserRecord | None:
+    """Apply one whole-block payment to an open perpetual loan.
+
+    The pointer moves by ``amount // payment_amount`` blocks, exactly as in
+    ``TREASURY_REPAY``. The stake-return path only feeds `SECURED` loans, so
+    there is no write-off branch here.
+
+    Args:
+        node: Storage node used to resolve and persist trie/expr data.
+        pending_exprs: Pending expressions to extend.
+        treasury_account: The `TREASURY_ADDRESS` account.
+        accounts: The block's accounts cache.
+        borrower: The borrower's 32-byte address.
+        loans_trie: The borrower's loans trie.
+        user_record: The borrower's treasury user record.
+        loan_transaction_id: The loan's trie key.
+        loan: The open loan record.
+        amount: The value to settle, a whole multiple of ``payment_amount``.
+
+    Returns:
+        The updated user record, or None if the payment cannot apply.
+    """
     if amount <= 0 or loan.payment_amount <= 0:
         return None
-    if loan.next_payment_block_number == 0:
+    if loan.paid_until_block == 0:
         return None
     if amount % loan.payment_amount != 0:
         return None
-
-    total_payment_count = loan.payment_count
-    paid_before = _paid_payment_count(loan)
-    if total_payment_count <= 0 or paid_before is None:
-        return None
-    if paid_before < 0 or paid_before >= total_payment_count:
+    if loan.paid_until_block < loan.creation_block_number:
         return None
 
-    final_payment_block_number = (
-        loan.creation_block_number
-        + loan.payment_interval_blocks * loan.payment_count
-    )
-    payment_count = amount // loan.payment_amount
-    next_payment_block_number = loan.next_payment_block_number
-    remaining_payments = payment_count
-    while remaining_payments > 0:
-        if next_payment_block_number == 0:
-            return None
-        if next_payment_block_number == final_payment_block_number:
-            next_payment_block_number = 0
-            remaining_payments -= 1
-            break
-        next_payment_block_number += loan.payment_interval_blocks
-        if next_payment_block_number > final_payment_block_number:
-            return None
-        remaining_payments -= 1
-
-    if remaining_payments > 0:
-        return None
-
-    if next_payment_block_number == 0:
-        paid_after = total_payment_count
-    else:
-        paid_after = (
-            (next_payment_block_number - loan.creation_block_number)
-            // loan.payment_interval_blocks
-        ) - 1
-    if paid_after > total_payment_count:
-        return None
-
-    interest_delta = _interest_paid_delta(
-        loan=loan,
-        paid_before=paid_before,
-        paid_after=paid_after,
-        total_payment_count=total_payment_count,
-    )
-    if interest_delta is None:
-        return None
+    blocks_paid = amount // loan.payment_amount
+    paid_until_block = loan.paid_until_block + blocks_paid
 
     if loan.owner == TREASURY_ADDRESS:
         treasury_account.balance += amount
@@ -97,7 +71,7 @@ def _apply_treasury_loan_payment(
         owner_account.balance += amount
         accounts.set_account(loan.owner, owner_account)
 
-    updated_loan = replace(loan, next_payment_block_number=next_payment_block_number)
+    updated_loan = replace(loan, paid_until_block=paid_until_block)
     updated_loan_head = updated_loan.expr().hash()
     put_in_radix_tree(loans_trie, node, loan_transaction_id, updated_loan_head)
     loan_exprs, _ = resolve_inner_exprs(node, updated_loan.expr(), contact=accounts.contact)
@@ -106,7 +80,7 @@ def _apply_treasury_loan_payment(
         user_record,
         loans_root_hash=loans_trie.root_hash or ZERO32,
         loans_root_block=loans_trie.root_block,
-        total_interest_paid=user_record.total_interest_paid + interest_delta,
+        total_interest_paid=user_record.total_interest_paid + amount,
     )
     updated_user_record_head = updated_user_record.expr().hash()
 
@@ -155,11 +129,11 @@ def apply_treasury_loan_payments_from_stake_return(
         if (
             loan is None
             or loan.loan_type != LoanType.SECURED
-            or loan.next_payment_block_number == 0
+            or loan.paid_until_block == 0
         ):
             continue
         active_loans.append(
-            (loan.next_payment_block_number, loan_transaction_id, loan)
+            (loan.paid_until_block, loan_transaction_id, loan)
         )
 
     if not active_loans:
@@ -190,6 +164,7 @@ def apply_treasury_loan_payments_from_stake_return(
                 node=node,
                 pending_exprs=accounts.pending_exprs,
                 treasury_account=treasury_account,
+                accounts=accounts,
                 borrower=borrower,
                 loans_trie=loans_trie,
                 user_record=replace(current_user_record, balance=next_balance),
@@ -205,22 +180,13 @@ def apply_treasury_loan_payments_from_stake_return(
             applied_amount += loan.payment_amount
             applied_this_pass = True
 
-            final_payment_block_number = (
-                loan.creation_block_number
-                + loan.payment_interval_blocks * loan.payment_count
-            )
-            next_payment_block_number = (
-                0
-                if loan.next_payment_block_number == final_payment_block_number
-                else loan.next_payment_block_number + loan.payment_interval_blocks
-            )
-            if next_payment_block_number != 0:
-                next_pass_loans.append(
-                    (
-                        loan_transaction_id,
-                        replace(loan, next_payment_block_number=next_payment_block_number),
-                    )
+            # Each applied payment settles exactly one block.
+            next_pass_loans.append(
+                (
+                    loan_transaction_id,
+                    replace(loan, paid_until_block=loan.paid_until_block + 1),
                 )
+            )
 
         if not applied_this_pass:
             break

@@ -79,9 +79,9 @@ def handle_treasury_guarantee(
 ) -> int:
     """Post a new `TreasuryGuarantee` into the sender's own guarantees trie.
 
-    Validates the guarantee's fields (``amount``, ``duration``, ``price``,
-    ``expiry``), loads (or creates, on first post) the sender's
-    `TreasuryUserRecord`, inserts the guarantee into that record's
+    Validates the guarantee's fields (``amount``, ``price``, ``expiry``),
+    loads (or creates, on first post) the sender's `TreasuryUserRecord`,
+    inserts the guarantee into that record's
     ``guarantees_root_hash`` trie keyed by *transaction_hash*, and writes the
     updated record back. No principal moves on a post. The guarantee only
     becomes economically active once a consumer claims it (see
@@ -94,8 +94,8 @@ def handle_treasury_guarantee(
             exprs are extended with everything the guarantee/record needs
             persisted.
         transaction: The decoded `TREASURY_GUARANTEE` transaction. Its ``data``
-            must decode to four ints: ``amount``, ``duration``, ``price``,
-            ``expiry`` (in that order).
+            must decode to three ints: ``amount``, ``price``, ``expiry``
+            (in that order).
         transaction_hash: The 32-byte hash of *transaction*. Used as the
             guarantee's key inside the guarantor's guarantees trie.
         sender_account: The sender's account (unused directly here — no
@@ -108,8 +108,8 @@ def handle_treasury_guarantee(
     Returns:
         `STATUS_SUCCESS` on success, `STATUS_FAILED` if any guard fails
         (wrong recipient/sender, malformed data, non-positive `amount`,
-        non-pow2 `duration`, negative `price`, already-expired `expiry`, or
-        a colliding transaction hash).
+        negative `price`, already-expired `expiry`, or a colliding
+        transaction hash).
     """
     if (
         transaction.recipient != TREASURY_ADDRESS
@@ -119,26 +119,22 @@ def handle_treasury_guarantee(
         return STATUS_FAILED
 
     nodes = _data_nodes(transaction.data)
-    if len(nodes) != 4:
+    if len(nodes) != 3:
         return STATUS_FAILED
-    amount_node, duration_node, price_node, expiry_node = nodes
+    amount_node, price_node, expiry_node = nodes
     if (
         get_expr_builtin_tag(amount_node) != "int"
-        or get_expr_builtin_tag(duration_node) != "int"
         or get_expr_builtin_tag(price_node) != "int"
         or get_expr_builtin_tag(expiry_node) != "int"
     ):
         return STATUS_FAILED
 
     amount = amount_node.value
-    duration = duration_node.value
     price = price_node.value
     expiry = expiry_node.value
 
     current_height = _current_height(block)
     if amount <= 0:
-        return STATUS_FAILED
-    if duration <= 0 or (duration & (duration - 1)) != 0:
         return STATUS_FAILED
     if price < 0:
         return STATUS_FAILED
@@ -151,7 +147,6 @@ def handle_treasury_guarantee(
 
     guarantee_record = TreasuryGuarantee(
         amount=amount,
-        duration=duration,
         price=price,
         expiry=expiry,
         claimed_by=ZERO32,
@@ -246,7 +241,6 @@ def claim_guarantee(
 
     updated_guarantee = TreasuryGuarantee(
         amount=guarantee.amount,
-        duration=guarantee.duration,
         price=guarantee.price,
         expiry=guarantee.expiry,
         claimed_by=claimant_id,

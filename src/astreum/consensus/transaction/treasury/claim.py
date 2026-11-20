@@ -5,7 +5,7 @@ from typing import Any
 
 from astreum.expression import resolve_inner_exprs
 from astreum.expression import ZERO32
-from astreum.storage.radix import RadixTree, get_from_radix_tree, put_in_radix_tree
+from astreum.storage.radix import RadixTree, put_in_radix_tree
 from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 from astreum.consensus.transaction.model import Transaction
@@ -14,11 +14,9 @@ from astreum.consensus.transaction.treasury.record import (
     load_loan_record,
     load_user_record,
     LoanType,
-    TreasuryLoanRecord,
-    TreasuryUserRecord,
 )
 from astreum.consensus.transaction.treasury.utils import (
-    _paid_payment_count,
+    _overdue_blocks,
     _trie_exprs,
 )
 from astreum.expression.helpers import get_expr_builtin_tag
@@ -87,66 +85,39 @@ def handle_treasury_claim(
         root_block=borrower_record.loans_root_block,
     )
     loan = load_loan_record(node, loans_trie, loan_transaction_id, contact=block.contact)
-    if loan is None or loan.next_payment_block_number == 0:
+    if loan is None or loan.paid_until_block == 0:
         return STATUS_FAILED
 
+    # Only the owner collects, and only from a loan the treasury does not own.
     if loan.owner == TREASURY_ADDRESS:
         return STATUS_FAILED
     if loan.owner != transaction.sender:
         return STATUS_FAILED
 
+    # The plan limits a claim to a secured loan. Secured arrears are interest,
+    # not a default, so a claim writes nothing off.
+    if loan.loan_type != LoanType.SECURED or loan.payment_amount <= 0:
+        return STATUS_FAILED
+
     current_height = _current_height(block)
-
-    final_payment_block_number = (
-        loan.creation_block_number
-        + loan.payment_interval_blocks * loan.payment_count
-    )
-
-    if current_height < loan.next_payment_block_number:
-        missed_count = 0
-    else:
-        missed_count = (
-            (current_height - loan.next_payment_block_number) // loan.payment_interval_blocks + 1
-        )
-
-    total_payment_count = loan.payment_count
-    paid_so_far = _paid_payment_count(loan)
-    if paid_so_far is None or total_payment_count is None:
+    overdue_blocks = _overdue_blocks(loan=loan, current_height=current_height)
+    payout = overdue_blocks * loan.payment_amount
+    if payout <= 0:
         return STATUS_FAILED
-    remaining_count = total_payment_count - paid_so_far
-    if remaining_count < 0:
-        return STATUS_FAILED
-
-    if missed_count > remaining_count:
-        missed_count = remaining_count
-
-    if missed_count == 0:
-        return STATUS_FAILED
-
-    payout = missed_count * loan.payment_amount
-
-    if treasury_account.balance < payout:
-        return STATUS_FAILED
-    treasury_account.balance -= payout
 
     owner_account = block.accounts.get_account(address=loan.owner, node=node)
     if owner_account is None:
         return STATUS_FAILED
+
+    if treasury_account.balance < payout:
+        return STATUS_FAILED
+    treasury_account.balance -= payout
     owner_account.balance += payout
     block.accounts.set_account(loan.owner, owner_account)
 
-    next_payment_block_number = loan.next_payment_block_number
-    for _ in range(missed_count):
-        if next_payment_block_number == final_payment_block_number:
-            next_payment_block_number = 0
-            break
-        next_payment_block_number += loan.payment_interval_blocks
-        if next_payment_block_number > final_payment_block_number:
-            return STATUS_FAILED
-
     updated_loan = replace(
         loan,
-        next_payment_block_number=next_payment_block_number,
+        paid_until_block=current_height,
     )
     updated_loan_head = updated_loan.expr().hash()
     put_in_radix_tree(loans_trie, node, loan_transaction_id, updated_loan_head)
@@ -157,14 +128,6 @@ def handle_treasury_claim(
         loans_root_hash=loans_trie.root_hash or ZERO32,
         loans_root_block=loans_trie.root_block,
     )
-
-    if loan.loan_type == LoanType.UNSECURED:
-        updated_borrower_record = replace(
-            updated_borrower_record,
-            defaulted=borrower_record.defaulted + payout,
-        )
-        block.global_defaulted = getattr(block, "global_defaulted", 0) + payout
-
     updated_borrower_record_head = updated_borrower_record.expr().hash()
     put_in_radix_tree(treasury_account.data, node, borrower, updated_borrower_record_head)
     treasury_account.data_hash = treasury_account.data.root_hash or ZERO32

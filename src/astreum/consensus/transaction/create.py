@@ -26,8 +26,6 @@ def create_transaction(
     base_fee: int = 1,
     secret_key=None,
     loan_transaction_id: Optional[bytes] = None,
-    payment_interval_blocks: Optional[int] = None,
-    payment_count: Optional[int] = None,
     loan_type: Union[int, LoanType] = LoanType.SECURED,
     counterparty: Optional[bytes] = None,
     new_withdrawal_window: Optional[int] = None,
@@ -39,7 +37,6 @@ def create_transaction(
     expr_list_id: Optional[bytes] = None,
     program_hash: Optional[bytes] = None,
     guarantee_amount: Optional[int] = None,
-    duration: Optional[int] = None,
     price: Optional[int] = None,
     expiry: Optional[int] = None,
     guarantee_refs: Optional[Sequence[Tuple[bytes, bytes]]] = None,
@@ -50,8 +47,6 @@ def create_transaction(
         amount=amount,
         recipient=recipient,
         loan_transaction_id=loan_transaction_id,
-        payment_interval_blocks=payment_interval_blocks,
-        payment_count=payment_count,
         loan_type=loan_type,
         counterparty=counterparty,
         withdraw_signature=withdraw_signature,
@@ -61,7 +56,6 @@ def create_transaction(
         expr_list_id=expr_list_id,
         program_hash=program_hash,
         guarantee_amount=guarantee_amount,
-        duration=duration,
         price=price,
         expiry=expiry,
         guarantee_refs=guarantee_refs,
@@ -71,8 +65,6 @@ def create_transaction(
         code=code,
         data=data,
         loan_transaction_id=loan_transaction_id,
-        payment_interval_blocks=payment_interval_blocks,
-        payment_count=payment_count,
         loan_type=loan_type,
         counterparty=counterparty,
         new_withdrawal_window=new_withdrawal_window,
@@ -83,7 +75,6 @@ def create_transaction(
         expr_list_id=expr_list_id,
         program_hash=program_hash,
         guarantee_amount=guarantee_amount,
-        duration=duration,
         price=price,
         expiry=expiry,
         guarantee_refs=guarantee_refs,
@@ -113,8 +104,6 @@ def _validate_params(
     amount: int,
     recipient: Optional[bytes] = None,
     loan_transaction_id: Optional[bytes] = None,
-    payment_interval_blocks: Optional[int] = None,
-    payment_count: Optional[int] = None,
     loan_type: Union[int, LoanType] = LoanType.SECURED,
     counterparty: Optional[bytes] = None,
     withdraw_signature: Optional[bytes] = None,
@@ -124,7 +113,6 @@ def _validate_params(
     expr_list_id: Optional[bytes] = None,
     program_hash: Optional[bytes] = None,
     guarantee_amount: Optional[int] = None,
-    duration: Optional[int] = None,
     price: Optional[int] = None,
     expiry: Optional[int] = None,
     guarantee_refs: Optional[Sequence[Tuple[bytes, bytes]]] = None,
@@ -169,10 +157,6 @@ def _validate_params(
         case TransactionCode.TREASURY_BORROW:
             if amount <= 0:
                 raise ValueError("TREASURY_BORROW requires amount > 0")
-            if payment_interval_blocks is None or payment_interval_blocks <= 0:
-                raise ValueError("TREASURY_BORROW requires payment_interval_blocks > 0")
-            if payment_count is None or payment_count <= 0:
-                raise ValueError("TREASURY_BORROW requires payment_count > 0")
             if LoanType(loan_type) == LoanType.UNSECURED:
                 if not guarantee_refs:
                     raise ValueError(
@@ -204,8 +188,6 @@ def _validate_params(
         case TransactionCode.TREASURY_GUARANTEE:
             if guarantee_amount is None or guarantee_amount <= 0:
                 raise ValueError("TREASURY_GUARANTEE requires guarantee_amount > 0")
-            if duration is None or duration <= 0 or (duration & (duration - 1)) != 0:
-                raise ValueError("TREASURY_GUARANTEE requires duration > 0 and a power of 2")
             if price is None or price < 0:
                 raise ValueError("TREASURY_GUARANTEE requires price >= 0")
             if expiry is None:
@@ -256,8 +238,6 @@ def _build_data_expr(
     code: TransactionCode,
     data: Expr,
     loan_transaction_id: Optional[bytes] = None,
-    payment_interval_blocks: Optional[int] = None,
-    payment_count: Optional[int] = None,
     loan_type: Union[int, LoanType] = LoanType.SECURED,
     counterparty: Optional[bytes] = None,
     new_withdrawal_window: Optional[int] = None,
@@ -268,7 +248,6 @@ def _build_data_expr(
     expr_list_id: Optional[bytes] = None,
     program_hash: Optional[bytes] = None,
     guarantee_amount: Optional[int] = None,
-    duration: Optional[int] = None,
     price: Optional[int] = None,
     expiry: Optional[int] = None,
     guarantee_refs: Optional[Sequence[Tuple[bytes, bytes]]] = None,
@@ -295,13 +274,7 @@ def _build_data_expr(
         case TransactionCode.TREASURY_BORROW:
             return link(
                 int_(LoanType(loan_type)),
-                link(
-                    int_(payment_interval_blocks),  # type: ignore[arg-type]
-                    link(
-                        int_(payment_count),  # type: ignore[arg-type]
-                        link(_guarantee_refs_to_expr(guarantee_refs), NIL),
-                    ),
-                ),
+                link(_guarantee_refs_to_expr(guarantee_refs), NIL),
             )
 
         case TransactionCode.TREASURY_REPAY | TransactionCode.TREASURY_CLOSE:
@@ -311,11 +284,8 @@ def _build_data_expr(
             return link(
                 int_(guarantee_amount),  # type: ignore[arg-type]
                 link(
-                    int_(duration),  # type: ignore[arg-type]
-                    link(
-                        int_(price),  # type: ignore[arg-type]
-                        link(int_(expiry), NIL),  # type: ignore[arg-type]
-                    ),
+                    int_(price),  # type: ignore[arg-type]
+                    link(int_(expiry), NIL),  # type: ignore[arg-type]
                 ),
             )
 

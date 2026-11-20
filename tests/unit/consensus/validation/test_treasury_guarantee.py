@@ -1,6 +1,6 @@
 """Validation tests for the TREASURY_GUARANTEE (0x24) transaction code.
 
-A guarantor posts a fixed-size, fixed-duration, fixed-price guarantee into
+A guarantor posts a fixed-size, fixed-price guarantee into
 their own `TreasuryUserRecord.guarantees_root_hash` trie. No principal moves on
 a post — the guarantee only becomes economically active when a consumer claims
 it (out of scope for this plan).
@@ -38,7 +38,6 @@ from _helpers import (
 )
 
 GUARANTEE_AMOUNT = 1000
-DURATION = 8  # pow2
 PRICE = 50
 EXPIRY = 100
 
@@ -51,11 +50,11 @@ class TestTreasuryGuarantee(unittest.TestCase):
         seed_storage_account(self.block)
         seed_treasury_account(self.node, self.block, treasury_balance=0)
 
-    def _make_guarantee_tx(self, sender_pk, sender_key, *, guarantee_amount=GUARANTEE_AMOUNT, duration=DURATION, price=PRICE, expiry=EXPIRY):
+    def _make_guarantee_tx(self, sender_pk, sender_key, *, guarantee_amount=GUARANTEE_AMOUNT, price=PRICE, expiry=EXPIRY):
         return create_transaction(
             chain_id=1, counter=0, sender=sender_pk, recipient=TREASURY_ADDRESS,
             code=TransactionCode.TREASURY_GUARANTEE,
-            guarantee_amount=guarantee_amount, duration=duration, price=price, expiry=expiry,
+            guarantee_amount=guarantee_amount, price=price, expiry=expiry,
             secret_key=sender_key,
         )
 
@@ -83,7 +82,6 @@ class TestTreasuryGuarantee(unittest.TestCase):
         guarantee = TreasuryGuarantee.from_storage(self.node, guarantee_head)
         self.assertIsNotNone(guarantee)
         self.assertEqual(guarantee.amount, GUARANTEE_AMOUNT)
-        self.assertEqual(guarantee.duration, DURATION)
         self.assertEqual(guarantee.price, PRICE)
         self.assertEqual(guarantee.expiry, EXPIRY)
         self.assertEqual(guarantee.claimed_by, ZERO32)
@@ -112,18 +110,13 @@ class TestTreasuryGuarantee(unittest.TestCase):
         tx = create_transaction(
             chain_id=1, counter=0, sender=sender_pk, recipient=os.urandom(32),
             code=TransactionCode.TREASURY_GUARANTEE,
-            guarantee_amount=GUARANTEE_AMOUNT, duration=DURATION, price=PRICE, expiry=EXPIRY,
+            guarantee_amount=GUARANTEE_AMOUNT, price=PRICE, expiry=EXPIRY,
             secret_key=sender_key,
         )
         tx_hash = store_tx(self.node, tx)
 
         apply_transaction(self.node, self.block, tx_hash)
         self.assertEqual(self.block.receipts[-1].status, STATUS_FAILED)
-
-    def test_non_pow2_duration_fails_at_create(self):
-        sender_pk, sender_key = seed_sender_account(self.block, balance=10_000)
-        with self.assertRaises(ValueError):
-            self._make_guarantee_tx(sender_pk, sender_key, duration=7)
 
     def test_non_positive_guarantee_amount_fails_at_create(self):
         sender_pk, sender_key = seed_sender_account(self.block, balance=10_000)
@@ -156,7 +149,7 @@ class TestTreasuryGuarantee(unittest.TestCase):
         from astreum.storage.radix import get_radix_node_expr
         from astreum.storage.radix.node import radix_node_hash
 
-        existing_guarantee = TreasuryGuarantee(amount=1, duration=1, price=0, expiry=999)
+        existing_guarantee = TreasuryGuarantee(amount=1, price=0, expiry=999)
         guarantees_trie = RadixTree(root_hash=None)
         put_in_radix_tree(guarantees_trie, self.node, tx_hash, existing_guarantee.expr().hash())
         self.node.hot_storage[existing_guarantee.expr().hash()] = existing_guarantee.expr()

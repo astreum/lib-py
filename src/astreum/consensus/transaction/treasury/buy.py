@@ -5,45 +5,44 @@ from typing import Any
 
 from astreum.expression import resolve_inner_exprs
 from astreum.expression import ZERO32
-from astreum.storage.radix import RadixTree, get_from_radix_tree, put_in_radix_tree
+from astreum.storage.radix import RadixTree, put_in_radix_tree
 from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.transaction.from_storage import get_transaction_from_storage
 from astreum.consensus.block.rate_window import all_time_rate_fraction
-from astreum.consensus.transaction.treasury.discount import calculate_discounted_amount
 from astreum.consensus.transaction.treasury.record import (
     load_loan_record,
     load_user_record,
-    TreasuryLoanRecord,
-    TreasuryUserRecord,
 )
-from astreum.consensus.transaction.treasury.utils import (
-    _remaining_payment_count,
-    _trie_exprs,
-)
+from astreum.consensus.transaction.treasury.utils import _trie_exprs
 from astreum.expression.helpers import get_expr_builtin_tag
 
 
 LOAN_TRANSACTION_ID_SIZE = 32
 
 
-def _current_height(block: object) -> int:
-    """Get the current block height.
+def _buyout_price(
+    *,
+    payment_amount: int,
+    rate_fraction: tuple[int, int],
+) -> int | None:
+    """Price a perpetual loan's remaining stream at the all-time rate.
+
+    The plan's formula is ``(payment_amount * stake + fee - 1) // fee``,
+    which is ``ceil(payment_amount / r(h))`` with ``r(h) = fee / stake``.
 
     Args:
-        block: The block.
+        payment_amount: The loan's per-block payment.
+        rate_fraction: ``(fee, stake)`` from the previous block's statistics.
 
     Returns:
-        The block height.
+        The buyout price, or ``None`` when an input cannot be priced.
     """
-    return int(
-        getattr(
-            block,
-            "height",
-            int(getattr(block.previous_block, "height", -1)) + 1,
-        )
-    )
+    fee, stake = rate_fraction
+    if payment_amount <= 0 or fee <= 0 or stake <= 0:
+        return None
+    return (payment_amount * stake + fee - 1) // fee
 
 
 def handle_treasury_buy(
@@ -88,51 +87,45 @@ def handle_treasury_buy(
         root_block=borrower_record.loans_root_block,
     )
     loan = load_loan_record(node, loans_trie, loan_transaction_id, contact=block.contact)
-    if loan is None or loan.next_payment_block_number == 0:
+    if loan is None or loan.paid_until_block == 0:
         return STATUS_FAILED
 
     if loan.owner == transaction.sender:
-        return STATUS_FAILED
-
-    remaining_count = _remaining_payment_count(loan)
-    if remaining_count is None or remaining_count <= 0:
         return STATUS_FAILED
 
     rate_fraction = all_time_rate_fraction(block)
     if rate_fraction is None:
         return STATUS_FAILED
 
-    price = calculate_discounted_amount(
+    price = _buyout_price(
         payment_amount=loan.payment_amount,
-        payment_interval_blocks=loan.payment_interval_blocks,
-        payment_count=remaining_count,
-        rate_numerator=rate_fraction[0],
-        rate_denominator=rate_fraction[1],
+        rate_fraction=rate_fraction,
     )
     if price is None or price <= 0 or transaction.amount < price:
         return STATUS_FAILED
 
-    refund = transaction.amount - price
+    buyer_account = block.accounts.get_account(address=transaction.sender, node=node)
+    if buyer_account is None or buyer_account.balance < price:
+        return STATUS_FAILED
 
+    # Resolve the payee before any balance moves. A missing owner account is a
+    # failure, and it must leave the buyer's balance untouched.
     if loan.owner == TREASURY_ADDRESS:
-        if treasury_account.balance < price:
-            return STATUS_FAILED
-        treasury_account.balance -= price
+        payee_account = treasury_account
     else:
-        current_owner_account = block.accounts.get_account(address=loan.owner, node=node)
-        if current_owner_account is None:
+        payee_account = block.accounts.get_account(address=loan.owner, node=node)
+        if payee_account is None:
             return STATUS_FAILED
-        if current_owner_account.balance < price:
-            return STATUS_FAILED
-        current_owner_account.balance -= price
-        block.accounts.set_account(loan.owner, current_owner_account)
 
-    if refund > 0:
-        buyer_account = block.accounts.get_account(address=transaction.sender, node=node)
-        if buyer_account is None:
-            return STATUS_FAILED
-        buyer_account.balance += refund
-        block.accounts.set_account(transaction.sender, buyer_account)
+    # ``TREASURY_BUY`` has no core transfer (``apply`` sets its transfer to
+    # zero), so the handler moves the money. The buyer pays the price; the
+    # plan's refund is the ``transaction.amount - price`` excess, which never
+    # leaves the buyer's account.
+    buyer_account.balance -= price
+    block.accounts.set_account(transaction.sender, buyer_account)
+
+    payee_account.balance += price
+    block.accounts.set_account(loan.owner, payee_account)
 
     updated_loan = replace(loan, owner=transaction.sender)
     updated_loan_head = updated_loan.expr().hash()

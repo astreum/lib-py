@@ -16,7 +16,6 @@ from astreum.consensus.account import create_account
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.block.rate_window import all_time_rate_fraction
-from astreum.consensus.transaction.treasury.discount import calculate_discounted_amount
 from astreum.consensus.transaction.treasury.guarantees import claim_guarantee
 from astreum.consensus.transaction.treasury.record import (
     load_user_record,
@@ -25,7 +24,7 @@ from astreum.consensus.transaction.treasury.record import (
     TreasuryUserRecord,
     TreasuryBorrowRequest,
 )
-from astreum.consensus.transaction.treasury.utils import _remaining_payment_count, _trie_exprs
+from astreum.consensus.transaction.treasury.utils import _trie_exprs
 
 
 def _extend_pending_exprs(block: object, exprs: list[Expr]) -> None:
@@ -83,7 +82,7 @@ def _decode_guarantee_refs(
 
     Args:
         node: Storage node used to resolve any hash-only sub-exprs.
-        guarantee_refs_node: The transaction data's 4th field, as encoded by
+        guarantee_refs_node: The transaction data's 2nd field, as encoded by
             `transaction.create._guarantee_refs_to_expr` — `NIL` (empty) or a
             `link`-list of `[guarantor_address, guarantee_transaction_id]` pairs.
 
@@ -117,6 +116,23 @@ def secured_loan_remaining_total(
     contact=None,
     loans_root_block: bytes | None = None,
 ) -> int | None:
+    """Sum the open principal of a borrower's secured loans.
+
+    The perpetual record has no remaining payment count. The collateral a
+    secured loan consumes is the principal ``discounted_amount`` the treasury
+    paid out, and only while the loan is open (``paid_until_block > 0``).
+
+    Args:
+        node: Storage node used to resolve trie and record exprs.
+        loans_root_hash: Root hash of the borrower's loans trie.
+        contact: Optional contact for storage fetches.
+        loans_root_block: Block that holds the trie root's cell, when older
+            than the current block.
+
+    Returns:
+        The sum of ``discounted_amount`` over open secured loans, ``0`` for an
+        empty trie, or ``None`` if a record cannot be decoded.
+    """
     if not loans_root_hash or loans_root_hash == ZERO32:
         return 0
 
@@ -128,13 +144,30 @@ def secured_loan_remaining_total(
         )
         if loan is None:
             return None
-        if loan.loan_type != LoanType.SECURED or loan.next_payment_block_number == 0:
+        if loan.loan_type != LoanType.SECURED or loan.paid_until_block == 0:
             continue
-        remaining_payment_count = _remaining_payment_count(loan)
-        if remaining_payment_count is None:
-            return None
-        remaining_total += remaining_payment_count * loan.payment_amount
+        remaining_total += loan.discounted_amount
     return remaining_total
+
+
+def _per_block_payment(*, principal: int, rate_fraction: tuple[int, int]) -> int | None:
+    """Lock the per-block payment at the all-time rate.
+
+    The plan's formula is ``(L * fee + stake - 1) // stake``, which is
+    ``ceil(L * r_bar)`` with ``r_bar = fee / stake``.
+
+    Args:
+        principal: The principal ``L``.
+        rate_fraction: ``(fee, stake)`` from the previous block's statistics.
+
+    Returns:
+        The per-block payment, or ``None`` when the principal or either rate
+        input is not positive.
+    """
+    fee, stake = rate_fraction
+    if principal <= 0 or fee <= 0 or stake <= 0:
+        return None
+    return (principal * fee + stake - 1) // stake
 
 
 def _handle_secured_borrow(
@@ -147,20 +180,15 @@ def _handle_secured_borrow(
     treasury_account: Any,
     request: TreasuryBorrowRequest,
 ) -> int:
-    duration = request.payment_interval_blocks * request.payment_count
     rate_fraction = all_time_rate_fraction(block)
     if rate_fraction is None:
         return STATUS_FAILED
 
-    rate_numerator, rate_denominator = rate_fraction
-    discounted_amount = calculate_discounted_amount(
-        payment_amount=transaction.amount,
-        payment_interval_blocks=request.payment_interval_blocks,
-        payment_count=request.payment_count,
-        rate_numerator=rate_numerator,
-        rate_denominator=rate_denominator,
-    )
-    scheduled_total = transaction.amount * request.payment_count
+    principal = transaction.amount
+    payment_amount = _per_block_payment(principal=principal, rate_fraction=rate_fraction)
+    if payment_amount is None:
+        return STATUS_FAILED
+
     user_record = load_user_record(node, treasury_account.data, transaction.sender, contact=block.contact)
     existing_secured_total = (
         None
@@ -173,25 +201,20 @@ def _handle_secured_borrow(
         )
     )
     if (
-        discounted_amount is None
-        or discounted_amount <= 0
-        or user_record is None
+        user_record is None
         or existing_secured_total is None
-        or user_record.balance - existing_secured_total < scheduled_total
-        or treasury_account.balance < discounted_amount
+        or user_record.balance - existing_secured_total < principal
+        or treasury_account.balance < principal
     ):
         return STATUS_FAILED
 
     creation_block_number = _current_height(block)
-    next_payment_block_number = creation_block_number + request.payment_interval_blocks
     loan_record = TreasuryLoanRecord(
         creation_block_number=creation_block_number,
         loan_type=request.loan_type,
-        discounted_amount=discounted_amount,
-        payment_amount=transaction.amount,
-        payment_interval_blocks=request.payment_interval_blocks,
-        next_payment_block_number=next_payment_block_number,
-        payment_count=request.payment_count,
+        discounted_amount=principal,
+        payment_amount=payment_amount,
+        paid_until_block=creation_block_number,
         owner=TREASURY_ADDRESS,
     )
     loan_record_head = loan_record.expr().hash()
@@ -219,8 +242,8 @@ def _handle_secured_borrow(
         updated_user_record_head,
     )
     treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
-    treasury_account.balance -= discounted_amount
-    sender_account.balance += discounted_amount
+    treasury_account.balance -= principal
+    sender_account.balance += principal
     user_record_exprs, _ = resolve_inner_exprs(node, user_record.expr(), contact=block.contact)
     _extend_pending_exprs(
         block,
@@ -245,20 +268,13 @@ def _handle_unsecured_borrow(
     if len(set(guarantee_refs)) != len(guarantee_refs):
         return STATUS_FAILED
 
-    duration = request.payment_interval_blocks * request.payment_count
     rate_fraction = all_time_rate_fraction(block)
     if rate_fraction is None:
         return STATUS_FAILED
 
-    rate_numerator, rate_denominator = rate_fraction
-    discounted_amount = calculate_discounted_amount(
-        payment_amount=transaction.amount,
-        payment_interval_blocks=request.payment_interval_blocks,
-        payment_count=request.payment_count,
-        rate_numerator=rate_numerator,
-        rate_denominator=rate_denominator,
-    )
-    if discounted_amount is None or discounted_amount <= 0:
+    principal = transaction.amount
+    payment_amount = _per_block_payment(principal=principal, rate_fraction=rate_fraction)
+    if payment_amount is None:
         return STATUS_FAILED
 
     creation_block_number = _current_height(block)
@@ -306,15 +322,13 @@ def _handle_unsecured_borrow(
         )
         if claimed_guarantee is None:
             return STATUS_FAILED
-        if claimed_guarantee.duration != duration:
-            return STATUS_FAILED
 
         state["price_total"] += claimed_guarantee.price
         state["added_guaranteed"] += claimed_guarantee.amount
         sum_guarantee_amount += claimed_guarantee.amount
         claimed_entries.append((guarantor_address, guarantee_transaction_id, claimed_guarantee.amount))
 
-    if sum_guarantee_amount < discounted_amount:
+    if sum_guarantee_amount < principal:
         return STATUS_FAILED
 
     for state in guarantor_states.values():
@@ -331,25 +345,26 @@ def _handle_unsecured_borrow(
         denominator = borrower_record.loaned * gc + gl
         if denominator <= 0:
             return STATUS_FAILED
-        numerator = discounted_amount * (borrower_record.defaulted * gc + gd)
-        insurance_fee = numerator // denominator
+        numerator = principal * (borrower_record.defaulted * gc + gd)
+        # The plan fixes the fee as ceil(L * p), not floor(L * p).
+        insurance_fee = (numerator + denominator - 1) // denominator
+
+    if principal <= insurance_fee:
+        return STATUS_FAILED
 
     total_price = sum(state["price_total"] for state in guarantor_states.values())
-    net_amount = discounted_amount - insurance_fee - total_price
+    net_amount = principal - insurance_fee - total_price
     if net_amount <= 0:
         return STATUS_FAILED
-    if treasury_account.balance < discounted_amount - insurance_fee:
+    if treasury_account.balance < principal - insurance_fee:
         return STATUS_FAILED
 
-    next_payment_block_number = creation_block_number + request.payment_interval_blocks
     loan_record = TreasuryLoanRecord(
         creation_block_number=creation_block_number,
         loan_type=LoanType.UNSECURED,
-        discounted_amount=discounted_amount,
-        payment_amount=transaction.amount,
-        payment_interval_blocks=request.payment_interval_blocks,
-        next_payment_block_number=next_payment_block_number,
-        payment_count=request.payment_count,
+        discounted_amount=principal,
+        payment_amount=payment_amount,
+        paid_until_block=creation_block_number,
         claimed_guarantees=claimed_entries,
         insurance_fee=insurance_fee,
         missed_count=0,
@@ -394,7 +409,7 @@ def _handle_unsecured_borrow(
         borrower_record,
         loans_root_hash=loans_trie.root_hash or ZERO32,
         loans_root_block=loans_trie.root_block,
-        loaned=borrower_record.loaned + discounted_amount,
+        loaned=borrower_record.loaned + principal,
     )
     updated_borrower_record_head = updated_borrower_record.expr().hash()
     put_in_radix_tree(treasury_account.data, node, transaction.sender, updated_borrower_record_head)
@@ -402,10 +417,10 @@ def _handle_unsecured_borrow(
     borrower_record_exprs, _ = resolve_inner_exprs(node, updated_borrower_record.expr(), contact=block.contact)
     pending_exprs.extend(borrower_record_exprs)
 
-    treasury_account.balance -= discounted_amount - insurance_fee
+    treasury_account.balance -= principal - insurance_fee
     sender_account.balance += net_amount
 
-    block.global_loaned = getattr(block, "global_loaned", 0) + discounted_amount
+    block.global_loaned = getattr(block, "global_loaned", 0) + principal
     block.global_loan_count = getattr(block, "global_loan_count", 0) + 1
 
     _extend_pending_exprs(block, pending_exprs)
@@ -430,16 +445,16 @@ def handle_treasury_borrow(
         return STATUS_FAILED
 
     nodes = _data_nodes(transaction.data)
-    if len(nodes) != 4:
+    if len(nodes) != 2:
         return STATUS_FAILED
-    loan_type_node, interval_node, count_node, guarantee_refs_node = nodes
-    if get_expr_builtin_tag(loan_type_node) != "int" or get_expr_builtin_tag(interval_node) != "int" or get_expr_builtin_tag(count_node) != "int":
+    loan_type_node, guarantee_refs_node = nodes
+    if get_expr_builtin_tag(loan_type_node) != "int":
         return STATUS_FAILED
-    request = TreasuryBorrowRequest(
-        loan_type=LoanType(loan_type_node.value),
-        payment_interval_blocks=interval_node.value,
-        payment_count=count_node.value,
-    )
+    try:
+        loan_type = LoanType(loan_type_node.value)
+    except ValueError:
+        return STATUS_FAILED
+    request = TreasuryBorrowRequest(loan_type=loan_type)
 
     if request.loan_type == LoanType.SECURED:
         return _handle_secured_borrow(

@@ -34,7 +34,7 @@ class TestTreasuryGuaranteeLifecycle(unittest.TestCase):
         self.guarantee_tx_id = os.urandom(32)
         self.claimant_id = os.urandom(32)
 
-        guarantee = TreasuryGuarantee(amount=100, duration=8, price=5, expiry=50)
+        guarantee = TreasuryGuarantee(amount=100, price=5, expiry=50)
         guarantee_head = guarantee.expr().hash()
         self.node.hot_storage[guarantee_head] = guarantee.expr()
         put_in_radix_tree(self.guarantees_trie, self.node, self.guarantee_tx_id, guarantee_head)
@@ -71,7 +71,6 @@ class TestTreasuryGuaranteeLifecycle(unittest.TestCase):
         self.assertEqual(after.claimed_by, self.claimant_id)
         # Other fields unchanged.
         self.assertEqual(after.amount, 100)
-        self.assertEqual(after.duration, 8)
         self.assertEqual(after.price, 5)
         self.assertEqual(after.expiry, 50)
 
