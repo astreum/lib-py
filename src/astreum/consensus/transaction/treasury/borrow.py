@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from astreum.expression import Expr, NIL, resolve_inner_exprs, resolve_list_exprs, get_expr_tag, get_expr_builtin_tag
+from astreum.expression import Expr, resolve_inner_exprs, get_expr_builtin_tag
 from astreum.expression import ZERO32
 from astreum.storage.radix import (
     RadixTree,
@@ -12,11 +12,9 @@ from astreum.storage.radix import (
     put_in_radix_tree,
 )
 from astreum.consensus.constants import TREASURY_ADDRESS
-from astreum.consensus.account import create_account
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.block.rate_window import all_time_rate_fraction
-from astreum.consensus.transaction.treasury.guarantees import claim_guarantee
 from astreum.consensus.transaction.treasury.record import (
     load_user_record,
     LoanType,
@@ -24,7 +22,11 @@ from astreum.consensus.transaction.treasury.record import (
     TreasuryUserRecord,
     TreasuryBorrowRequest,
 )
-from astreum.consensus.transaction.treasury.utils import _trie_exprs
+from astreum.consensus.transaction.treasury.utils import (
+    _data_nodes,
+    _trie_exprs,
+    insurance_interval_fee as _insurance_interval_fee,
+)
 
 
 def _extend_pending_exprs(block: object, exprs: list[Expr]) -> None:
@@ -37,24 +39,6 @@ def _extend_pending_exprs(block: object, exprs: list[Expr]) -> None:
     Returns: None
     """
     block.pending_exprs.extend(exprs)
-
-
-def _data_nodes(data) -> list:
-    """Extract nodes from data.
-
-    Args:
-        data: The data expression.
-
-    Returns:
-        List of nodes.
-    """
-    result = []
-    current = data
-    while current is not None and get_expr_builtin_tag(current) == "link":
-        if current.head is not None:
-            result.append(current.head)
-        current = current.tail
-    return result
 
 
 def _current_height(block: object) -> int:
@@ -73,40 +57,6 @@ def _current_height(block: object) -> int:
             int(getattr(block.previous_block, "height", -1)) + 1,
         )
     )
-
-
-def _decode_guarantee_refs(
-    node: Any, guarantee_refs_node: Expr, contact=None
-) -> list[tuple[bytes, bytes]] | None:
-    """Decode a borrow transaction's guarantee-refs field.
-
-    Args:
-        node: Storage node used to resolve any hash-only sub-exprs.
-        guarantee_refs_node: The transaction data's 2nd field, as encoded by
-            `transaction.create._guarantee_refs_to_expr` — `NIL` (empty) or a
-            `link`-list of `[guarantor_address, guarantee_transaction_id]` pairs.
-
-    Returns:
-        The decoded `(guarantor_address, guarantee_transaction_id)` pairs in
-        order, or `None` if the shape doesn't match.
-    """
-    if guarantee_refs_node is NIL:
-        return []
-    entry_nodes, missed = resolve_list_exprs(node, guarantee_refs_node, contact=contact)
-    if missed:
-        return None
-    result: list[tuple[bytes, bytes]] = []
-    for entry_node in entry_nodes:
-        sub_nodes, sub_missed = resolve_list_exprs(node, entry_node, contact=contact)
-        if sub_missed or len(sub_nodes) != 2:
-            return None
-        guarantor_node, guarantee_node = sub_nodes
-        if get_expr_tag(guarantor_node, node, contact) != "bytes":
-            return None
-        if get_expr_tag(guarantee_node, node, contact) != "bytes":
-            return None
-        result.append((guarantor_node.value, guarantee_node.value))
-    return result
 
 
 def secured_loan_remaining_total(
@@ -261,13 +211,32 @@ def _handle_unsecured_borrow(
     sender_account: Any,
     treasury_account: Any,
     request: TreasuryBorrowRequest,
-    guarantee_refs: list[tuple[bytes, bytes]],
 ) -> int:
-    if not guarantee_refs:
-        return STATUS_FAILED
-    if len(set(guarantee_refs)) != len(guarantee_refs):
-        return STATUS_FAILED
+    """Open an uncapped unsecured loan and mint its principal.
 
+    An unsecured loan needs no collateral and no third-party backing. The
+    treasury mints the principal ``L``: the borrower is credited ``L`` and the
+    treasury is not debited, so the supply level grows by ``L``. The measured
+    per-interval insurance premium is the whole cost; it is recorded on the
+    loan and collected with the service, never deducted at origination.
+
+    Args:
+        node: Storage node used to resolve and persist trie/expr data.
+        block: The block currently being applied against.
+        transaction: The decoded ``TREASURY_BORROW`` transaction. Its
+            ``amount`` is the principal ``L``.
+        transaction_hash: The 32-byte hash of *transaction*, used as the
+            loan's key in the borrower's loans trie.
+        sender_account: The borrower's account. It is credited ``L``.
+        treasury_account: The ``TREASURY_ADDRESS`` account. Its ``data`` trie
+            holds the borrower's record.
+        request: The decoded borrow request; its type is `UNSECURED`.
+
+    Returns:
+        ``STATUS_SUCCESS`` after the loan is written and the principal is
+        credited, or ``STATUS_FAILED`` when the rate, the principal, or the
+        premium cannot price the loan.
+    """
     rate_fraction = all_time_rate_fraction(block)
     if rate_fraction is None:
         return STATUS_FAILED
@@ -283,80 +252,19 @@ def _handle_unsecured_borrow(
     if borrower_record is None:
         borrower_record = TreasuryUserRecord()
 
-    # Claim every referenced guarantee, grouping per-guarantor state so a borrow
-    # that claims several guarantees from the same guarantor only loads/writes
-    # that guarantor's record once.
-    guarantor_states: dict[bytes, dict] = {}
-    claimed_entries: list[tuple[bytes, bytes, int]] = []
-    sum_guarantee_amount = 0
-
-    for guarantor_address, guarantee_transaction_id in guarantee_refs:
-        if guarantor_address == TREASURY_ADDRESS:
-            return STATUS_FAILED
-
-        state = guarantor_states.get(guarantor_address)
-        if state is None:
-            guarantor_record = load_user_record(node, treasury_account.data, guarantor_address, contact=block.contact)
-            if guarantor_record is None:
-                return STATUS_FAILED
-            guarantees_root_hash = guarantor_record.guarantees_root_hash or ZERO32
-            guarantees_trie = RadixTree(
-                root_hash=None if guarantees_root_hash == ZERO32 else guarantees_root_hash,
-                contact=block.contact,
-                root_block=guarantor_record.guarantees_root_block,
-            )
-            state = {
-                "record": guarantor_record,
-                "trie": guarantees_trie,
-                "price_total": 0,
-                "added_guaranteed": 0,
-            }
-            guarantor_states[guarantor_address] = state
-
-        claimed_guarantee = claim_guarantee(
-            guarantees_trie=state["trie"],
-            node=node,
-            guarantee_transaction_id=guarantee_transaction_id,
-            claimant_id=transaction_hash,
-            current_height=creation_block_number,
-        )
-        if claimed_guarantee is None:
-            return STATUS_FAILED
-
-        state["price_total"] += claimed_guarantee.price
-        state["added_guaranteed"] += claimed_guarantee.amount
-        sum_guarantee_amount += claimed_guarantee.amount
-        claimed_entries.append((guarantor_address, guarantee_transaction_id, claimed_guarantee.amount))
-
-    if sum_guarantee_amount < principal:
+    # The plan fixes the fee as ceil(L * p), not floor(L * p). The value is a
+    # per-interval premium now: it is recorded on the loan and collected with
+    # the service, not deducted from the principal at origination.
+    insurance_interval_fee = _insurance_interval_fee(
+        principal=principal,
+        loaned=borrower_record.loaned,
+        defaulted=borrower_record.defaulted,
+        block=block,
+    )
+    if insurance_interval_fee is None:
         return STATUS_FAILED
 
-    for state in guarantor_states.values():
-        record = state["record"]
-        if record.guaranteed + state["added_guaranteed"] > record.total_interest_paid:
-            return STATUS_FAILED
-
-    gc = getattr(block, "global_loan_count", 0) or 0
-    gd = getattr(block, "global_defaulted", 0) or 0
-    gl = getattr(block, "global_loaned", 0) or 0
-    if gc <= 0:
-        insurance_fee = 0
-    else:
-        denominator = borrower_record.loaned * gc + gl
-        if denominator <= 0:
-            return STATUS_FAILED
-        numerator = principal * (borrower_record.defaulted * gc + gd)
-        # The plan fixes the fee as ceil(L * p), not floor(L * p).
-        insurance_fee = (numerator + denominator - 1) // denominator
-
-    if principal <= insurance_fee:
-        return STATUS_FAILED
-
-    total_price = sum(state["price_total"] for state in guarantor_states.values())
-    net_amount = principal - insurance_fee - total_price
-    if net_amount <= 0:
-        return STATUS_FAILED
-    if treasury_account.balance < principal - insurance_fee:
+    if principal <= insurance_interval_fee:
         return STATUS_FAILED
 
     loan_record = TreasuryLoanRecord(
@@ -365,8 +273,7 @@ def _handle_unsecured_borrow(
         discounted_amount=principal,
         payment_amount=payment_amount,
         paid_until_block=creation_block_number,
-        claimed_guarantees=claimed_entries,
-        insurance_fee=insurance_fee,
+        insurance_interval_fee=insurance_interval_fee,
         missed_count=0,
         owner=TREASURY_ADDRESS,
     )
@@ -383,28 +290,6 @@ def _handle_unsecured_borrow(
     put_in_radix_tree(loans_trie, node, transaction_hash, loan_record_head)
     loan_exprs, _ = resolve_inner_exprs(node, loan_record.expr(), contact=block.contact)
 
-    pending_exprs: list[Expr] = list(loan_exprs) + _trie_exprs(loans_trie)
-
-    # Pay each guarantor its guarantee(s)' price and write back its updated
-    # guarantees_root_hash + guaranteed.
-    for guarantor_address, state in guarantor_states.items():
-        guarantor_account = block.accounts.get_account(guarantor_address, node)
-        if guarantor_account is None:
-            guarantor_account = create_account()
-        guarantor_account.balance += state["price_total"]
-        block.accounts.set_account(guarantor_address, guarantor_account)
-
-        updated_guarantor_record = replace(
-            state["record"],
-            guarantees_root_hash=state["trie"].root_hash or ZERO32,
-            guarantees_root_block=state["trie"].root_block,
-            guaranteed=state["record"].guaranteed + state["added_guaranteed"],
-        )
-        updated_guarantor_record_head = updated_guarantor_record.expr().hash()
-        put_in_radix_tree(treasury_account.data, node, guarantor_address, updated_guarantor_record_head)
-        guarantor_record_exprs, _ = resolve_inner_exprs(node, updated_guarantor_record.expr(), contact=block.contact)
-        pending_exprs.extend(guarantor_record_exprs + _trie_exprs(state["trie"]))
-
     updated_borrower_record = replace(
         borrower_record,
         loans_root_hash=loans_trie.root_hash or ZERO32,
@@ -415,15 +300,17 @@ def _handle_unsecured_borrow(
     put_in_radix_tree(treasury_account.data, node, transaction.sender, updated_borrower_record_head)
     treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
     borrower_record_exprs, _ = resolve_inner_exprs(node, updated_borrower_record.expr(), contact=block.contact)
-    pending_exprs.extend(borrower_record_exprs)
 
-    treasury_account.balance -= principal - insurance_fee
-    sender_account.balance += net_amount
+    # The treasury mints the principal: credit the borrower and debit nothing.
+    # The chain's total_balance is a level and a mint moves it.
+    sender_account.balance += principal
 
     block.global_loaned = getattr(block, "global_loaned", 0) + principal
     block.global_loan_count = getattr(block, "global_loan_count", 0) + 1
 
-    _extend_pending_exprs(block, pending_exprs)
+    _extend_pending_exprs(
+        block, loan_exprs + _trie_exprs(loans_trie) + borrower_record_exprs
+    )
     return STATUS_SUCCESS
 
 
@@ -445,9 +332,9 @@ def handle_treasury_borrow(
         return STATUS_FAILED
 
     nodes = _data_nodes(transaction.data)
-    if len(nodes) != 2:
+    if len(nodes) != 1:
         return STATUS_FAILED
-    loan_type_node, guarantee_refs_node = nodes
+    loan_type_node = nodes[0]
     if get_expr_builtin_tag(loan_type_node) != "int":
         return STATUS_FAILED
     try:
@@ -468,9 +355,6 @@ def handle_treasury_borrow(
         )
 
     if request.loan_type == LoanType.UNSECURED:
-        guarantee_refs = _decode_guarantee_refs(node, guarantee_refs_node, block.contact)
-        if guarantee_refs is None:
-            return STATUS_FAILED
         return _handle_unsecured_borrow(
             node=node,
             block=block,
@@ -479,7 +363,6 @@ def handle_treasury_borrow(
             sender_account=sender_account,
             treasury_account=treasury_account,
             request=request,
-            guarantee_refs=guarantee_refs,
         )
 
     return STATUS_FAILED

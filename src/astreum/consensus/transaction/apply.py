@@ -38,9 +38,12 @@ from astreum.consensus.transaction.treasury.record import (
     load_user_record,
 )
 from astreum.consensus.transaction.treasury.loans import write_user_loan
+from astreum.consensus.transaction.treasury.utils import (
+    _PendingNodes,
+    insurance_interval_fee,
+)
 from astreum.consensus.transaction.treasury.close import handle_treasury_close
 from astreum.consensus.transaction.treasury.repay import handle_treasury_repay
-from astreum.consensus.transaction.treasury.guarantees import handle_treasury_guarantee
 from astreum.consensus.transaction.treasury.buy import handle_treasury_buy
 from astreum.consensus.transaction.treasury.claim import handle_treasury_claim
 from astreum.consensus.transaction.fees import settle_fees
@@ -185,7 +188,6 @@ def _apply_tx_effects(
     if transaction.code in (
         TransactionCode.CHANNEL_WITHDRAW,
         TransactionCode.TREASURY_BORROW,
-        TransactionCode.TREASURY_GUARANTEE,
         TransactionCode.TREASURY_BUY,
     ):
         transfer_amount = 0
@@ -438,20 +440,6 @@ def _apply_tx_effects(
                     transfer_amount = 0
             else:
                 transfer_amount = 0
-
-        case TransactionCode.TREASURY_GUARANTEE:
-            transfer_amount = 0
-            treasury_account = block.accounts.get_account(address=TREASURY_ADDRESS, node=node)
-            recipient_account = treasury_account
-            if receipt_status == STATUS_SUCCESS:
-                receipt_status = handle_treasury_guarantee(
-                    node=node,
-                    block=block,
-                    transaction=transaction,
-                    transaction_hash=transaction_hash,
-                    sender_account=sender_account,
-                    treasury_account=treasury_account,
-                )
 
         case TransactionCode.TREASURY_BUY:
             transfer_amount = 0
@@ -844,6 +832,20 @@ def _apply_tx_effects(
         )
         if treasury_account is None:
             treasury_account = create_account()
+        # One estimator prices every insured loan: the same smoothed blend of
+        # the claimant's own history and the global counters, applied to the
+        # claim-cost principal C and rounded up. Earlier transactions of this
+        # block may have written the record, so read the pending exprs first.
+        lookup = _PendingNodes(node, block.pending_exprs)
+        borrower_record = load_user_record(
+            lookup, treasury_account.data, transaction.sender, contact=block.contact
+        )
+        premium = insurance_interval_fee(
+            principal=claim_fee,
+            loaned=borrower_record.loaned if borrower_record is not None else 0,
+            defaulted=borrower_record.defaulted if borrower_record is not None else 0,
+            block=block,
+        )
         loan = TreasuryLoanRecord(
             creation_block_number=int(block.height),
             loan_type=LoanType.CLAIM_COST,
@@ -851,12 +853,13 @@ def _apply_tx_effects(
             payment_amount=_claim_fee_per_block(claim_fee, claim_quote),
             paid_until_block=int(block.height),
             owner=TREASURY_ADDRESS,
+            insurance_interval_fee=premium if premium is not None else 0,
         )
         write_user_loan(
             node=node,
             treasury_account=treasury_account,
             borrower=transaction.sender,
-            user_record=None,
+            user_record=borrower_record,
             loan_transaction_id=transaction_hash,
             loan=loan,
             pending_exprs=block.pending_exprs,

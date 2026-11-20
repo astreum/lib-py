@@ -142,65 +142,9 @@ The node must already be connected and have a `latest_block`; otherwise the func
 
 ## Treasury Overview
 
-The treasury account (`TREASURY_ADDRESS`) tracks per-participant state in a `TreasuryUserRecord`, keyed by address inside the treasury account's own data trie: staked `balance`, a `loans_root_hash` trie of secured and unsecured loans, `total_interest_paid`, a `guarantees_root_hash` trie of posted guarantees, and three unsecured-lending counters — `loaned`, `defaulted`, and `guaranteed` (see below).
+The treasury account (`TREASURY_ADDRESS`) tracks per-participant state in a `TreasuryUserRecord`, keyed by address inside the treasury account's own data trie: staked `balance`, a `loans_root_hash` trie of secured and unsecured loans, `total_interest_paid`, and two unsecured-lending counters — `loaned` and `defaulted` (see below).
 
-A loan is perpetual: it has no term and no payment count. `TreasuryLoanRecord` has nine fields: `creation_block_number`, `loan_type`, `discounted_amount` (the principal `L` the treasury paid out — no discount applies), `payment_amount` (the per-block payment), `paid_until_block` (the last block whose payment is settled; `0` once closed), `claimed_guarantees`, `insurance_fee`, `missed_count` (overdue blocks written off), and `owner` (the treasury at origination, the buyer after a buyout).
-
-### Guarantees (`TREASURY_GUARANTEE`)
-
-A guarantor sells a fixed-size, fixed-price guarantee with `TREASURY_GUARANTEE`. The guarantee backs an unsecured loan until the loan closes, so it has no term. It has four fields — `amount`, `price`, `expiry`, and `claimed_by` — and is stored in the guarantor's own `TreasuryUserRecord.guarantees_root_hash` trie, keyed by the hash of the transaction that created it — no principal moves on a post; the guarantee only becomes economically active once claimed by a borrower. If the borrower defaults, the guarantor does not pay ASTR: that share of their guarantee capacity is permanently consumed instead.
-
-```python
-from astreum.consensus.transaction import create_transaction
-from astreum.consensus.transaction.code import TransactionCode
-from astreum.consensus.constants import TREASURY_ADDRESS
-
-tx = create_transaction(
-    chain_id=node.config.chain_id,
-    counter=sender_account.counter + 1,
-    sender=sender_public_key,
-    recipient=TREASURY_ADDRESS,
-    code=TransactionCode.TREASURY_GUARANTEE,
-    guarantee_amount=1_000,  # capacity this guarantee covers
-    price=50,                # flat fee paid to the guarantor at claim time
-    expiry=100_000,          # block height after which an unclaimed guarantee can never be claimed
-)
-tx.sign(sender_key)
-```
-
-| Parameter  | Type  | Description |
-|------------|-------|--------------|
-| `guarantee_amount` | `int` | Exact capacity this guarantee covers. Must be `> 0`. |
-| `price`    | `int` | Flat fee paid to the guarantor, in ASTR, in full, at claim time. Must be `>= 0`. |
-| `expiry`   | `int` | Block height after which an unclaimed guarantee can never be claimed. Must be greater than the current block height. |
-
-### `claim_guarantee(...)`
-
-Consumer-specific transaction handlers claim a posted guarantee directly against the guarantor's guarantees trie:
-
-```python
-from astreum.consensus.transaction.treasury.guarantees import claim_guarantee
-from astreum.storage.radix import RadixTree
-
-guarantees_trie = RadixTree(root_hash=guarantor_user_record.guarantees_root_hash)
-updated_guarantee = claim_guarantee(
-    guarantees_trie=guarantees_trie,
-    node=node,
-    guarantee_transaction_id=guarantee_tx_hash,   # the TREASURY_GUARANTEE tx hash that created the guarantee
-    claimant_id=claimant_id,              # opaque 32-byte id, e.g. a loan transaction hash
-    current_height=block.height,
-)
-```
-
-| Parameter | Type | Description |
-|-----------|------|--------------|
-| `guarantees_trie` | `RadixTree` | The guarantor's guarantees trie, opened from `TreasuryUserRecord.guarantees_root_hash`. |
-| `node` | `Node` | Storage node used to resolve and persist trie/expr data. |
-| `guarantee_transaction_id` | `bytes` | The 32-byte `TREASURY_GUARANTEE` transaction hash identifying the guarantee. |
-| `claimant_id` | `bytes` | Opaque 32-byte id recorded as the claimant. |
-| `current_height` | `int` | Current block height, used to reject claims past `expiry`. |
-
-Returns the updated (claimed) `TreasuryGuarantee`, or `None` if the guarantee doesn't exist, is already claimed, or is expired (`current_height >= expiry`). **A claim is permanent** — once `claimed_by` is set it never resets, and there is no "free" operation or transaction code to release it. `claim_guarantee` does not touch the guarantor's `TreasuryUserRecord.guarantees_root_hash` field itself — the caller must write the trie's new root hash back into that field.
+A loan is perpetual: it has no term and no payment count. `TreasuryLoanRecord` has eight fields: `creation_block_number`, `loan_type`, `discounted_amount` (the principal `L` the loan is written for: the secured handler disburses it, an unsecured principal is minted, and a claim-cost principal is the financed storage fee — no discount applies), `payment_amount` (the per-block payment), `paid_until_block` (the last block whose payment is settled; `0` once closed), `insurance_interval_fee` (the per-interval insurance premium collected with the service), `missed_count` (overdue blocks written off), and `owner` (the treasury at origination, the buyer after a buyout).
 
 ### Borrowing (`TREASURY_BORROW`)
 
@@ -210,7 +154,7 @@ Returns the updated (claimed) `TreasuryGuarantee`, or `None` if the guarantee do
 payment_amount = (L * fee + stake - 1) // stake     # ceil(L * fee / stake)
 ```
 
-The new loan records `paid_until_block = current_height`. A **secured** borrow (`loan_type=SECURED`) posts the borrower's staked balance as collateral: the handler requires `balance - sum of open secured principal >= L`, and the treasury must hold `L`, which is paid to the borrower. An **unsecured** borrow (`loan_type=UNSECURED`) assembles its principal by claiming one or more guarantees instead of posting stake. The borrower references each guarantee as a `(guarantor_address, guarantee_transaction_id)` pair; the handler claims every guarantee (permanently, via `claim_guarantee`), requires their combined `amount` to cover `L`, and disburses `L - insurance_fee - sum(price)` to the borrower — the insurance fee and every guarantor's price are deducted up front, not billed separately.
+The new loan records `paid_until_block = current_height`. A **secured** borrow (`loan_type=SECURED`) posts the borrower's staked balance as collateral: the handler requires `balance - sum of open secured principal >= L`, and the treasury must hold `L`, which is paid to the borrower. An **unsecured** borrow (`loan_type=UNSECURED`) is **uncapped**: it needs no collateral and no guarantor. The treasury **mints** the principal, so `L` is credited to the borrower and the treasury is not debited; the chain's total balance grows by `L`.
 
 ```python
 tx = create_transaction(
@@ -221,18 +165,19 @@ tx = create_transaction(
     code=TransactionCode.TREASURY_BORROW,
     amount=1_000,                         # principal L
     loan_type=LoanType.UNSECURED,
-    guarantee_refs=[(guarantor_public_key, guarantee_tx_hash)],  # one or more (guarantor, guarantee_tx_id) pairs
 )
 tx.sign(sender_key)
 ```
 
-Each claimed guarantee backs the loan until it closes, and a guarantor can never have more guaranteed than they've paid in interest across their own borrowing history: `guaranteed + guarantee.amount <= total_interest_paid`. The **insurance fee** is derived entirely from network history — no fixed rate is set by either party:
+The **per-interval insurance premium** is the whole cost of an unsecured loan. It is derived entirely from network history — no fixed rate is set by either party:
 
 ```
-insurance_fee = ceil(principal * (borrower.defaulted * gc + gd) / (borrower.loaned * gc + gl))
+insurance_interval_fee = ceil(principal * (borrower.defaulted * gc + gd) / (borrower.loaned * gc + gl))
 ```
 
-where `gc`/`gd`/`gl` are the block's running `global_loan_count`/`global_defaulted`/`global_loaned` totals. A first-ever unsecured loan on the network (`gc == 0`) pays `insurance_fee = 0`.
+where `gc`/`gd`/`gl` are the block's running `global_loan_count`/`global_defaulted`/`global_loaned` totals. A first-ever unsecured loan on the network (`gc == 0`) pays a zero premium. The premium is recorded on the loan and collected with the service at repay and netting; it is never deducted from the principal at origination. **Premiums are treasury income, like fees**: the treasury account's balance receives them. There is no insurance fund and no premium ledger. A premium at or above the principal fails the borrow.
+
+A **claim-cost** loan (`CLAIM_COST`) is insured too. Its premium is the same estimator applied to the financed storage fee `C`: `insurance_interval_fee = ceil(C * (borrower.defaulted * gc + gd) / (borrower.loaned * gc + gl))`.
 
 ### `TREASURY_REPAY`
 
@@ -250,7 +195,7 @@ The pointer can pass `current_height`, so a borrower can prepay any whole number
 A close references the loan with `loan_transaction_id`, requires `transaction.amount` to cover the cost, refunds the excess to the sender, and sets `paid_until_block = 0`.
 
 - **Secured:** `total_cost = L + max(0, current_height - paid_until_block) * payment_amount`. The treasury receives `L`; the loan owner (or the treasury) receives the catch-up, which is added to `total_interest_paid`.
-- **Unsecured:** `total_cost = L`. The overdue blocks are written off, not collected: the overdue count is added to `missed_count`, and `overdue_blocks * payment_amount` is added to the borrower's `defaulted` and the block's `global_defaulted`. Backing guarantees are released net of the loan's loss: `loss = min(sum of guarantee amounts, missed_count * payment_amount)`, split across the claimed guarantees in proportion to their amounts. The loss share floors under integer division, so the rounding remainder is released too, and the retained loss can end slightly below the write-off. Whatever is not returned stays in `guaranteed` permanently — the guarantor's unrecoverable loss of capacity on that loan.
+- **Unsecured:** `total_cost = L`. The overdue blocks are written off, not collected: the overdue count is added to `missed_count`, and `overdue_blocks * payment_amount` is added to the borrower's `defaulted` and the block's `global_defaulted`.
 
 ### `TREASURY_BUY`
 
@@ -264,13 +209,16 @@ The buyer pays `price`; the excess of `transaction.amount` over `price` stays wi
 
 ### `TREASURY_CLAIM`
 
-Only a non-treasury owner of a secured loan can claim. A claim pays the overdue blocks at face value from the treasury:
+A claim references the loan with `loan_transaction_id` and pays its overdue blocks:
 
 ```
 payout = max(0, current_height - paid_until_block) * payment_amount
 ```
 
-The treasury pays `payout` to the owner and the handler sets `paid_until_block = current_height`. A claim writes nothing off: secured arrears are interest, not a default.
+- **Secured:** only the non-treasury owner may claim. The treasury pays `payout` to the owner, and a claim writes nothing off: secured arrears are interest, not a default.
+- **Insured (`UNSECURED` or `CLAIM_COST`):** initiation is permissionless — any sender may claim and pays the claim's own fees. The missed service is **minted** to the loan's owner, so the treasury is not debited and the chain's total balance grows by `payout`; a treasury-owned loan pays the treasury. The payout is the write-off event: the overdue count is added to `missed_count`, and `payout` is added to the borrower's `defaulted` and the block's `global_defaulted`. No premium is collected by the claim.
+
+Both paths set `paid_until_block = current_height`. A claim with no arrears fails, and a closed loan fails.
 
 
 ## Query API

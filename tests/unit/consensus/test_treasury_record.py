@@ -14,13 +14,12 @@ from astreum.consensus.transaction.treasury.record import (
     BORROW_REQUEST_VERSION,
     LoanType,
     TreasuryBorrowRequest,
-    TreasuryGuarantee,
     TreasuryLoanRecord,
     TreasuryUserRecord,
     decode_borrow_request,
     encode_borrow_request,
 )
-from astreum.expression import Expr, ZERO32, resolve_list_exprs
+from astreum.expression import resolve_list_exprs
 from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.expression.helpers import get_expr_builtin_tag
 from astreum.utils.config import NodeConfig
@@ -57,15 +56,12 @@ class TestTreasuryRecord(unittest.TestCase):
 
     def test_to_expr_uses_expected_field_order(self):
         loans_root_hash = b"\x01" * 32
-        guarantees_root_hash = b"\x02" * 32
         record = TreasuryUserRecord(
             balance=7,
             loans_root_hash=loans_root_hash,
             total_interest_paid=3,
-            guarantees_root_hash=guarantees_root_hash,
             loaned=11,
             defaulted=5,
-            guaranteed=13,
         )
 
         expr = record.expr()
@@ -73,7 +69,7 @@ class TestTreasuryRecord(unittest.TestCase):
 
         nodes, missed = resolve_list_exprs(_FakeNode(), expr)
         self.assertFalse(missed)
-        self.assertEqual(len(nodes), 7)
+        self.assertEqual(len(nodes), 5)
 
         self.assertEqual(get_expr_builtin_tag(nodes[0]), "int")
         self.assertEqual(nodes[0].value, 7)  # balance
@@ -84,17 +80,11 @@ class TestTreasuryRecord(unittest.TestCase):
         self.assertEqual(get_expr_builtin_tag(nodes[2]), "int")
         self.assertEqual(nodes[2].value, 3)  # total_interest_paid
 
-        self.assertEqual(get_expr_builtin_tag(nodes[3]), "link")
-        self.assertEqual(nodes[3].head_hash, guarantees_root_hash)  # guarantees_root_hash ref
+        self.assertEqual(get_expr_builtin_tag(nodes[3]), "int")
+        self.assertEqual(nodes[3].value, 11)  # loaned
 
         self.assertEqual(get_expr_builtin_tag(nodes[4]), "int")
-        self.assertEqual(nodes[4].value, 11)  # loaned
-
-        self.assertEqual(get_expr_builtin_tag(nodes[5]), "int")
-        self.assertEqual(nodes[5].value, 5)  # defaulted
-
-        self.assertEqual(get_expr_builtin_tag(nodes[6]), "int")
-        self.assertEqual(nodes[6].value, 13)  # guaranteed
+        self.assertEqual(nodes[4].value, 5)  # defaulted
 
     def test_from_storage_round_trip(self):
         node = _FakeNode()
@@ -102,10 +92,8 @@ class TestTreasuryRecord(unittest.TestCase):
             balance=42,
             loans_root_hash=b"\x03" * 32,
             total_interest_paid=9,
-            guarantees_root_hash=b"\x04" * 32,
             loaned=100,
             defaulted=20,
-            guaranteed=30,
         )
         expr = record.expr()
         node.hot_storage[expr.hash()] = expr
@@ -115,42 +103,34 @@ class TestTreasuryRecord(unittest.TestCase):
         self.assertEqual(loaded.balance, 42)
         self.assertEqual(loaded.loans_root_hash, b"\x03" * 32)
         self.assertEqual(loaded.total_interest_paid, 9)
-        self.assertEqual(loaded.guarantees_root_hash, b"\x04" * 32)
         self.assertEqual(loaded.loaned, 100)
         self.assertEqual(loaded.defaulted, 20)
-        self.assertEqual(loaded.guaranteed, 30)
 
-    def test_from_storage_accepts_legacy_four_field_shape(self):
-        # A record written before loaned/defaulted/guaranteed existed must
-        # still decode, defaulting the new fields to 0.
+    def test_from_storage_rejects_the_old_seven_field_shape(self):
+        # The deleted guarantee trie and guaranteed capacity are not decoded:
+        # the chain restarts, so no guarantee-bearing record can exist.
         node = _FakeNode()
         from astreum.expression import NIL, int_, link
 
-        legacy_expr = link(Expr("link", head_hash=b"\x04" * 32), NIL)
-        legacy_expr = link(int_(9), legacy_expr)
-        legacy_expr = link(Expr("link", head_hash=b"\x03" * 32), legacy_expr)
-        legacy_expr = link(int_(42), legacy_expr)
+        legacy_expr = link(int_(5), NIL)  # guaranteed
+        legacy_expr = link(int_(4), legacy_expr)  # defaulted
+        legacy_expr = link(int_(3), legacy_expr)  # loaned
+        legacy_expr = link(link(int_(0), NIL), legacy_expr)  # guarantees root
+        legacy_expr = link(int_(7), legacy_expr)  # total_interest_paid
+        legacy_expr = link(link(int_(0), NIL), legacy_expr)  # loans root
+        legacy_expr = link(int_(500), legacy_expr)  # balance
         node.hot_storage[legacy_expr.hash()] = legacy_expr
 
-        loaded = TreasuryUserRecord.from_storage(node, legacy_expr.hash())
-        self.assertIsNotNone(loaded)
-        self.assertEqual(loaded.balance, 42)
-        self.assertEqual(loaded.loans_root_hash, b"\x03" * 32)
-        self.assertEqual(loaded.total_interest_paid, 9)
-        self.assertEqual(loaded.guarantees_root_hash, b"\x04" * 32)
-        self.assertEqual(loaded.loaned, 0)
-        self.assertEqual(loaded.defaulted, 0)
-        self.assertEqual(loaded.guaranteed, 0)
+        self.assertIsNone(TreasuryUserRecord.from_storage(node, legacy_expr.hash()))
 
     def test_from_storage_rejects_wrong_field_count(self):
-        # A 3-field record (pre-extension shape) must not be misread as valid.
+        # A 3-field record (the shape before the loans root was paired with
+        # the counters) is not decoded.
         node = _FakeNode()
-        old_shape = TreasuryUserRecord(balance=1, loans_root_hash=ZERO32, total_interest_paid=0)
-        # Manually build the legacy 3-field expr (without guarantees_root_hash).
         from astreum.expression import NIL, int_, link
 
         legacy_expr = link(int_(0), NIL)
-        legacy_expr = link(Expr("link", head_hash=ZERO32), legacy_expr)
+        legacy_expr = link(link(int_(0), NIL), legacy_expr)
         legacy_expr = link(int_(1), legacy_expr)
         node.hot_storage[legacy_expr.hash()] = legacy_expr
 
@@ -180,8 +160,7 @@ class TestTreasuryLoanRecord(unittest.TestCase):
                 "discounted_amount",
                 "payment_amount",
                 "paid_until_block",
-                "claimed_guarantees",
-                "insurance_fee",
+                "insurance_interval_fee",
                 "missed_count",
                 "owner",
             ],
@@ -190,37 +169,30 @@ class TestTreasuryLoanRecord(unittest.TestCase):
     def test_to_expr_uses_expected_field_order(self):
         record = TreasuryLoanRecord(
             **self._base_kwargs(),
-            claimed_guarantees=[(b"\x11" * 32, b"\x22" * 32, 500)],
-            insurance_fee=17,
+            insurance_interval_fee=17,
             missed_count=3,
             owner=b"\xaa" * 32,
         )
         nodes, missed = resolve_list_exprs(_FakeNode(), record.expr())
         self.assertFalse(missed)
-        self.assertEqual(len(nodes), 9)
+        self.assertEqual(len(nodes), 8)
 
         self.assertEqual(nodes[0].value, 10)  # creation_block_number
         self.assertEqual(nodes[1].value, int(LoanType.UNSECURED))  # loan_type
         self.assertEqual(nodes[2].value, 900)  # discounted_amount
         self.assertEqual(nodes[3].value, 100)  # payment_amount
         self.assertEqual(nodes[4].value, 10)  # paid_until_block
-        self.assertEqual(get_expr_builtin_tag(nodes[5]), "link")  # claimed_guarantees
-        self.assertEqual(nodes[6].value, 17)  # insurance_fee
-        self.assertEqual(nodes[7].value, 3)  # missed_count
-        self.assertEqual(get_expr_builtin_tag(nodes[8]), "bytes")  # owner
-        self.assertEqual(nodes[8].value, b"\xaa" * 32)
+        self.assertEqual(nodes[5].value, 17)  # insurance_interval_fee
+        self.assertEqual(nodes[6].value, 3)  # missed_count
+        self.assertEqual(get_expr_builtin_tag(nodes[7]), "bytes")  # owner
+        self.assertEqual(nodes[7].value, b"\xaa" * 32)
 
-    def test_round_trip_with_claimed_guarantees(self):
+    def test_round_trip(self):
         node = _FakeNode()
-        guarantor_a = b"\x11" * 32
-        guarantor_b = b"\x22" * 32
-        guarantee_a = b"\x33" * 32
-        guarantee_b = b"\x44" * 32
         custom_owner = b"\xaa" * 32
         record = TreasuryLoanRecord(
             **self._base_kwargs(),
-            claimed_guarantees=[(guarantor_a, guarantee_a, 500), (guarantor_b, guarantee_b, 400)],
-            insurance_fee=17,
+            insurance_interval_fee=17,
             missed_count=3,
             owner=custom_owner,
         )
@@ -234,15 +206,11 @@ class TestTreasuryLoanRecord(unittest.TestCase):
         self.assertEqual(loaded.discounted_amount, 900)
         self.assertEqual(loaded.payment_amount, 100)
         self.assertEqual(loaded.paid_until_block, 10)
-        self.assertEqual(
-            loaded.claimed_guarantees,
-            [(guarantor_a, guarantee_a, 500), (guarantor_b, guarantee_b, 400)],
-        )
-        self.assertEqual(loaded.insurance_fee, 17)
+        self.assertEqual(loaded.insurance_interval_fee, 17)
         self.assertEqual(loaded.missed_count, 3)
         self.assertEqual(loaded.owner, custom_owner)
 
-    def test_round_trip_empty_claimed_guarantees(self):
+    def test_round_trip_defaults(self):
         node = _FakeNode()
         record = TreasuryLoanRecord(
             **{**self._base_kwargs(), "loan_type": LoanType.SECURED},
@@ -252,8 +220,7 @@ class TestTreasuryLoanRecord(unittest.TestCase):
 
         loaded = TreasuryLoanRecord.from_storage(node, expr.hash())
         self.assertIsNotNone(loaded)
-        self.assertEqual(loaded.claimed_guarantees, [])
-        self.assertEqual(loaded.insurance_fee, 0)
+        self.assertEqual(loaded.insurance_interval_fee, 0)
         self.assertEqual(loaded.missed_count, 0)
         self.assertEqual(loaded.owner, TREASURY_ADDRESS)
 
@@ -276,7 +243,7 @@ class TestTreasuryLoanRecord(unittest.TestCase):
 
         nodes, missed = resolve_list_exprs(node, expr)
         self.assertFalse(missed)
-        self.assertEqual(len(nodes), 9)
+        self.assertEqual(len(nodes), 8)
         self.assertEqual(nodes[1].value, int(LoanType.CLAIM_COST))
 
         loaded = TreasuryLoanRecord.from_storage(node, expr.hash())
@@ -286,8 +253,7 @@ class TestTreasuryLoanRecord(unittest.TestCase):
         self.assertEqual(loaded.discounted_amount, 1_200)
         self.assertEqual(loaded.payment_amount, 6)
         self.assertEqual(loaded.paid_until_block, 42)
-        self.assertEqual(loaded.claimed_guarantees, [])
-        self.assertEqual(loaded.insurance_fee, 0)
+        self.assertEqual(loaded.insurance_interval_fee, 0)
         self.assertEqual(loaded.missed_count, 0)
         self.assertEqual(loaded.owner, TREASURY_ADDRESS)
 
@@ -313,7 +279,7 @@ class TestTreasuryLoanRecord(unittest.TestCase):
 
         legacy_eleven = link(bytes_(b"\xaa" * 32), NIL)  # owner
         legacy_eleven = link(int_(0), legacy_eleven)  # missed_count
-        legacy_eleven = link(int_(17), legacy_eleven)  # insurance_fee
+        legacy_eleven = link(int_(17), legacy_eleven)  # insurance_interval_fee
         legacy_eleven = link(link(int_(500), NIL), legacy_eleven)  # claimed
         legacy_eleven = link(int_(5), legacy_eleven)  # payment_interval_blocks
         legacy_eleven = link(int_(100), legacy_eleven)  # payment_amount
@@ -329,7 +295,7 @@ class TestTreasuryLoanRecord(unittest.TestCase):
 
         legacy_ten = NIL
         legacy_ten = link(int_(0), legacy_ten)  # missed_count
-        legacy_ten = link(int_(17), legacy_ten)  # insurance_fee
+        legacy_ten = link(int_(17), legacy_ten)  # insurance_interval_fee
         legacy_ten = link(link(int_(500), NIL), legacy_ten)  # claimed
         legacy_ten = link(int_(5), legacy_ten)  # payment_interval_blocks
         legacy_ten = link(int_(100), legacy_ten)  # payment_amount
@@ -344,72 +310,7 @@ class TestTreasuryLoanRecord(unittest.TestCase):
         self.assertIsNone(loaded)
 
 
-class TestTreasuryGuarantee(unittest.TestCase):
-    def test_field_set_is_the_perpetual_shape(self):
-        field_names = [
-            f.name for f in dataclasses.fields(TreasuryGuarantee) if not f.name.startswith("_")
-        ]
-        self.assertEqual(field_names, ["amount", "price", "expiry", "claimed_by"])
-
-    def test_to_expr_uses_expected_field_order(self):
-        guarantee = TreasuryGuarantee(
-            amount=1000,
-            price=50,
-            expiry=100,
-        )
-        expr = guarantee.expr()
-        nodes, missed = resolve_list_exprs(_FakeNode(), expr)
-        self.assertFalse(missed)
-        self.assertEqual(len(nodes), 4)
-
-        self.assertEqual(nodes[0].value, 1000)  # amount
-        self.assertEqual(nodes[1].value, 50)  # price
-        self.assertEqual(nodes[2].value, 100)  # expiry
-        # claimed_by (unclaimed): an address, a bytes value, not a hash link
-        self.assertEqual(get_expr_builtin_tag(nodes[3]), "bytes")
-        self.assertEqual(nodes[3].value, ZERO32)
-
-    def test_round_trip_unclaimed(self):
-        node = _FakeNode()
-        guarantee = TreasuryGuarantee(amount=10, price=1, expiry=50)
-        expr = guarantee.expr()
-        node.hot_storage[expr.hash()] = expr
-
-        loaded = TreasuryGuarantee.from_storage(node, expr.hash())
-        self.assertIsNotNone(loaded)
-        self.assertEqual(loaded.amount, 10)
-        self.assertEqual(loaded.price, 1)
-        self.assertEqual(loaded.expiry, 50)
-        self.assertEqual(loaded.claimed_by, ZERO32)
-
-    def test_round_trip_claimed(self):
-        node = _FakeNode()
-        claimant_id = b"\x09" * 32
-        guarantee = TreasuryGuarantee(
-            amount=10, price=1, expiry=50, claimed_by=claimant_id,
-        )
-        expr = guarantee.expr()
-        node.hot_storage[expr.hash()] = expr
-
-        loaded = TreasuryGuarantee.from_storage(node, expr.hash())
-        self.assertIsNotNone(loaded)
-        self.assertEqual(loaded.claimed_by, claimant_id)
-
-    def test_from_storage_rejects_legacy_duration_shape(self):
-        # The old five-field shape carried a plain-int duration.
-        node = _FakeNode()
-        from astreum.expression import NIL, int_, link, bytes_
-
-        legacy = link(bytes_(ZERO32), NIL)
-        legacy = link(int_(100), legacy)  # expiry
-        legacy = link(int_(50), legacy)  # price
-        legacy = link(int_(8), legacy)  # duration
-        legacy = link(int_(1000), legacy)  # amount
-        node.hot_storage[legacy.hash()] = legacy
-
-        loaded = TreasuryGuarantee.from_storage(node, legacy.hash())
-        self.assertIsNone(loaded)
-
+class TestBorrowRequest(unittest.TestCase):
     def test_borrow_request_round_trip_is_two_bytes(self):
         request = TreasuryBorrowRequest(loan_type=LoanType.UNSECURED)
 

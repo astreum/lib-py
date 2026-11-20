@@ -311,7 +311,6 @@ class TestLoanTrieReadWrite(unittest.TestCase):
         self.assertEqual(loaded.payment_amount, 6)
         self.assertEqual(loaded.paid_until_block, 5)
         self.assertEqual(loaded.owner, TREASURY_ADDRESS)
-        self.assertEqual(loaded.claimed_guarantees, [])
 
     def test_write_then_read_claim_cost_beside_an_existing_loan(self):
         secured_tx_id = os.urandom(32)
@@ -346,7 +345,6 @@ class TestLoanTrieReadWrite(unittest.TestCase):
             total_interest_paid=77,
             loaned=33,
             defaulted=4,
-            guaranteed=5,
         )
 
         claim_tx_id = os.urandom(32)
@@ -359,14 +357,12 @@ class TestLoanTrieReadWrite(unittest.TestCase):
         self.assertEqual(updated.total_interest_paid, 77)
         self.assertEqual(updated.loaned, 33)
         self.assertEqual(updated.defaulted, 4)
-        self.assertEqual(updated.guaranteed, 5)
         user = self._load_user()
         self.assertIsNotNone(user)
         self.assertEqual(user.balance, 10_000)
         self.assertEqual(user.total_interest_paid, 77)
         self.assertEqual(user.loaned, 33)
         self.assertEqual(user.defaulted, 4)
-        self.assertEqual(user.guaranteed, 5)
         self.assertIsNotNone(self._load_loan(existing_tx_id))
         self.assertIsNotNone(self._load_loan(claim_tx_id))
 

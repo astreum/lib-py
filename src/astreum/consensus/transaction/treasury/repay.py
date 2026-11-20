@@ -90,6 +90,19 @@ def handle_treasury_repay(
     current_height = _current_height(block)
     blocks_paid = transaction.amount // loan.payment_amount
 
+    # One interval premium per block of service settled, collected on top of
+    # the payment and credited to the treasury as income. A secured loan is
+    # not insured; a zero-fee loan collects nothing.
+    premium = 0
+    payer_account = None
+    if loan.loan_type != LoanType.SECURED and loan.insurance_interval_fee > 0:
+        premium = blocks_paid * loan.insurance_interval_fee
+        payer_account = block.accounts.get_account(
+            address=transaction.sender, node=node
+        )
+        if payer_account is None or payer_account.balance < premium:
+            return STATUS_FAILED
+
     # Unsecured arrears are written off, never collected. Advancing the pointer
     # to ``current_height`` settles every overdue block at that face value and
     # the write-off records the loss. SECURED loans have no write-off branch.
@@ -135,6 +148,12 @@ def handle_treasury_repay(
             return STATUS_FAILED
         owner_account.balance += transaction.amount
         block.accounts.set_account(loan.owner, owner_account)
+
+    if premium:
+        payer_account.balance -= premium
+        block.accounts.set_account(transaction.sender, payer_account)
+        # Premiums are treasury income, like fees: no ledger, no fund.
+        treasury_account.balance += premium
 
     user_record_exprs, _ = resolve_inner_exprs(node, updated_user_record.expr(), contact=block.contact)
 

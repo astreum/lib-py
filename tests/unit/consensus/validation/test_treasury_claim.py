@@ -240,8 +240,9 @@ class TestTreasuryClaim(unittest.TestCase):
     # --- accounting scope ---
 
     def test_claim_on_a_secured_loan_records_no_write_off(self):
-        # Pins the secured path only. The removed unsecured branch is covered
-        # by ``test_claim_on_an_unsecured_loan_fails``.
+        # Pins the secured path only. An insured loan takes the separate
+        # owner-initiated insurance claim path (Plan C Task 3), pinned in
+        # ``test_treasury_insurance_claim``.
         block = self._make_block(height=8)
         borrower_pk, _ = seed_sender_account(block, balance=1_000_000)
         owner_pk, owner_key = self._seed_owner(block)
@@ -259,26 +260,6 @@ class TestTreasuryClaim(unittest.TestCase):
         self.assertEqual(getattr(block, "global_defaulted", 0), 0)
 
     # --- eligibility ---
-
-    def test_claim_on_an_unsecured_loan_fails(self):
-        block = self._make_block(height=8)
-        borrower_pk, _ = seed_sender_account(block, balance=1_000_000)
-        owner_pk, owner_key = self._seed_owner(block)
-        treasury, loan_tx_id, _ = self._seed_loan(
-            block, borrower_pk, paid_until=5, owner=owner_pk,
-            loan_type=LoanType.UNSECURED,
-        )
-        treasury_before = treasury.balance
-
-        receipt = self._claim(block, owner_pk, owner_key, loan_tx_id)
-
-        self.assertEqual(receipt.status, STATUS_FAILED)
-        self.assertEqual(
-            block.accounts.get_account(TREASURY_ADDRESS, self.node).balance,
-            treasury_before,
-        )
-        _, loan = self._get_user_and_loan(block, borrower_pk, loan_tx_id)
-        self.assertEqual(loan.paid_until_block, 5)
 
     def test_claim_by_a_non_owner_fails(self):
         block = self._make_block(height=8)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Sequence, Tuple, Union
+from typing import Optional, Union
 
 from astreum.expression import Expr, NIL, bytes_, int_, link
 from astreum.consensus.transaction.code import TransactionCode
@@ -36,10 +36,6 @@ def create_transaction(
     channel_close_op: bool = False,
     expr_list_id: Optional[bytes] = None,
     program_hash: Optional[bytes] = None,
-    guarantee_amount: Optional[int] = None,
-    price: Optional[int] = None,
-    expiry: Optional[int] = None,
-    guarantee_refs: Optional[Sequence[Tuple[bytes, bytes]]] = None,
     data: Expr = NIL,
 ) -> Transaction:
     _validate_params(
@@ -55,10 +51,6 @@ def create_transaction(
         payer=payer,
         expr_list_id=expr_list_id,
         program_hash=program_hash,
-        guarantee_amount=guarantee_amount,
-        price=price,
-        expiry=expiry,
-        guarantee_refs=guarantee_refs,
     )
 
     data = _build_data_expr(
@@ -74,10 +66,6 @@ def create_transaction(
         channel_close_op=channel_close_op,
         expr_list_id=expr_list_id,
         program_hash=program_hash,
-        guarantee_amount=guarantee_amount,
-        price=price,
-        expiry=expiry,
-        guarantee_refs=guarantee_refs,
     )
 
     tx = Transaction(
@@ -112,10 +100,6 @@ def _validate_params(
     payer: Optional[bytes] = None,
     expr_list_id: Optional[bytes] = None,
     program_hash: Optional[bytes] = None,
-    guarantee_amount: Optional[int] = None,
-    price: Optional[int] = None,
-    expiry: Optional[int] = None,
-    guarantee_refs: Optional[Sequence[Tuple[bytes, bytes]]] = None,
 ) -> None:
     match code:
         case TransactionCode.TRANSFER:
@@ -157,21 +141,6 @@ def _validate_params(
         case TransactionCode.TREASURY_BORROW:
             if amount <= 0:
                 raise ValueError("TREASURY_BORROW requires amount > 0")
-            if LoanType(loan_type) == LoanType.UNSECURED:
-                if not guarantee_refs:
-                    raise ValueError(
-                        "TREASURY_BORROW with loan_type=UNSECURED requires guarantee_refs"
-                    )
-                seen = set()
-                for guarantor, guarantee_transaction_id in guarantee_refs:
-                    if len(guarantor) != RECIPIENT_SIZE or len(guarantee_transaction_id) != LOAN_TRANSACTION_ID_SIZE:
-                        raise ValueError(
-                            "TREASURY_BORROW guarantee_refs entries must be (32-byte guarantor, 32-byte guarantee_transaction_id)"
-                        )
-                    key = (guarantor, guarantee_transaction_id)
-                    if key in seen:
-                        raise ValueError("TREASURY_BORROW guarantee_refs must not contain duplicates")
-                    seen.add(key)
 
         case TransactionCode.TREASURY_REPAY:
             if amount <= 0:
@@ -185,14 +154,6 @@ def _validate_params(
             if loan_transaction_id is None or len(loan_transaction_id) != LOAN_TRANSACTION_ID_SIZE:
                 raise ValueError("TREASURY_CLOSE requires loan_transaction_id (32 bytes)")
 
-        case TransactionCode.TREASURY_GUARANTEE:
-            if guarantee_amount is None or guarantee_amount <= 0:
-                raise ValueError("TREASURY_GUARANTEE requires guarantee_amount > 0")
-            if price is None or price < 0:
-                raise ValueError("TREASURY_GUARANTEE requires price >= 0")
-            if expiry is None:
-                raise ValueError("TREASURY_GUARANTEE requires expiry")
-
         case TransactionCode.STORAGE_CREATE:
             if expr_list_id is None or len(expr_list_id) != EXPR_LIST_ID_SIZE:
                 raise ValueError("STORAGE_CREATE requires expr_list_id (32 bytes)")
@@ -204,33 +165,6 @@ def _validate_params(
         case TransactionCode.CODE_ACCOUNT_CALL:
             if recipient is None:
                 raise ValueError("CODE_ACCOUNT_CALL requires recipient")
-
-
-def _guarantee_refs_to_expr(guarantee_refs: Optional[Sequence[Tuple[bytes, bytes]]]) -> Expr:
-    """Encode a borrow's claimed-guarantee refs as a nested `Expr` link-list.
-
-    Each entry is a 2-field sub-list: ``[guarantor_address,
-    guarantee_transaction_id]``, both `bytes` values: they are ids, not exprs
-    the block record could follow.
-
-    Args:
-        guarantee_refs: The `(guarantor_address, guarantee_transaction_id)` pairs to
-            encode, in claim order.
-
-    Returns:
-        `NIL` if *guarantee_refs* is empty/`None`, otherwise a `link`-list
-        `Expr` of the encoded entries.
-    """
-    if not guarantee_refs:
-        return NIL
-    result: Expr = NIL
-    for guarantor, guarantee_transaction_id in reversed(list(guarantee_refs)):
-        entry: Expr = link(
-            bytes_(guarantor),
-            link(bytes_(guarantee_transaction_id), NIL),
-        )
-        result = link(entry, result)
-    return result
 
 
 def _build_data_expr(
@@ -247,10 +181,6 @@ def _build_data_expr(
     channel_close_op: bool = False,
     expr_list_id: Optional[bytes] = None,
     program_hash: Optional[bytes] = None,
-    guarantee_amount: Optional[int] = None,
-    price: Optional[int] = None,
-    expiry: Optional[int] = None,
-    guarantee_refs: Optional[Sequence[Tuple[bytes, bytes]]] = None,
 ) -> Expr:
     match code:
         case TransactionCode.CHANNEL_UPDATE:
@@ -272,22 +202,10 @@ def _build_data_expr(
             return link(bytes_(counterparty), NIL)  # type: ignore[arg-type]
 
         case TransactionCode.TREASURY_BORROW:
-            return link(
-                int_(LoanType(loan_type)),
-                link(_guarantee_refs_to_expr(guarantee_refs), NIL),
-            )
+            return link(int_(LoanType(loan_type)), NIL)
 
         case TransactionCode.TREASURY_REPAY | TransactionCode.TREASURY_CLOSE:
             return link(bytes_(loan_transaction_id), NIL)
-
-        case TransactionCode.TREASURY_GUARANTEE:
-            return link(
-                int_(guarantee_amount),  # type: ignore[arg-type]
-                link(
-                    int_(price),  # type: ignore[arg-type]
-                    link(int_(expiry), NIL),  # type: ignore[arg-type]
-                ),
-            )
 
         case TransactionCode.STORAGE_CREATE:
             return link(Expr("link", head_hash=expr_list_id), NIL)

@@ -19,7 +19,6 @@ from astreum.consensus.transaction.treasury.record import (
 )
 from astreum.consensus.transaction.treasury.utils import (
     _overdue_blocks,
-    _release_guarantees,
     _trie_exprs,
 )
 from astreum.expression.helpers import get_expr_builtin_tag
@@ -262,10 +261,6 @@ def handle_treasury_close(
 
     if write_off_amount:
         block.global_defaulted = getattr(block, "global_defaulted", 0) + write_off_amount
-
-    pending_exprs = pending_exprs + _release_guarantees(
-        node, treasury_account, updated_loan
-    )
 
     block.pending_exprs.extend(pending_exprs)
     block.accounts.set_account(TREASURY_ADDRESS, treasury_account)

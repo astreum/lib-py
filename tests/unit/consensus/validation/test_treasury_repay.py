@@ -31,14 +31,7 @@ from astreum.consensus.transaction.treasury.record import (
     TreasuryLoanRecord,
     TreasuryUserRecord,
 )
-from astreum.expression import ZERO32
-from astreum.storage.radix import (
-    RadixTree,
-    get_from_radix_tree,
-    get_radix_node_expr,
-    put_in_radix_tree,
-)
-from astreum.storage.radix.node import radix_node_hash
+from astreum.storage.radix import RadixTree, get_from_radix_tree
 from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 
@@ -51,7 +44,6 @@ from _helpers import (
     seed_storage_account,
     seed_treasury_account,
     seed_user_with_loan,
-    store_expr_tree,
     store_tx,
 )
 
@@ -84,7 +76,6 @@ class TestTreasuryRepay(unittest.TestCase):
         loan_type=LoanType.SECURED,
         payment_amount=PAYMENT,
         principal=PRINCIPAL,
-        claimed_guarantees=None,
         user_balance=10_000,
         treasury_balance=100_000,
     ):
@@ -95,7 +86,6 @@ class TestTreasuryRepay(unittest.TestCase):
             discounted_amount=principal,
             payment_amount=payment_amount,
             paid_until_block=paid_until,
-            claimed_guarantees=claimed_guarantees or [],
         )
         treasury = seed_treasury_account(
             self.node, block, treasury_balance=treasury_balance,
@@ -107,14 +97,6 @@ class TestTreasuryRepay(unittest.TestCase):
         )
         return treasury, loan_tx_id, loan
 
-    def _seed_guarantor(self, treasury, guarantor, *, guaranteed):
-        record = TreasuryUserRecord(guaranteed=guaranteed)
-        head = store_expr_tree(self.node, record.expr())
-        put_in_radix_tree(treasury.data, self.node, guarantor, head)
-        for trie_node in treasury.data.nodes.values():
-            self.node.hot_storage[radix_node_hash(trie_node)] = get_radix_node_expr(trie_node)
-        treasury.data_hash = treasury.data.root_hash or ZERO32
-
     def _get_user_and_loan(self, block, sender_pk, loan_tx_id):
         treasury = block.accounts.get_account(TREASURY_ADDRESS, self.node)
         user_head = get_from_radix_tree(treasury.data, self.node, sender_pk)
@@ -123,11 +105,6 @@ class TestTreasuryRepay(unittest.TestCase):
         loan_head = get_from_radix_tree(loans_trie, self.node, loan_tx_id)
         loan = TreasuryLoanRecord.from_storage(self.node, loan_head)
         return user, loan
-
-    def _get_guarantor(self, block, guarantor):
-        treasury = block.accounts.get_account(TREASURY_ADDRESS, self.node)
-        head = get_from_radix_tree(treasury.data, self.node, guarantor)
-        return TreasuryUserRecord.from_storage(self.node, head)
 
     def _repay(self, block, sender_pk, sender_key, loan_tx_id, amount, *, counter=0):
         tx = create_transaction(
@@ -255,26 +232,6 @@ class TestTreasuryRepay(unittest.TestCase):
         sender = block.accounts.get_account(sender_pk, self.node)
         self.assertEqual(
             sender.balance, sender_before - PAYMENT - receipt.total_fee,
-        )
-
-    def test_repay_keeps_guarantees_while_the_loan_is_open(self):
-        block = self._make_block(height=8)
-        sender_pk, sender_key = seed_sender_account(block, balance=1_000_000)
-        guarantor = os.urandom(32)
-        guarantee_id = os.urandom(32)
-        treasury, loan_tx_id, _ = self._seed_loan(
-            block, sender_pk, paid_until=5, loan_type=LoanType.UNSECURED,
-            claimed_guarantees=[(guarantor, guarantee_id, 1000)],
-        )
-        self._seed_guarantor(treasury, guarantor, guaranteed=1000)
-
-        receipt = self._repay(block, sender_pk, sender_key, loan_tx_id, PAYMENT)
-
-        self.assertEqual(receipt.status, STATUS_SUCCESS)
-        _, loan = self._get_user_and_loan(block, sender_pk, loan_tx_id)
-        self.assertGreater(loan.paid_until_block, 0)
-        self.assertEqual(
-            self._get_guarantor(block, guarantor).guaranteed, 1000,
         )
 
     def test_secured_arrears_are_not_written_off(self):

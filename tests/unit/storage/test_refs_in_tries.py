@@ -27,7 +27,6 @@ from astreum.consensus.account import create_account
 from astreum.consensus.models.accounts import Accounts
 from astreum.consensus.transaction.storage.initial import walk_record_slots
 from astreum.consensus.transaction.treasury.record import (
-    TreasuryGuarantee,
     TreasuryLoanRecord,
     TreasuryUserRecord,
 )
@@ -459,11 +458,10 @@ class TestBloomRefs(unittest.TestCase):
 class TestTreasuryRefs(unittest.TestCase):
     def test_a_trie_root_survives_as_a_ref(self):
         node = _FakeNode()
-        loans, guarantees, block = os.urandom(32), os.urandom(32), os.urandom(32)
+        loans, block = os.urandom(32), os.urandom(32)
         record = TreasuryUserRecord(
             balance=5,
             loans_root_hash=loans,
-            guarantees_root_hash=guarantees,
             loans_root_block=block,
         )
         expr = record.expr()
@@ -471,9 +469,6 @@ class TestTreasuryRefs(unittest.TestCase):
         loaded = TreasuryUserRecord.from_storage(node, expr.hash(), block_hash=b"\x01" * 32)
         self.assertEqual(loaded.loans_root_hash, loans)
         self.assertEqual(loaded.loans_root_block, block)
-        self.assertEqual(loaded.guarantees_root_hash, guarantees)
-        # held by a plain hash: in the block that holds the record
-        self.assertEqual(loaded.guarantees_root_block, b"\x01" * 32)
         self.assertEqual(loaded.balance, 5)
 
     def test_an_empty_root_has_no_block(self):
@@ -493,24 +488,14 @@ class TestTreasuryRefs(unittest.TestCase):
             payment_amount=1,
             paid_until_block=2,
             owner=b"\x55" * 32,
-            claimed_guarantees=[(b"\x66" * 32, b"\x77" * 32, 3)],
         )
-        guarantee = TreasuryGuarantee(amount=1, price=0, expiry=9, claimed_by=b"\x88" * 32)
-        for record in (loan, guarantee):
-            expr = record.expr()
-            store_expr_tree(node, expr)
-            slots, _, _ = walk_record_slots(
-                node, Expr("link", head_hash=expr.hash(), tail=NIL), RadixTree(), follow_refs=True
-            )
-            self.assertTrue(slots)
+        expr = loan.expr()
+        store_expr_tree(node, expr)
+        slots, _, _ = walk_record_slots(
+            node, Expr("link", head_hash=expr.hash(), tail=NIL), RadixTree(), follow_refs=True
+        )
+        self.assertTrue(slots)
         self.assertEqual(TreasuryLoanRecord.from_storage(node, loan.expr().hash()).owner, b"\x55" * 32)
-        self.assertEqual(
-            TreasuryLoanRecord.from_storage(node, loan.expr().hash()).claimed_guarantees,
-            [(b"\x66" * 32, b"\x77" * 32, 3)],
-        )
-        self.assertEqual(
-            TreasuryGuarantee.from_storage(node, guarantee.expr().hash()).claimed_by, b"\x88" * 32
-        )
 
 
 if __name__ == "__main__":

@@ -25,7 +25,6 @@ from astreum.consensus.transaction.model import Transaction
 from astreum.storage.radix import get_radix_node_expr
 from astreum.storage.radix.node import radix_node_hash
 from astreum.consensus.transaction.treasury.record import (
-    TreasuryGuarantee,
     TreasuryLoanRecord,
     TreasuryUserRecord,
 )
@@ -359,41 +358,6 @@ def seed_user_with_loan(
     return user_record, loans_trie
 
 
-def seed_guarantor_with_guarantee(
-    node: _FakeNode,
-    treasury_account: Account,
-    *,
-    guarantor: bytes,
-    guarantee_transaction_id: bytes,
-    guarantee: TreasuryGuarantee,
-    total_interest_paid: int = 0,
-    guaranteed: int = 0,
-) -> TreasuryUserRecord:
-    """Seed a guarantor's `TreasuryUserRecord` with one posted guarantee.
-
-    Bypasses `TREASURY_GUARANTEE` and writes the guarantee + record directly, since
-    unsecured-borrow tests only care about the guarantee already existing, not
-    about how it got posted (that's covered by `test_treasury_guarantee.py`).
-    """
-    guarantee_head = store_expr_tree(node, guarantee.expr())
-    guarantees_trie = RadixTree()
-    put_in_radix_tree(guarantees_trie, node, guarantee_transaction_id, guarantee_head)
-    for trie_node in guarantees_trie.nodes.values():
-        node.hot_storage[radix_node_hash(trie_node)] = get_radix_node_expr(trie_node)
-
-    guarantor_record = TreasuryUserRecord(
-        guarantees_root_hash=guarantees_trie.root_hash or ZERO32,
-        total_interest_paid=total_interest_paid,
-        guaranteed=guaranteed,
-    )
-    rec_head = store_expr_tree(node, guarantor_record.expr())
-    put_in_radix_tree(treasury_account.data, node, guarantor, rec_head)
-    for trie_node in treasury_account.data.nodes.values():
-        node.hot_storage[radix_node_hash(trie_node)] = get_radix_node_expr(trie_node)
-    treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
-    return guarantor_record
-
-
 __all__ = [
     "FAR_FUTURE_WINDOW",
     "PAST_WINDOW",
@@ -411,5 +375,4 @@ __all__ = [
     "seed_channel",
     "seed_treasury_account",
     "seed_user_with_loan",
-    "seed_guarantor_with_guarantee",
 ]

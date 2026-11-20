@@ -1,11 +1,53 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from collections import ChainMap
+from typing import Any
 
-from astreum.storage.radix import RadixTree, get_radix_node_expr, put_in_radix_tree
-from astreum.expression import Expr, ZERO32, resolve_inner_exprs
-from astreum.consensus.transaction.treasury.record import TreasuryLoanRecord, load_user_record
+from astreum.storage.radix import RadixTree, get_radix_node_expr
+from astreum.expression import Expr
+from astreum.consensus.transaction.treasury.record import TreasuryLoanRecord
 from astreum.expression.helpers import get_expr_builtin_tag
+
+
+class _PendingNodes:
+    """A node view that reads a block's pending exprs before storage.
+
+    A block applies its transactions before it writes their exprs. A later
+    transaction in the same block must still see what an earlier one wrote
+    into the treasury tries, so this view answers a hash from the pending
+    list first and falls back to the node.
+    """
+
+    def __init__(self, node: Any, exprs: list[Expr]):
+        self._node = node
+        self._by_hash = {expr.hash(): expr for expr in exprs or () if expr is not None}
+
+    @property
+    def hot_storage(self):
+        """The node's hot storage with the pending exprs in front."""
+        return ChainMap(self._by_hash, getattr(self._node, "hot_storage", {}))
+
+    def __getattr__(self, name: str):
+        """Delegate every other storage attribute to the wrapped node."""
+        return getattr(self._node, name)
+
+
+def _data_nodes(data) -> list:
+    """Flatten a transaction's ``data`` link chain into its elements.
+
+    Args:
+        data: The head of the transaction's data chain.
+
+    Returns:
+        The chain's elements in order, as a list of ``Expr`` heads.
+    """
+    result = []
+    current = data
+    while current is not None and get_expr_builtin_tag(current) == "link":
+        if current.head is not None:
+            result.append(current.head)
+        current = current.tail
+    return result
 
 
 def _collect_sub_exprs(expr: Expr) -> list:
@@ -47,6 +89,47 @@ def _trie_exprs(trie: RadixTree) -> list:
     return emitted
 
 
+def insurance_interval_fee(
+    *,
+    principal: int,
+    loaned: int,
+    defaulted: int,
+    block: object,
+) -> int | None:
+    """Return the measured per-interval insurance premium for *principal*.
+
+    One estimator prices every insured loan. The smoothed rate ``p`` blends
+    the borrower's own history with the all-time global counters:
+
+    ``p = (defaulted * gc + gd) / (loaned * gc + gl)``
+
+    and the premium is ``ceil(principal * p)``. The global counters live on
+    the block: ``global_loan_count`` (``gc``), ``global_defaulted`` (``gd``),
+    and ``global_loaned`` (``gl``).
+
+    Args:
+        principal: The insured principal, ``L`` for a borrow or ``C`` for a
+            claim-cost loan.
+        loaned: The borrower's own cumulative unsecured principal.
+        defaulted: The borrower's own cumulative write-off.
+        block: The block whose global counters are read.
+
+    Returns:
+        The premium, or `None` when a counter is positive but the blend's
+        denominator is not. With no global loans the premium is `0`.
+    """
+    gc = getattr(block, "global_loan_count", 0) or 0
+    gd = getattr(block, "global_defaulted", 0) or 0
+    gl = getattr(block, "global_loaned", 0) or 0
+    if gc <= 0:
+        return 0
+    denominator = loaned * gc + gl
+    if denominator <= 0:
+        return None
+    numerator = principal * (defaulted * gc + gd)
+    return (numerator + denominator - 1) // denominator
+
+
 def _overdue_blocks(*, loan: TreasuryLoanRecord, current_height: int) -> int:
     """Return the number of unpaid blocks after the settled pointer.
 
@@ -66,81 +149,3 @@ def _overdue_blocks(*, loan: TreasuryLoanRecord, current_height: int) -> int:
         The count of overdue blocks, never negative.
     """
     return max(0, current_height - loan.paid_until_block)
-
-
-def _release_guarantees(
-    node,
-    treasury_account,
-    loan: TreasuryLoanRecord,
-) -> list[Expr]:
-    """Release a closed loan's backing guarantees, net of its written-off losses.
-
-    Called once a loan's ``paid_until_block`` reaches ``0``. The guarantee
-    covers the loan's arrears up to ``guarantee.amount``. The loan's
-    permanent loss is its written-off arrears,
-    ``loan.missed_count * loan.payment_amount``, capped at the total of the
-    guarantees backing it. That loss is split across the claimed guarantees in
-    proportion to their amounts. The loss share floors under integer division,
-    so the few-unit remainder of the write-off is released too and the
-    retained loss can end slightly below the written-off amount. Each
-    guarantor's ``guaranteed`` is reduced by its released amount, so:
-
-    - no write-off (a clean close) releases the full guarantee;
-    - a partial write-off releases the guarantee minus its share of the loss;
-    - a write-off at or above the total guarantee releases nothing.
-
-    A no-op for `SECURED` loans (`claimed_guarantees` is always empty for
-    those).
-
-    Args:
-        node: Storage node used to resolve and persist trie/expr data.
-        treasury_account: The `TREASURY_ADDRESS` account. Its ``data`` trie
-            holds every guarantor's `TreasuryUserRecord`, keyed by guarantor
-            address. Mutated in place (multiple guarantors' slots may be
-            written in one call). ``data_hash`` is refreshed before return.
-        loan: The loan that just closed, with its *final* ``missed_count``
-            already applied.
-
-    Returns:
-        Pending exprs for every updated guarantor record, to be extended onto
-        the caller's own pending-expr list.
-    """
-    if not loan.claimed_guarantees:
-        return []
-
-    total_guarantee = sum(
-        guarantee_amount
-        for _guarantor_address, _guarantee_transaction_id, guarantee_amount
-        in loan.claimed_guarantees
-    )
-    if total_guarantee <= 0:
-        return []
-
-    written_off = max(0, loan.missed_count) * max(0, loan.payment_amount)
-    lost_total = min(total_guarantee, written_off)
-
-    returned_by_guarantor: dict[bytes, int] = {}
-    for guarantor_address, _guarantee_transaction_id, guarantee_amount in loan.claimed_guarantees:
-        loss = lost_total * guarantee_amount // total_guarantee
-        returned = guarantee_amount - loss
-        returned_by_guarantor[guarantor_address] = returned_by_guarantor.get(guarantor_address, 0) + returned
-
-    pending_exprs: list[Expr] = []
-    for guarantor_address, returned in returned_by_guarantor.items():
-        if returned <= 0:
-            continue
-        guarantor_record = load_user_record(node, treasury_account.data, guarantor_address, contact=treasury_account.data.contact)
-        if guarantor_record is None:
-            continue
-        updated_guarantor_record = replace(
-            guarantor_record,
-            guaranteed=max(0, guarantor_record.guaranteed - returned),
-        )
-        updated_head = updated_guarantor_record.expr().hash()
-        put_in_radix_tree(treasury_account.data, node, guarantor_address, updated_head)
-        guarantor_exprs, _ = resolve_inner_exprs(node, updated_guarantor_record.expr(), contact=treasury_account.data.contact)
-        pending_exprs.extend(guarantor_exprs)
-
-    if pending_exprs:
-        treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
-    return pending_exprs

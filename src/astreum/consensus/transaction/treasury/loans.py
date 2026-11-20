@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import ChainMap
 from dataclasses import replace
 from typing import Any
 
@@ -16,30 +15,11 @@ from astreum.consensus.transaction.treasury.record import (
     TreasuryLoanRecord,
     TreasuryUserRecord,
 )
-from astreum.consensus.transaction.treasury.utils import _overdue_blocks, _trie_exprs
-
-
-class _PendingNodes:
-    """A node view that reads a block's pending exprs before storage.
-
-    A block applies its transactions before it writes their exprs. A later
-    transaction in the same block must still see what an earlier one wrote
-    into the treasury tries, so this view answers a hash from the pending
-    list first and falls back to the node.
-    """
-
-    def __init__(self, node: Any, exprs: list[Expr]):
-        self._node = node
-        self._by_hash = {expr.hash(): expr for expr in exprs or () if expr is not None}
-
-    @property
-    def hot_storage(self):
-        """The node's hot storage with the pending exprs in front."""
-        return ChainMap(self._by_hash, getattr(self._node, "hot_storage", {}))
-
-    def __getattr__(self, name: str):
-        """Delegate every other storage attribute to the wrapped node."""
-        return getattr(self._node, name)
+from astreum.consensus.transaction.treasury.utils import (
+    _PendingNodes,
+    _overdue_blocks,
+    _trie_exprs,
+)
 
 
 def load_user_loan(
@@ -225,10 +205,13 @@ def settle_claim_payout(
     borrower's loans trie, using the canonical ``paid_until_block``
     convention. When the payout covers the total, every owner receives its
     loan's service, every settled loan's ``paid_until_block`` advances to the
-    current height, and the sender keeps the remainder. When the payout does
-    not cover the total, nothing is settled and no owner is paid: the sender
-    keeps the whole payout, and the accrued service stays owed on the loans
-    for the owner to collect later.
+    current height, and the sender keeps the remainder. An insured loan also
+    pays one ``insurance_interval_fee`` per settled block, taken from the
+    payout after the service and credited to the treasury as income; the owner
+    still receives the whole service. When the payout does not cover the
+    service and the premiums, nothing is settled and no owner is paid: the
+    sender keeps the whole payout, and the accrued service stays owed on the
+    loans for the owner to collect later.
 
     A prepaid loan (``paid_until_block`` above the current height) has no
     accrued service and keeps its pointer. A closed loan
@@ -242,13 +225,14 @@ def settle_claim_payout(
         accounts: The block's accounts cache. Owner balances are credited
             through it so supply tracking sees the movement.
         treasury_account: The `TREASURY_ADDRESS` account. Its ``data`` trie
-            holds the borrower's `TreasuryUserRecord`.
+            holds the borrower's `TreasuryUserRecord`; its balance receives
+            the premium income.
         borrower: The borrower's 32-byte address.
         payout: The claim's gross payout ``R``.
 
     Returns:
-        The amount to credit to the sender: ``payout - service`` when the
-        payout covers the service, possibly ``0``; otherwise the whole
+        The amount to credit to the sender: ``payout - service - premiums``
+        when the payout covers both, possibly ``0``; otherwise the whole
         ``payout``.
     """
     current_height = int(block.height)
@@ -261,8 +245,9 @@ def settle_claim_payout(
     if user_record is None or user_record.loans_root_hash == ZERO32:
         return payout
 
-    overdue_loans: list[tuple[bytes, TreasuryLoanRecord, int]] = []
+    overdue_loans: list[tuple[bytes, TreasuryLoanRecord, int, int]] = []
     service_total = 0
+    premium_total = 0
     for loan_transaction_id, loan in load_user_loans(
         node=lookup,
         treasury_account=treasury_account,
@@ -280,15 +265,21 @@ def settle_claim_payout(
         if overdue_blocks <= 0:
             continue
         service = overdue_blocks * loan.payment_amount
-        overdue_loans.append((loan_transaction_id, loan, service))
+        premium = (
+            overdue_blocks * loan.insurance_interval_fee
+            if loan.loan_type != LoanType.SECURED
+            else 0
+        )
+        overdue_loans.append((loan_transaction_id, loan, service, premium))
         service_total += service
+        premium_total += premium
 
     if service_total == 0:
         return payout
-    if payout < service_total:
+    if payout < service_total + premium_total:
         # The rent is the provider's own money: it keeps the whole payout.
         # Nothing is settled, so every pointer stays and the accrued service
-        # remains owed on the loans, to be collected by the owner later.
+        # and premium remain owed on the loans, to be collected later.
         return payout
 
     loans_trie = RadixTree(
@@ -297,7 +288,7 @@ def settle_claim_payout(
         root_block=user_record.loans_root_block,
     )
     loan_exprs: list[Expr] = []
-    for loan_transaction_id, loan, service in overdue_loans:
+    for loan_transaction_id, loan, service, _premium in overdue_loans:
         updated_loan = replace(loan, paid_until_block=current_height)
         put_in_radix_tree(
             loans_trie, lookup, loan_transaction_id, updated_loan.expr().hash()
@@ -329,6 +320,11 @@ def settle_claim_payout(
         updated_user_record.expr().hash(),
     )
     treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
+    # The premium rides with the service: the owner keeps the whole service
+    # and the treasury takes one interval premium per settled block from the
+    # payout as income. There is no fund.
+    if premium_total:
+        treasury_account.balance += premium_total
     accounts.set_account(TREASURY_ADDRESS, treasury_account)
 
     trie_exprs = _trie_exprs(loans_trie)
@@ -339,7 +335,7 @@ def settle_claim_payout(
         resolved, updated_user_record.expr(), contact=block.contact
     )
     block.pending_exprs.extend(loan_exprs + trie_exprs + user_record_exprs)
-    return payout - service_total
+    return payout - service_total - premium_total
 
 
 def _apply_treasury_loan_payment(

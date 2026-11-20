@@ -34,7 +34,7 @@ from astreum.consensus.transaction.treasury.record import (
     TreasuryLoanRecord,
     TreasuryUserRecord,
 )
-from astreum.expression import NIL, resolve_list_exprs
+from astreum.expression import resolve_list_exprs
 from astreum.expression import ZERO32
 from astreum.storage.radix import RadixTree, get_from_radix_tree
 from astreum.consensus.constants import TREASURY_ADDRESS
@@ -312,9 +312,9 @@ class TestTreasuryBorrow(unittest.TestCase):
 
         nodes, missed = resolve_list_exprs(self.node, tx.data)
         self.assertFalse(missed)
-        self.assertEqual(len(nodes), 2)
+        # The borrow data is the loan type alone: no guarantee refs follow it.
+        self.assertEqual(len(nodes), 1)
         self.assertEqual(nodes[0].value, int(LoanType.SECURED))
-        self.assertIs(nodes[1], NIL)
 
         with self.assertRaises(TypeError):
             create_transaction(

@@ -30,14 +30,7 @@ from astreum.consensus.transaction.treasury.record import (
     TreasuryLoanRecord,
     TreasuryUserRecord,
 )
-from astreum.expression import ZERO32
-from astreum.storage.radix import (
-    RadixTree,
-    get_from_radix_tree,
-    get_radix_node_expr,
-    put_in_radix_tree,
-)
-from astreum.storage.radix.node import radix_node_hash
+from astreum.storage.radix import RadixTree, get_from_radix_tree
 from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 
@@ -50,7 +43,6 @@ from _helpers import (
     seed_storage_account,
     seed_treasury_account,
     seed_user_with_loan,
-    store_expr_tree,
     store_tx,
 )
 
@@ -83,7 +75,6 @@ class TestTreasuryClose(unittest.TestCase):
         loan_type=LoanType.SECURED,
         payment_amount=PAYMENT,
         principal=PRINCIPAL,
-        claimed_guarantees=None,
         owner=TREASURY_ADDRESS,
         user_balance=10_000,
         treasury_balance=100_000,
@@ -95,7 +86,6 @@ class TestTreasuryClose(unittest.TestCase):
             discounted_amount=principal,
             payment_amount=payment_amount,
             paid_until_block=paid_until,
-            claimed_guarantees=claimed_guarantees or [],
             owner=owner,
         )
         treasury = seed_treasury_account(
@@ -108,14 +98,6 @@ class TestTreasuryClose(unittest.TestCase):
         )
         return treasury, loan_tx_id, loan
 
-    def _seed_guarantor(self, treasury, guarantor, *, guaranteed):
-        record = TreasuryUserRecord(guaranteed=guaranteed)
-        head = store_expr_tree(self.node, record.expr())
-        put_in_radix_tree(treasury.data, self.node, guarantor, head)
-        for trie_node in treasury.data.nodes.values():
-            self.node.hot_storage[radix_node_hash(trie_node)] = get_radix_node_expr(trie_node)
-        treasury.data_hash = treasury.data.root_hash or ZERO32
-
     def _get_user_and_loan(self, block, sender_pk, loan_tx_id):
         treasury = block.accounts.get_account(TREASURY_ADDRESS, self.node)
         user_head = get_from_radix_tree(treasury.data, self.node, sender_pk)
@@ -125,25 +107,20 @@ class TestTreasuryClose(unittest.TestCase):
         loan = TreasuryLoanRecord.from_storage(self.node, loan_head)
         return user, loan
 
-    def _get_guarantor(self, block, guarantor):
-        treasury = block.accounts.get_account(TREASURY_ADDRESS, self.node)
-        head = get_from_radix_tree(treasury.data, self.node, guarantor)
-        return TreasuryUserRecord.from_storage(self.node, head)
-
-    def _repay(self, block, sender_pk, sender_key, loan_tx_id, amount, *, counter=0):
+    def _close(self, block, sender_pk, sender_key, loan_tx_id, amount, *, counter=0):
         tx = create_transaction(
             chain_id=1, counter=counter, sender=sender_pk, recipient=TREASURY_ADDRESS,
-            amount=amount, code=TransactionCode.TREASURY_REPAY,
+            amount=amount, code=TransactionCode.TREASURY_CLOSE,
             loan_transaction_id=loan_tx_id, secret_key=sender_key,
         )
         apply_transaction(self.node, block, store_tx(self.node, tx))
         flush_pending(self.node, block)
         return block.receipts[-1]
 
-    def _close(self, block, sender_pk, sender_key, loan_tx_id, amount, *, counter=0):
+    def _repay(self, block, sender_pk, sender_key, loan_tx_id, amount, *, counter=0):
         tx = create_transaction(
             chain_id=1, counter=counter, sender=sender_pk, recipient=TREASURY_ADDRESS,
-            amount=amount, code=TransactionCode.TREASURY_CLOSE,
+            amount=amount, code=TransactionCode.TREASURY_REPAY,
             loan_transaction_id=loan_tx_id, secret_key=sender_key,
         )
         apply_transaction(self.node, block, store_tx(self.node, tx))
@@ -304,12 +281,9 @@ class TestTreasuryClose(unittest.TestCase):
     def test_close_unsecured_charges_principal_and_writes_off_arrears(self):
         block = self._make_block(height=8)
         sender_pk, sender_key = seed_sender_account(block, balance=1_000_000)
-        guarantor = os.urandom(32)
         treasury, loan_tx_id, _ = self._seed_loan(
             block, sender_pk, paid_until=5, loan_type=LoanType.UNSECURED,
-            claimed_guarantees=[(guarantor, os.urandom(32), 1000)],
         )
-        self._seed_guarantor(treasury, guarantor, guaranteed=1000)
         treasury_before = treasury.balance
 
         receipt = self._close(block, sender_pk, sender_key, loan_tx_id, PRINCIPAL)
@@ -319,117 +293,23 @@ class TestTreasuryClose(unittest.TestCase):
         self.assertEqual(loan.paid_until_block, 0)
         self.assertEqual(loan.missed_count, 3)
         self.assertEqual(user.defaulted, 3 * PAYMENT)
+        # An unsecured close writes off arrears; their face value is not
+        # interest, so nothing reaches total_interest_paid.
+        self.assertEqual(user.total_interest_paid, 0)
         self.assertEqual(getattr(block, "global_defaulted", 0), 3 * PAYMENT)
         self.assertEqual(
             block.accounts.get_account(TREASURY_ADDRESS, self.node).balance,
             treasury_before + PRINCIPAL,
         )
-        # 300 of the 1000 guarantee is permanently lost; the rest is released.
-        self.assertEqual(
-            self._get_guarantor(block, guarantor).guaranteed, 3 * PAYMENT,
-        )
-
-    def test_close_unsecured_clean_payoff_releases_the_full_guarantee(self):
-        block = self._make_block(height=5)
-        sender_pk, sender_key = seed_sender_account(block, balance=1_000_000)
-        guarantor = os.urandom(32)
-        treasury, loan_tx_id, _ = self._seed_loan(
-            block, sender_pk, paid_until=5, loan_type=LoanType.UNSECURED,
-            claimed_guarantees=[(guarantor, os.urandom(32), 1000)],
-        )
-        self._seed_guarantor(treasury, guarantor, guaranteed=1000)
-
-        receipt = self._close(block, sender_pk, sender_key, loan_tx_id, PRINCIPAL)
-
-        self.assertEqual(receipt.status, STATUS_SUCCESS)
-        user, loan = self._get_user_and_loan(block, sender_pk, loan_tx_id)
-        self.assertEqual(loan.missed_count, 0)
-        self.assertEqual(user.defaulted, 0)
-        self.assertEqual(self._get_guarantor(block, guarantor).guaranteed, 0)
-
-    def test_close_unsecured_total_default_releases_nothing(self):
-        block = self._make_block(height=25)
-        sender_pk, sender_key = seed_sender_account(block, balance=1_000_000)
-        guarantor = os.urandom(32)
-        treasury, loan_tx_id, _ = self._seed_loan(
-            block, sender_pk, paid_until=5, loan_type=LoanType.UNSECURED,
-            claimed_guarantees=[(guarantor, os.urandom(32), 1000)],
-        )
-        self._seed_guarantor(treasury, guarantor, guaranteed=1000)
-
-        receipt = self._close(block, sender_pk, sender_key, loan_tx_id, PRINCIPAL)
-
-        self.assertEqual(receipt.status, STATUS_SUCCESS)
-        user, loan = self._get_user_and_loan(block, sender_pk, loan_tx_id)
-        self.assertEqual(loan.missed_count, 20)  # write-off 2000 >= guarantee 1000
-        self.assertEqual(user.defaulted, 20 * PAYMENT)
-        self.assertEqual(self._get_guarantor(block, guarantor).guaranteed, 1000)
-
-    def test_close_unsecured_splits_the_guarantee_loss_across_guarantors(self):
-        block = self._make_block(height=8)
-        sender_pk, sender_key = seed_sender_account(block, balance=1_000_000)
-        first_guarantor = os.urandom(32)
-        second_guarantor = os.urandom(32)
-        treasury, loan_tx_id, _ = self._seed_loan(
-            block, sender_pk, paid_until=5, loan_type=LoanType.UNSECURED,
-            claimed_guarantees=[
-                (first_guarantor, os.urandom(32), 600),
-                (second_guarantor, os.urandom(32), 400),
-            ],
-        )
-        self._seed_guarantor(treasury, first_guarantor, guaranteed=600)
-        self._seed_guarantor(treasury, second_guarantor, guaranteed=400)
-
-        receipt = self._close(block, sender_pk, sender_key, loan_tx_id, PRINCIPAL)
-
-        self.assertEqual(receipt.status, STATUS_SUCCESS)
-        # 300 written off, split 600:400 -> permanent losses 180:120.
-        self.assertEqual(
-            self._get_guarantor(block, first_guarantor).guaranteed, 180,
-        )
-        self.assertEqual(
-            self._get_guarantor(block, second_guarantor).guaranteed, 120,
-        )
-
-    def test_close_unsecured_guarantee_loss_integer_division_remainder(self):
-        block = self._make_block(height=338)  # 333 blocks past pointer 5
-        sender_pk, sender_key = seed_sender_account(block, balance=1_000_000)
-        guarantors = [os.urandom(32) for _ in range(3)]
-        amounts = [333, 333, 334]
-        treasury, loan_tx_id, _ = self._seed_loan(
-            block, sender_pk, paid_until=5, loan_type=LoanType.UNSECURED,
-            payment_amount=1, principal=450,
-            claimed_guarantees=[
-                (guarantor, os.urandom(32), amount)
-                for guarantor, amount in zip(guarantors, amounts)
-            ],
-        )
-        for guarantor, amount in zip(guarantors, amounts):
-            self._seed_guarantor(treasury, guarantor, guaranteed=amount)
-
-        receipt = self._close(block, sender_pk, sender_key, loan_tx_id, PRINCIPAL)
-
-        self.assertEqual(receipt.status, STATUS_SUCCESS)
-        user, loan = self._get_user_and_loan(block, sender_pk, loan_tx_id)
-        self.assertEqual(loan.missed_count, 333)
-        self.assertEqual(user.defaulted, 333)
-        # Each loss floors: 333*333//1000 = 110, 333*333//1000 = 110,
-        # 333*334//1000 = 111. The 2-unit remainder of the write-off is
-        # released, so the retained loss is 331, not 333.
-        self.assertEqual(
-            [self._get_guarantor(block, guarantor).guaranteed for guarantor in guarantors],
-            [110, 110, 111],
-        )
 
     def test_close_after_a_repay_write_off_retains_the_earlier_loss(self):
+        # A repay that writes off blocks, then a clean close: the three
+        # counters accumulate across both events and never reset at close.
         block = self._make_block(height=8)
         sender_pk, sender_key = seed_sender_account(block, balance=1_000_000)
-        guarantor = os.urandom(32)
-        treasury, loan_tx_id, _ = self._seed_loan(
+        _, loan_tx_id, _ = self._seed_loan(
             block, sender_pk, paid_until=5, loan_type=LoanType.UNSECURED,
-            claimed_guarantees=[(guarantor, os.urandom(32), 1000)],
         )
-        self._seed_guarantor(treasury, guarantor, guaranteed=1000)
 
         repay_receipt = self._repay(
             block, sender_pk, sender_key, loan_tx_id, PAYMENT,
@@ -439,8 +319,8 @@ class TestTreasuryClose(unittest.TestCase):
         self.assertEqual(after_repay.missed_count, 3)  # blocks 6, 7, 8
         self.assertEqual(after_repay.paid_until_block, 9)
 
-        # The pointer is now ahead of the chain, so the close is clean. The
-        # guarantee release must still charge the repay's earlier write-off.
+        # The pointer is ahead of the chain, so the close writes off nothing
+        # new. The earlier write-off must still stand.
         close_receipt = self._close(
             block, sender_pk, sender_key, loan_tx_id, PRINCIPAL, counter=1,
         )
@@ -451,9 +331,6 @@ class TestTreasuryClose(unittest.TestCase):
         self.assertEqual(loan.missed_count, 3)
         self.assertEqual(user.defaulted, 3 * PAYMENT)
         self.assertEqual(getattr(block, "global_defaulted", 0), 3 * PAYMENT)
-        self.assertEqual(
-            self._get_guarantor(block, guarantor).guaranteed, 3 * PAYMENT,
-        )
 
     def test_close_unsecured_refunds_excess_to_the_sender_account(self):
         block = self._make_block(height=5)

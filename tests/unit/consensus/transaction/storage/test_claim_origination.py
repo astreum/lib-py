@@ -304,6 +304,8 @@ class TestClaimOrigination(unittest.TestCase):
         self.assertEqual(loan.creation_block_number, self.block.height)
         self.assertEqual(loan.owner, TREASURY_ADDRESS)
         self.assertEqual(loan.missed_count, 0)
+        # No loan history and no global loans: the measured premium is zero.
+        self.assertEqual(loan.insurance_interval_fee, 0)
 
         # The storage fee moves no cash. The only cash is the base fee.
         sender_after, treasury_after, storage_after = self._balances(sender)
@@ -389,6 +391,37 @@ class TestClaimOrigination(unittest.TestCase):
             receipt.storage_fee,
         )
         self._assert_fee_booked(receipt)
+
+    def test_a_financed_claim_records_the_measured_insurance_premium(self):
+        # One estimator prices every insured loan: the same smoothed blend of
+        # the claimant's own history and the global counters, applied to the
+        # claim-cost principal C, rounded up.
+        sender, _ = seed_sender_account(self.block, balance=1_000_000)
+        self.block.global_loan_count = 10
+        self.block.global_loaned = 10_000
+        self.block.global_defaulted = 3_333
+        seed_treasury_account(
+            self.node,
+            self.block,
+            treasury_balance=0,
+            user_records={
+                sender: TreasuryUserRecord(
+                    balance=10_000, loaned=4_000, defaulted=1_000,
+                )
+            },
+        )
+        storage_id, claim = self._seed_record_and_claim(sender)
+
+        tx_hash = self._submit_claim(sender, [claim])
+
+        receipt = self.block.receipts[-1]
+        self.assertEqual(receipt.status, STATUS_SUCCESS)
+        loan = self._loan(sender, tx_hash)
+        self.assertIsNotNone(loan)
+        denominator = 4_000 * 10 + 10_000
+        numerator = receipt.storage_fee * (1_000 * 10 + 3_333)
+        expected = (numerator + denominator - 1) // denominator
+        self.assertEqual(loan.insurance_interval_fee, expected)
 
     # ------------------------------------------------------------------
     # amount >= C: the amount pays the storage fee, the remainder transfers
