@@ -36,6 +36,13 @@ class TestValidatorReward(unittest.TestCase):
     def test_the_storage_fee_is_not_paid_to_the_validator(self):
         self.assertEqual(validator_reward([_receipt(storage_fee=100)]), 0)
 
+    def test_only_the_named_fee_fields_are_paid(self):
+        # A receipt whose total_fee carries a fee outside the three rewarded
+        # fields must not pass that fee to the validator.
+        receipt = _receipt(base_fee=3, data_fee=5, storage_fee=100)
+        receipt.total_fee += 7
+        self.assertEqual(validator_reward([receipt]), 3 + 5)
+
 
 class TestFeeIncome(unittest.TestCase):
     def test_an_empty_block_adds_nothing(self):
