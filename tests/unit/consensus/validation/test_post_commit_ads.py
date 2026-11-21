@@ -68,7 +68,11 @@ def _node(head=None):
         exception=lambda *a, **k: None,
     )
     node = SimpleNamespace(
-        logger=logger, latest_block=head, latest_block_lock=threading.Lock()
+        logger=logger,
+        latest_block=head,
+        latest_block_lock=threading.Lock(),
+        block_holders={},
+        block_holders_lock=threading.RLock(),
     )
     init_pending_ads(node)
     return node

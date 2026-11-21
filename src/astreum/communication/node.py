@@ -29,7 +29,7 @@ def connect_node(astreum_node):
         except Exception as exc:
             astreum_node.logger.error("Invalid latest_block_hash in config: %s", exc)
 
-    if verified_up_to_hex and getattr(astreum_node, "verified_up_to", None) is None:
+    if verified_up_to_hex and astreum_node.verified_up_to is None:
         try:
             from astreum.utils.bytes import hex_to_bytes
 

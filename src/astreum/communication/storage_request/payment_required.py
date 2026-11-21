@@ -70,12 +70,7 @@ def _queue_storage_payment_required(
         )
         return False
 
-    try:
-        base_storage_fee = int(getattr(node, "storage_request_current_price", 0) or 0)
-    except Exception:
-        base_storage_fee = 0
-    if base_storage_fee < 0:
-        base_storage_fee = 0
+    base_storage_fee = max(0, int(node.storage_request_current_price))
 
     try:
         payload = encode_storage_payment_required(

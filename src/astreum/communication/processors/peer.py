@@ -158,7 +158,7 @@ def _manage_peer_pass(node: "Node", probed: dict, now: float) -> None:
     if peer_count == 0:
         bootstrap_interval = node.config.bootstrap_retry_interval
         wall_now = time.time()
-        last_attempt = getattr(node, "_bootstrap_last_attempt", 0.0)
+        last_attempt = node._bootstrap_last_attempt
         if bootstrap_interval and (wall_now - last_attempt) >= bootstrap_interval:
             sent = _queue_bootstrap_handshakes(node)
             if sent:

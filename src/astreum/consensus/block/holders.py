@@ -40,8 +40,8 @@ def block_holder(node: Any, block_hash: Optional[bytes]) -> Optional["RelayEndpo
     Returns:
         The endpoint if found, else None.
     """
-    holders = getattr(node, "block_holders", None)
-    if holders is None or not block_hash:
+    holders = node.block_holders
+    if not block_hash:
         return None
     with node.block_holders_lock:
         return holders.get(block_hash)
@@ -95,11 +95,9 @@ def replace_holder_relay_key(node: Any, old_key: bytes, new_key: bytes) -> int:
         new_key: The relay key that the peer has now.
 
     Returns:
-        The number of entries that changed. 0 if the node has no table.
+        The number of entries that changed.
     """
-    holders = getattr(node, "block_holders", None)
-    if holders is None:
-        return 0
+    holders = node.block_holders
     from astreum.communication.models.relay_endpoint import RelayEndpoint
 
     changed = 0
@@ -136,14 +134,14 @@ def get_ping_holder(
     holder = block_holder(node, block_hash)
     if holder is not None:
         return holder
-    own_key = getattr(node.config, "validation_public_key_bytes", None)
+    own_key = node.config.validation_public_key_bytes
     if block is None or not own_key:
         return None
     if block.validator_public_key_bytes != own_key:
         return None
-    relay_key = getattr(node.config, "relay_public_key_bytes", None)
-    host = getattr(node, "relay_ip_address", None)
-    port = getattr(node.config, "port", None)
+    relay_key = node.config.relay_public_key_bytes
+    host = node.relay_ip_address
+    port = node.config.port
     if not relay_key or not host or port is None:
         return None
     from astreum.communication.models.relay_endpoint import RelayEndpoint

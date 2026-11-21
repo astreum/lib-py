@@ -37,6 +37,9 @@ class Node:
 
         # Machine Setup
         self.is_connected = False
+        self.relay_ip_address = None
+        self.verified_up_to = None
+        self._bootstrap_last_attempt = 0.0
         self.latest_block_hash = None
         self.latest_block = None
         self.latest_block_lock = Lock()

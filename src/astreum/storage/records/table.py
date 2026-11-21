@@ -40,7 +40,7 @@ def put_record_in_cold_storage(node: "Node", storage_id: bytes, slot_ids: list[b
         key=storage_id,
     )
     if written:
-        new_record_ids = getattr(node, "new_record_ids", None)
+        new_record_ids = node.new_record_ids
         if new_record_ids is not None:
             new_record_ids.append(storage_id)
     return written

@@ -145,7 +145,7 @@ def _long_term_store_one(node: "Node") -> bool:
     if get_record_from_cold_storage(node, storage_id) is not None:
         return False  # already stored
 
-    block = getattr(node, "latest_block", None)
+    block = node.latest_block
     if block is None:
         return False
     storage_account = block.accounts.get_account(STORAGE_ADDRESS, node)
@@ -182,12 +182,12 @@ def _startup_announce_step(node: "Node") -> str:
         ``"wait"`` if the node is not synced yet, ``"more"`` if records
         remain, ``"done"`` if the job is finished or does not apply.
     """
-    if not getattr(node, "is_storage_provider", False):
+    if not node.is_storage_provider:
         return _ANNOUNCE_DONE
-    state = getattr(node, "startup_announce", None)
+    state = node.startup_announce
     if state == _ANNOUNCE_DONE:
         return _ANNOUNCE_DONE
-    if getattr(node, "latest_block", None) is None:
+    if node.latest_block is None:
         return _ANNOUNCE_WAIT
 
     try:
@@ -223,7 +223,7 @@ def _send_index_requests(node: "Node") -> bool:
     Returns:
         True if the requests were sent in this call, False otherwise.
     """
-    if node.index_requested or getattr(node, "latest_block", None) is None:
+    if node.index_requested or node.latest_block is None:
         return False
     with node.peers_lock:
         peers = list(node.peers.values())
@@ -251,7 +251,7 @@ def _send_branch_index_requests(node: "Node") -> bool:
     Returns:
         True if a request was sent to at least one peer, False otherwise.
     """
-    if getattr(node, "latest_block", None) is None:
+    if node.latest_block is None:
         return False
     route = node.peer_route
     peers = route.closest_peers(node.storage_public_key_bytes, route.bucket_size)
@@ -394,10 +394,8 @@ def advertise_storage(astreum_node: "Node") -> None:
     price_interval = float(astreum_node.config.storage_request_price_interval or 0)
     prune_interval = float(astreum_node.config.expr_request_ttl or 0)
 
-    long_term_interval = float(
-        getattr(astreum_node, "long_term_storage_interval", 0) or 0
-    )
-    long_term_enabled = bool(getattr(astreum_node, "is_storage_provider", False))
+    long_term_interval = float(astreum_node.long_term_storage_interval)
+    long_term_enabled = bool(astreum_node.is_storage_provider)
 
     if long_term_enabled:
         astreum_node.logger.info(
@@ -415,7 +413,7 @@ def advertise_storage(astreum_node: "Node") -> None:
     next_price_at = now if price_interval > 0 else None
     next_long_term_at = now if long_term_enabled and long_term_interval > 0 else None
     next_prune_at = now + prune_interval if prune_interval > 0 else None
-    next_announce_at = now if getattr(astreum_node, "is_storage_provider", False) else None
+    next_announce_at = now if astreum_node.is_storage_provider else None
     next_index_at = now
     next_put_at = now
     timer = SelfLookupTimer()

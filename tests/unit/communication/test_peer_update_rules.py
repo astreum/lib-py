@@ -58,6 +58,8 @@ def _node(default_seed_ips=()):
         incoming_queue_size_limit=0,
         incoming_queue_size_lock=threading.Lock(),
         communication_stop_event=threading.Event(),
+        block_holders={},
+        block_holders_lock=threading.RLock(),
     )
 
 

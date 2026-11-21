@@ -70,6 +70,7 @@ def _node(use_ipv6=False, bucket_size=16):
         peers_lock=threading.RLock(),
         peer_route=Route(OWN_KEY, bucket_size=bucket_size),
         validation_route=Route(OWN_KEY, bucket_size=bucket_size),
+        is_connected=True,
         outgoing_queue=queue.Queue(),
         logger=_logger(),
     )

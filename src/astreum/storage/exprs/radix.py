@@ -41,7 +41,7 @@ def _is_request_finished(node, expr_id: bytes) -> bool:
 
     if getattr(node, "expr_requests_lock", None) is None:
         return False
-    buffered = getattr(node, "storage_request_buffered", ())
+    buffered = node.storage_request_buffered
     return not has_expr_req(node, expr_id) and expr_id not in buffered
 
 
@@ -130,7 +130,7 @@ def get_radix_key_from_network(
 
     if _is_readable(node, node_hash, block_hash):
         return True
-    if not getattr(node, "is_connected", False):
+    if not node.is_connected:
         return False
 
     # Only a scoped call without a contact is routed by the block.
@@ -243,7 +243,7 @@ def get_radix_all_from_network(
         )
         if not missing:
             return True
-        if not getattr(node, "is_connected", False):
+        if not node.is_connected:
             return False
         if missing == last:
             # The handler may still be storing the last reply. Look once more.

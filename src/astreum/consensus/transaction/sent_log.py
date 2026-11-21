@@ -54,6 +54,6 @@ def append_sent_transaction(
         node.logger.warning(
             "Sent transaction log write failed for tx %r at %r: %r",
             tx_hash,
-            getattr(node.config, "sent_transactions_path", None),
+            node.config.sent_transactions_path,
             exc,
         )

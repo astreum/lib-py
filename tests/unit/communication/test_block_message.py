@@ -241,7 +241,10 @@ class TestBlockHolders(unittest.TestCase):
         self.assertIsNone(block_holder(node, b"a" * 32))
 
     def test_unknown_or_missing_state(self):
-        self.assertIsNone(block_holder(SimpleNamespace(), b"x" * 32))
+        node = SimpleNamespace(
+            block_holders={}, block_holders_lock=threading.Lock()
+        )
+        self.assertIsNone(block_holder(node, b"x" * 32))
         node = SimpleNamespace()
         init_block_holders(node)
         self.assertIsNone(block_holder(node, b"x" * 32))

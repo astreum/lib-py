@@ -224,7 +224,7 @@ def _chain_counter(node: Node, block=None) -> int:
     Returns:
         The account counter at the block.
     """
-    latest_block = block if block is not None else getattr(node, "latest_block", None)
+    latest_block = block if block is not None else node.latest_block
     if latest_block is None:
         return 0
     try:
@@ -379,7 +379,7 @@ def _send_batch(
     """
     tx_bytes = 0
     try:
-        sent = getattr(node, "latest_block", None) or head
+        sent = node.latest_block or head
         if counter is None:
             counter = _chain_counter(node, sent)
         tx = _build_multi_claim_tx(
@@ -522,7 +522,7 @@ def claim_storage(node: Node) -> None:
     Returns:
         None.
     """
-    if not getattr(node, "is_storage_provider", False):
+    if not node.is_storage_provider:
         return
 
     stop = node.communication_stop_event

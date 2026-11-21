@@ -64,6 +64,8 @@ def _node(peer_for=None, flush_interval: float = 0.05):
         expr_requests={},
         expr_requests_lock=threading.RLock(),
         communication_stop_event=threading.Event(),
+        block_holders={},
+        block_holders_lock=threading.RLock(),
     )
     init_request_buffer(node)
     return node

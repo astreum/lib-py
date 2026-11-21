@@ -58,8 +58,9 @@ class TestReplaceHolderRelayKey(unittest.TestCase):
         self.assertEqual(block_holder(self.node, b"\x10" * 32).relay_key, OLD)
         self.assertEqual(block_holder(self.node, b"\x11" * 32).relay_key, OTHER)
 
-    def test_replace_without_a_table(self):
-        self.assertEqual(replace_holder_relay_key(SimpleNamespace(), OLD, NEW), 0)
+    def test_replace_with_an_empty_table(self):
+        node = SimpleNamespace(block_holders={}, block_holders_lock=threading.RLock())
+        self.assertEqual(replace_holder_relay_key(node, OLD, NEW), 0)
 
     def test_the_first_holder_is_still_kept(self):
         replace_holder_relay_key(self.node, OLD, NEW)

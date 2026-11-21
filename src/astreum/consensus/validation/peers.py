@@ -14,9 +14,9 @@ def validator_peers(node: Any) -> Dict[bytes, Any]:
     Returns:
         Dictionary of public key bytes to peer objects.
     """
-    validation_route = getattr(node, "validation_route", None)
-    if validation_route is None:
+    if not node.is_connected:
         return {}
+    validation_route = node.validation_route
     validators: Dict[bytes, Any] = {}
     for peer in list(validation_route.peers.values()):
         if peer is not None and getattr(peer, "address", None):

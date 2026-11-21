@@ -162,10 +162,7 @@ def handle_storage_response(node: "Node", peer: "Peer", message: Message) -> tup
                 hint_peer,
             )
 
-            has_local_payment_key = bool(
-                getattr(node, "storage_secret_key", None)
-                or node.config.storage_secret_key
-            )
+            has_local_payment_key = bool(node.config.storage_secret_key)
             if has_local_payment_key:
                 return True, None
 

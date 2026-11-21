@@ -113,7 +113,7 @@ def flush_ads(node: Any) -> list[bytes]:
     Returns:
         List of sent expression identifiers.
     """
-    pending = getattr(node, "pending_ads", None)
+    pending = node.pending_ads
     if not pending:
         return []
     with node.latest_block_lock:

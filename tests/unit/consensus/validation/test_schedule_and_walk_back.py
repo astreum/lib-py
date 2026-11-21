@@ -114,7 +114,10 @@ class TestWorkerLoop(unittest.TestCase):
     def _run(self, *, validator_side_effect, head=_h(2), last_good=_h(1), previous_hash=None):
         """Start with ``last_good`` as the head. The first pass moves it to ``head``."""
         node = _node(head=last_good)
-        node.config = SimpleNamespace(validation_public_key_bytes=self.KEY)
+        node.config = SimpleNamespace(
+            validation_public_key_bytes=self.KEY,
+            chain_id=0,
+        )
         node._validation_stop_event = threading.Event()
         parent = SimpleNamespace(
             timestamp=500,
@@ -186,7 +189,10 @@ class TestWorkerBatchFetch(unittest.TestCase):
         head = _h(2)
         node = _node(head=head)
         node.nonce_time_ms = 500
-        node.config = SimpleNamespace(validation_public_key_bytes=self.KEY)
+        node.config = SimpleNamespace(
+            validation_public_key_bytes=self.KEY,
+            chain_id=0,
+        )
         node._validation_stop_event = threading.Event()
         node._validation_transaction_queue = mock.Mock()
         parent = SimpleNamespace(
@@ -318,6 +324,7 @@ class TestWorkerBuildTime(unittest.TestCase):
         node.config = SimpleNamespace(
             validation_public_key_bytes=self.KEY,
             validation_secret_key=mock.Mock(),
+            chain_id=0,
         )
         node._validation_stop_event = threading.Event()
         node._validation_transaction_queue = mock.Mock()

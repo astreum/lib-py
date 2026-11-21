@@ -384,7 +384,7 @@ def make_validation_worker(
 
             initial_balance = compute_total_balance(accounts_snapshot, node)
             new_block = create_block(
-                chain_id=getattr(node, "chain", 0),
+                chain_id=node.config.chain_id,
                 previous_block_hash=latest_block_hash,
                 previous_block=previous_block,
                 height=previous_block.height + 1,

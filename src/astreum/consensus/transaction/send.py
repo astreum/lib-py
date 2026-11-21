@@ -136,7 +136,7 @@ def send_transaction(
             difficulty=peer.difficulty,
         )
 
-    if getattr(node.config, "sent_transactions_path", None):
+    if node.config.sent_transactions_path:
         append_sent_transaction(node, transaction, tx_hash, latest_block.height)
 
     return tx_hash

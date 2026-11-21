@@ -63,7 +63,7 @@ def _get_latest_storage_account(node: "Node") -> Optional["Account"]:
     """
     global _storage_account_cache
 
-    latest_block = getattr(node, "latest_block", None)
+    latest_block = node.latest_block
     if latest_block is None:
         return None
 

@@ -375,7 +375,7 @@ def prefetch_exprs_from_network(
     Returns: None
     """
     try:
-        if not getattr(node, "is_connected", False):
+        if not node.is_connected:
             return
         wanted = [
             (h, resolution)

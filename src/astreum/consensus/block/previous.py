@@ -38,9 +38,7 @@ def get_previous_block(node: Any, block: Any) -> Optional[Any]:
             node, prev_hash, contact=contact, load_bloom=False
         )
     except Exception as exc:
-        logger = getattr(node, "logger", None)
-        if logger is not None:
-            logger.debug(
-                "Unable to load previous block %s: %s", prev_hash.hex(), exc
-            )
+        node.logger.debug(
+            "Unable to load previous block %s: %s", prev_hash.hex(), exc
+        )
         return None

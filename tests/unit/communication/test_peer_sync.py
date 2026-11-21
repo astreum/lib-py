@@ -57,6 +57,7 @@ def _full_node(window=60):
         logger=logging.getLogger("test_peer_sync"),
         default_seed_ips=set(),
         bootstrap_peers=[],
+        _bootstrap_last_attempt=0.0,
         peers={},
         peers_lock=threading.RLock(),
         peer_route=Route(storage_public),
