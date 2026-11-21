@@ -18,6 +18,7 @@ from astreum.crypto.bloom_search import (
 from astreum.crypto.bloom_search import search as search_module
 from astreum.crypto.bloom_search.search import iter_matching_transactions
 from astreum.crypto.bloom_tree import BloomTree
+from astreum.expression import ZERO32
 from astreum.crypto.bloom_tree.tree import bloom_search_leaves, bloom_search_storage
 from astreum.expression import NIL
 
@@ -62,6 +63,7 @@ def _block(tree, height, previous=None):
         bloom_hash=tree.root.expr().hash(),
         expr_id=_addr(f"block/{height}"),
         previous_block=previous,
+        previous_block_hash=ZERO32 if previous is None else previous.expr_id,
     )
 
 

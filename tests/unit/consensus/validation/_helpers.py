@@ -215,6 +215,7 @@ def make_block(
         receipts_hash=ZERO32,
         validation_difficulty=1,
         validator_public_key_bytes=os.urandom(32),
+        statistics=prev_block.statistics,
     )
     block.accounts = Accounts()
     block.transactions = []

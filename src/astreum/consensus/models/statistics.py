@@ -125,10 +125,10 @@ def all_time_rate_fraction(block: object) -> tuple[int, int] | None:
         The ``(total_fees, cumulative_total_balance)`` fraction, or None
         when the previous block or its statistics are missing.
     """
-    previous_block = getattr(block, "previous_block", None)
+    previous_block = block.previous_block
     if previous_block is None:
         return None
-    stats = getattr(previous_block, "statistics", None)
+    stats = previous_block.statistics
     if stats is None or stats.cumulative_total_balance <= 0:
         return None
     return stats.total_fees, stats.cumulative_total_balance

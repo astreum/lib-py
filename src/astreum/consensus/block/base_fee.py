@@ -53,7 +53,7 @@ def estimate_transaction_base_fee(
 
     total_fee = 0
     total_count = 0
-    target = (head.height or 0) - 1
+    target = head.height - 1
     block = get_previous_block(node, head)
     for i in range(samples):
         if block is None or target < 0:

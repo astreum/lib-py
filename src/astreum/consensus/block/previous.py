@@ -22,17 +22,17 @@ def get_previous_block(node: Any, block: Any) -> Optional[Any]:
         The parent block, or None if *block* is a genesis block or the parent
         cannot be loaded. The parent has no bloom tree loaded.
     """
-    previous = getattr(block, "previous_block", None)
+    previous = block.previous_block
     if previous is not None:
         return previous
 
-    prev_hash = getattr(block, "previous_block_hash", None)
+    prev_hash = block.previous_block_hash
     if not prev_hash or prev_hash == ZERO32:
         return None
 
     from astreum.consensus.block.encoding.decode import get_block_from_storage
 
-    contact = block_holder(node, prev_hash) or getattr(block, "contact", None)
+    contact = block_holder(node, prev_hash) or block.contact
     try:
         return get_block_from_storage(
             node, prev_hash, contact=contact, load_bloom=False

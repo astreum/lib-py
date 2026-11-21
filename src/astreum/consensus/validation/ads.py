@@ -66,7 +66,7 @@ def _block_hash(block: Any) -> Optional[bytes]:
     Returns:
         The block hash or None.
     """
-    expr_id = getattr(block, "expr_id", None)
+    expr_id = block.expr_id
     if expr_id and expr_id != ZERO32:
         return expr_id
     try:

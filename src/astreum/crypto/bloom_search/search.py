@@ -154,7 +154,7 @@ def _load_block_txs(node: Any, block) -> list["Transaction"]:
         return []
 
     # The tx trie is all new in its block: its provider holds every tx.
-    block_id = getattr(block, "expr_id", None)
+    block_id = block.expr_id
     scope = {} if not block_id else {"block_hash": block_id}
     expr = get_expr_list(node, block.transactions_hash, **scope)
     if expr is None:

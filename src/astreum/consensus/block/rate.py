@@ -80,7 +80,7 @@ def calculate_quote_rate(block: object) -> Fraction:
         return Fraction(0)
 
     total_fees, cumulative_total_balance = rate_fraction
-    height = int(getattr(block, "height", 0))
+    height = block.height
     if height <= 0 or total_fees <= 0:
         return Fraction(0)
 
@@ -126,13 +126,13 @@ def calculate_fee_rate(block: object) -> Fraction:
             unavailable, or if either pair total is zero. An empty pair
             has no price.
     """
-    previous_block = getattr(block, "previous_block", None)
+    previous_block = block.previous_block
     if previous_block is None:
         raise ValueError(
             "previous block is required for the measured byte price"
         )
 
-    stats = getattr(previous_block, "statistics", None)
+    stats = previous_block.statistics
     if not stats:
         raise ValueError(
             "previous block statistics are required for the measured byte price"
@@ -167,14 +167,12 @@ def calculate_storage_fee(block: object, total_bytes: int) -> int:
         copies of the data.
 
     Raises:
-        ValueError: If the previous block quote is zero or the demand
-            pair has no price. The fee is never invented.
+        ValueError: If the block has no previous block, the previous block
+            quote is zero, or the demand pair has no price. The fee is never
+            invented.
     """
-    previous_block = getattr(block, "previous_block", None)
-    if previous_block is None:
-        # TODO: return None instead of 0, propagate None through
-        # add_pending_storage_contract caller chain
-        return 0
+    if block.previous_block is None:
+        raise ValueError("previous block is required for the storage fee")
 
     quote = calculate_quote_rate(block)
     if quote <= 0:
@@ -201,7 +199,7 @@ def estimate_storage_rate(head: object, window: int) -> Fraction:
     Raises:
         ValueError: If the head total fees are not greater than zero.
     """
-    stats = getattr(head, "statistics", None)
+    stats = head.statistics
     if not isinstance(stats, BlockStatistics):
         raise ValueError("head statistics are required for the storage rate")
     cumulative_fee = int(stats.total_fees)
@@ -259,7 +257,7 @@ def next_storage_price(head: object) -> tuple[Fraction, Fraction]:
         ValueError: If the head has no measured demand pair.
     """
     next_block = SimpleNamespace(
-        height=int(getattr(head, "height", 0) or 0) + 1,
+        height=head.height + 1,
         previous_block=head,
     )
     return calculate_fee_rate(next_block), calculate_quote_rate(next_block)

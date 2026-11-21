@@ -16,8 +16,8 @@ def handle_channel_close(
     sender_account: Any,
     counterparty: bytes,
 ) -> bool:
-    previous_block = getattr(block, "previous_block", None)
-    previous_block_time = getattr(previous_block, "timestamp", None)
+    previous_block = block.previous_block
+    previous_block_time = previous_block.timestamp
     if previous_block_time is None:
         return False
 

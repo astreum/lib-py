@@ -96,7 +96,7 @@ def current_validator(
     if target_timestamp <= block_timestamp:
         target_timestamp = block_timestamp + 1
 
-    accounts_hash = getattr(block, "accounts_hash", None)
+    accounts_hash = block.accounts_hash
     if not accounts_hash:
         raise ValueError("block missing accounts hash")
     accounts = Accounts(root_hash=accounts_hash, contact=contact, block_hash=block_hash)
@@ -150,7 +150,7 @@ def current_validator(
     if not stakes:
         raise ValueError("no validator stakes found in treasury trie")
 
-    seed_value = int.from_bytes(bytes(block_hash or getattr(block, "previous_block_hash", ZERO32)), "big", signed=False)
+    seed_value = int.from_bytes(bytes(block_hash or block.previous_block_hash), "big", signed=False)
     rng = random.Random(seed_value)
 
     def pick_validator() -> bytes:

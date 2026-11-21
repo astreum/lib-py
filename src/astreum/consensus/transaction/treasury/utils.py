@@ -9,6 +9,18 @@ from astreum.consensus.transaction.treasury.record import TreasuryLoanRecord
 from astreum.expression.helpers import get_expr_builtin_tag
 
 
+def _current_height(block: object) -> int:
+    """Return the height of the block being applied.
+
+    Args:
+        block: The block.
+
+    Returns:
+        The block height.
+    """
+    return block.height
+
+
 class _PendingNodes:
     """A node view that reads a block's pending exprs before storage.
 
@@ -117,11 +129,16 @@ def insurance_interval_fee(
     Returns:
         The premium, or `None` when a counter is positive but the blend's
         denominator is not. With no global loans the premium is `0`.
+
+    Raises:
+        ValueError: If the block has no statistics.
     """
-    stats = getattr(block, "statistics", None)
-    gc = stats.total_loan_count if stats is not None else 0
-    gd = stats.total_written_off if stats is not None else 0
-    gl = stats.total_loaned if stats is not None else 0
+    stats = block.statistics
+    if stats is None:
+        raise ValueError("block statistics are required for the premium")
+    gc = stats.total_loan_count
+    gd = stats.total_written_off
+    gl = stats.total_loaned
     if gc <= 0:
         return 0
     denominator = loaned * gc + gl

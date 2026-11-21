@@ -21,29 +21,12 @@ from astreum.consensus.transaction.treasury.record import (
 from astreum.consensus.transaction.treasury.utils import (
     _overdue_blocks,
     _trie_exprs,
+    _current_height,
 )
 from astreum.expression.helpers import get_expr_builtin_tag
 
 
 LOAN_TRANSACTION_ID_SIZE = 32
-
-
-def _current_height(block: object) -> int:
-    """Get the current block height.
-
-    Args:
-        block: The block.
-
-    Returns:
-        The block height.
-    """
-    return int(
-        getattr(
-            block,
-            "height",
-            int(getattr(block.previous_block, "height", -1)) + 1,
-        )
-    )
 
 
 def _claim_cost_buyout_price(

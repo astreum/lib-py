@@ -34,12 +34,14 @@ def block_scope(block: object) -> bytes | None:
     Returns its id once it has one (a verified block), else None (one being built).
 
     Args:
-        block: The block.
+        block: The block, or None for a size-only walk.
 
     Returns:
         The block id or None.
     """
-    block_id = getattr(block, "expr_id", None)
+    if block is None:
+        return None
+    block_id = block.expr_id
     if not block_id or block_id == ZERO32:
         return None
     return block_id
@@ -179,7 +181,7 @@ def storage_walk_size(
     Cells whose hash is in *exclude* (and everything below them) are not
     counted nor fetched. Returns None if a referenced cell cannot be fetched.
     """
-    contact = getattr(block, "contact", None)
+    contact = block.contact if block is not None else None
     # A block being built has no id yet; a verified one does, and the cells of
     # its transactions are in its record.
     cell_block = block_scope(block)
@@ -250,7 +252,7 @@ def generate_initial_storage_record(
     """
     storage_account = block.accounts.get_account(STORAGE_ADDRESS, node)
     storage_data = storage_account.data
-    contact = getattr(block, "contact", None)
+    contact = block.contact
 
     root_hash = expr.hash()
     existing = get_from_radix_tree(storage_data, node, root_hash)

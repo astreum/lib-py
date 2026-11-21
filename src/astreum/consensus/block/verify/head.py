@@ -52,7 +52,7 @@ def verify_block_head(node: Any, block: Any) -> bool:
     block_hash = bytes(block.expr_id)
     prev_hash = block.previous_block_hash or ZERO32
     is_genesis = prev_hash == ZERO32
-    previous_block: Optional[Block] = getattr(block, "previous_block", None)
+    previous_block: Optional[Block] = block.previous_block
     if not is_genesis and previous_block is None:
         node.logger.debug("Block head verify failed missing previous block=%s", _hex(prev_hash))
         return False
@@ -100,7 +100,7 @@ def verify_block_head(node: Any, block: Any) -> bool:
         node.logger.debug("Block head verify failed missing body/signature/validator block=%s", _hex(block_hash))
         return False
 
-    expected_height = (previous_block.height or 0) + 1
+    expected_height = previous_block.height + 1
     if block.height != expected_height:
         node.logger.debug(
             "Block head verify failed height mismatch block=%s height=%s expected=%s",

@@ -28,6 +28,7 @@ from astreum.consensus.transaction.treasury.record import (
 from astreum.consensus.transaction.treasury.utils import (
     _data_nodes,
     _trie_exprs,
+    _current_height,
     insurance_interval_fee as _insurance_interval_fee,
 )
 
@@ -42,24 +43,6 @@ def _extend_pending_exprs(block: object, exprs: list[Expr]) -> None:
     Returns: None
     """
     block.pending_exprs.extend(exprs)
-
-
-def _current_height(block: object) -> int:
-    """Get the current block height.
-
-    Args:
-        block: The block.
-
-    Returns:
-        The block height.
-    """
-    return int(
-        getattr(
-            block,
-            "height",
-            int(getattr(block.previous_block, "height", -1)) + 1,
-        )
-    )
 
 
 def secured_loan_remaining_total(

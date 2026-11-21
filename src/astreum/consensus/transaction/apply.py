@@ -112,8 +112,8 @@ def demand_pair(node: Any, block: object) -> tuple[int, int]:
         ValueError: If a transaction cell cannot be fetched. The pair is
             never invented.
     """
-    receipts = getattr(block, "receipts", None) or []
-    transactions = getattr(block, "transactions", None) or []
+    receipts = block.receipts or []
+    transactions = block.transactions or []
     tx_fees = sum(receipt.base_fee + receipt.execution_fee for receipt in receipts)
     tx_bytes = 0
     for transaction in transactions:
@@ -922,7 +922,7 @@ def apply_transaction(node: Any, block: object, transaction_hash: bytes) -> None
     Returns: None
     """
     # A verified block's transactions are asked from its provider.
-    block_hash = getattr(block, "expr_id", None)
+    block_hash = block.expr_id
     scope = {} if not block_hash or block_hash == ZERO32 else {"block_hash": block_hash}
     transaction = get_transaction_from_storage(
         node, transaction_hash, contact=block.contact, **scope

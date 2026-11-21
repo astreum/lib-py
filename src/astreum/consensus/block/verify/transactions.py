@@ -195,7 +195,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
                 _hex(block.expr_id),
             )
             return False, "genesis total fee mismatch"
-        genesis_stats = getattr(block, "statistics", None)
+        genesis_stats = block.statistics
         if genesis_stats is not None and (
             genesis_stats.total_loan_count
             or genesis_stats.total_loaned
@@ -238,7 +238,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         # trust root. A set-up chain may start with fee history (so its first
         # block can be priced); a raw genesis starts with zeros. Check the
         # shape and signs, not exact figures.
-        stats = getattr(block, "statistics", None)
+        stats = block.statistics
         if not isinstance(stats, BlockStatistics):
             node.logger.debug(
                 "Block verify genesis statistics mismatch block=%s",
@@ -331,7 +331,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         transactions=[],
         receipts=[],
         total_balance=initial_balance,
-        statistics=getattr(prev_block, "statistics", None),
+        statistics=prev_block.statistics,
         contact=block.contact,
         expr_id=block.expr_id,
     )
@@ -419,7 +419,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
 
     # Award validator reward (replicating block builder)
     reward_amount = validator_reward(work_block.receipts)
-    validator_key = getattr(block, "validator_public_key_bytes", None)
+    validator_key = block.validator_public_key_bytes
     if validator_key:
         try:
             validator_account = work_block.accounts.get_account(
@@ -656,7 +656,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         tx_fees=delta_tx_fees,
         tx_bytes=delta_tx_bytes,
     )
-    if getattr(block, "statistics", None) != expected_statistics:
+    if block.statistics != expected_statistics:
         node.logger.debug(
             "Block verify statistics mismatch block=%s",
             _hex(block.expr_id),

@@ -45,6 +45,7 @@ def _block(height, block_hash, parent=None):
         expr_id=block_hash,
         previous_block=parent,
         previous_block_hash=parent.expr_id if parent is not None else _hash(0),
+        contact=None,
     )
 
 

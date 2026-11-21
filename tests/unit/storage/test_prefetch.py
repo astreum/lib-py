@@ -79,7 +79,7 @@ class TestBloomSearchPrefetch(unittest.TestCase):
         tx_list = link(None, link(None, NIL))
         tx_list.head_hash = H[0]
         tx_list.tail.head_hash = H[1]
-        block = SimpleNamespace(transactions_hash=b"\x09" * 32)
+        block = SimpleNamespace(transactions_hash=b"\x09" * 32, expr_id=None)
         order = []
 
         with patch.object(search, "get_expr_list", return_value=tx_list), \

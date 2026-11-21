@@ -174,7 +174,7 @@ def _select_latest_block(node: Any) -> None:
             )
         except Exception:
             continue
-        ts = getattr(block, "timestamp", None)
+        ts = block.timestamp
         if ts is None:
             continue
         ts_int = ts

@@ -127,11 +127,9 @@ class TestStorageFee(unittest.TestCase):
         )
         self.assertEqual(calculate_storage_fee(block, 101), 2 * 152)
 
-    def test_fee_zero_without_previous_block(self):
-        self.assertEqual(
-            calculate_storage_fee(SimpleNamespace(previous_block=None), 1000),
-            0,
-        )
+    def test_fee_raises_without_previous_block(self):
+        with self.assertRaisesRegex(ValueError, "previous block"):
+            calculate_storage_fee(SimpleNamespace(previous_block=None), 1000)
 
     def test_fee_raises_on_zero_total_fee(self):
         block = _block(

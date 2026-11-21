@@ -139,7 +139,7 @@ def get_ping_holder(
     own_key = getattr(node.config, "validation_public_key_bytes", None)
     if block is None or not own_key:
         return None
-    if getattr(block, "validator_public_key_bytes", None) != own_key:
+    if block.validator_public_key_bytes != own_key:
         return None
     relay_key = getattr(node.config, "relay_public_key_bytes", None)
     host = getattr(node, "relay_ip_address", None)

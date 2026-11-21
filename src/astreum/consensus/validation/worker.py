@@ -269,8 +269,8 @@ def make_validation_worker(
             """
             if reward_amount <= 0:
                 return
-            accounts = getattr(block, "accounts", None)
-            validator_key = getattr(block, "validator_public_key_bytes", None)
+            accounts = block.accounts
+            validator_key = block.validator_public_key_bytes
             if accounts is None or not validator_key:
                 node.logger.debug(
                     "Skipping validator reward; accounts snapshot or key missing"
@@ -387,7 +387,7 @@ def make_validation_worker(
                 chain_id=getattr(node, "chain", 0),
                 previous_block_hash=latest_block_hash,
                 previous_block=previous_block,
-                height=(previous_block.height or 0) + 1,
+                height=previous_block.height + 1,
                 timestamp=None,
                 accounts_hash=previous_block.accounts_hash,
                 bloom_hash=previous_block.bloom_hash,
@@ -405,7 +405,7 @@ def make_validation_worker(
                 transactions=[],
                 receipts=[],
                 total_balance=initial_balance,
-                statistics=getattr(previous_block, "statistics", None),
+                statistics=previous_block.statistics,
                 contact=head_holder,
             )
             node.logger.debug(

@@ -179,7 +179,7 @@ class Fork:
                         blk = None
                     if blk is None:
                         break
-                    prev = getattr(blk, "previous_block_hash", ZERO32) or ZERO32
+                    prev = blk.previous_block_hash or ZERO32
                     if prev == ZERO32:
                         break
                     blk_hash = prev
@@ -233,7 +233,7 @@ class Fork:
                         intersection_fork_head = other_head
                         node.logger.debug("Fork verify anchor intersection=%s other_head=%s", _hex(anchor_hash), _hex(other_head))
                     else:
-                        prev_hash = getattr(previous_block, "previous_block_hash", ZERO32) or ZERO32
+                        prev_hash = previous_block.previous_block_hash or ZERO32
                         if prev_hash == ZERO32:
                             self.reached_genesis = True
                             anchor_hash = current_block_hash
@@ -241,7 +241,7 @@ class Fork:
                             node.logger.debug("Fork verify anchor genesis=%s", _hex(anchor_hash))
 
             current_block = previous_block
-            prev_hash = getattr(previous_block, "previous_block_hash", ZERO32) or ZERO32
+            prev_hash = previous_block.previous_block_hash or ZERO32
             if prev_hash == ZERO32:
                 self.reached_genesis = True
                 break
@@ -249,7 +249,7 @@ class Fork:
 
         if current_block is not None and not anchor_validated:
             previous_block: Optional[Block] = None
-            prev_hash = getattr(current_block, "previous_block_hash", ZERO32) or ZERO32
+            prev_hash = current_block.previous_block_hash or ZERO32
             if prev_hash not in (None, ZERO32, b""):
                 try:
                     previous_block = get_block_from_storage(astreum_node=node, block_hash=prev_hash)
@@ -301,7 +301,7 @@ class Fork:
             if not current_validator:
                 return False
             return (
-                getattr(block, "validator_public_key_bytes", None) == current_validator
+                block.validator_public_key_bytes == current_validator
             )
 
         heavy_cursor = self.head
@@ -346,7 +346,7 @@ class Fork:
                     node.logger.debug("Fork verify heavy reached anchor=%s", _hex(anchor_hash))
                     break
 
-            prev_hash = getattr(blk, "previous_block_hash", ZERO32) or ZERO32
+            prev_hash = blk.previous_block_hash or ZERO32
             heavy_pending = blk
             if prev_hash == ZERO32:
                 break

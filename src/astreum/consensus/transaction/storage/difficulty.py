@@ -46,7 +46,7 @@ def next_storage_difficulty(parent: int, votes: int) -> int:
 
 
 def parent_storage_difficulty(block) -> int:
-    previous_block = getattr(block, "previous_block", None)
+    previous_block = block.previous_block
     if previous_block is None:
         return 0
     return previous_block.storage_difficulty
@@ -55,11 +55,11 @@ def parent_storage_difficulty(block) -> int:
 def fair_interval(parent) -> int | None:
     if parent is None:
         return None
-    stats = getattr(parent, "statistics", None)
+    stats = parent.statistics
     if not stats:
         return None
 
-    height = getattr(parent, "height", 0) or 0
+    height = parent.height
     if height <= 0:
         return None
     claims = stats.total_claims
