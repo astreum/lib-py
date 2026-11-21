@@ -9,7 +9,7 @@ from astreum.storage.exprs import (
     get_radix_all_from_network,
     prefetch_exprs_from_network,
 )
-from astreum.consensus.block.rate_window import update_statistics
+from astreum.consensus.models.statistics import BlockStatistics
 from astreum.consensus.block.reward import fee_income, validator_reward
 from astreum.storage.radix import RadixTree, get_from_radix_tree, put_in_radix_tree
 from astreum.consensus.models.accounts import Accounts, compute_total_balance
@@ -195,16 +195,17 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
                 _hex(block.expr_id),
             )
             return False, "genesis total fee mismatch"
-        if (
-            getattr(block, "global_loaned", 0)
-            or getattr(block, "global_defaulted", 0)
-            or getattr(block, "global_loan_count", 0)
+        genesis_stats = getattr(block, "statistics", None)
+        if genesis_stats is not None and (
+            genesis_stats.total_loan_count
+            or genesis_stats.total_loaned
+            or genesis_stats.total_written_off
         ):
             node.logger.debug(
-                "Block verify genesis global credit totals mismatch block=%s",
+                "Block verify genesis loan totals mismatch block=%s",
                 _hex(block.expr_id),
             )
-            return False, "genesis global credit totals mismatch"
+            return False, "genesis loan totals mismatch"
         if block.accounts_hash is None:
             node.logger.debug(
                 "Block verify genesis missing accounts hash block=%s",
@@ -238,17 +239,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         # block can be priced); a raw genesis starts with zeros. Check the
         # shape and signs, not exact figures.
         stats = getattr(block, "statistics", None)
-        valid_stats = (
-            isinstance(stats, (list, tuple))
-            and len(stats) == 1
-            and isinstance(stats[0], (list, tuple))
-            and len(stats[0]) == 6
-            and all(
-                isinstance(value, int) and not isinstance(value, bool) and value >= 0
-                for value in stats[0]
-            )
-        )
-        if not valid_stats:
+        if not isinstance(stats, BlockStatistics):
             node.logger.debug(
                 "Block verify genesis statistics mismatch block=%s",
                 _hex(block.expr_id),
@@ -340,9 +331,7 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         transactions=[],
         receipts=[],
         total_balance=initial_balance,
-        global_loaned=getattr(prev_block, "global_loaned", 0) or 0,
-        global_defaulted=getattr(prev_block, "global_defaulted", 0) or 0,
-        global_loan_count=getattr(prev_block, "global_loan_count", 0) or 0,
+        statistics=getattr(prev_block, "statistics", None),
         contact=block.contact,
         expr_id=block.expr_id,
     )
@@ -524,31 +513,6 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
         )
         return False, "total fee mismatch"
 
-    if getattr(block, "global_loaned", 0) != work_block.global_loaned:
-        node.logger.debug(
-            "Block verify global_loaned mismatch block=%s expected=%s actual=%s",
-            _hex(block.expr_id),
-            work_block.global_loaned,
-            getattr(block, "global_loaned", 0),
-        )
-        return False, "global_loaned mismatch"
-    if getattr(block, "global_defaulted", 0) != work_block.global_defaulted:
-        node.logger.debug(
-            "Block verify global_defaulted mismatch block=%s expected=%s actual=%s",
-            _hex(block.expr_id),
-            work_block.global_defaulted,
-            getattr(block, "global_defaulted", 0),
-        )
-        return False, "global_defaulted mismatch"
-    if getattr(block, "global_loan_count", 0) != work_block.global_loan_count:
-        node.logger.debug(
-            "Block verify global_loan_count mismatch block=%s expected=%s actual=%s",
-            _hex(block.expr_id),
-            work_block.global_loan_count,
-            getattr(block, "global_loan_count", 0),
-        )
-        return False, "global_loan_count mismatch"
-
     applied_transactions = list(work_block.transactions or [])
     if len(applied_transactions) != len(tx_hashes):
         node.logger.debug(
@@ -683,13 +647,14 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
             exc,
         )
         return False, "demand pair unavailable"
-    expected_statistics = update_statistics(
-        getattr(prev_block, "statistics", None),
-        work_block.total_balance,
-        delta_fee,
-        work_block.storage_claim_count,
-        delta_tx_fees,
-        delta_tx_bytes,
+    expected_statistics = (
+        work_block.statistics or BlockStatistics()
+    ).updated(
+        total_balance=work_block.total_balance,
+        fee_income=delta_fee,
+        claims=work_block.storage_claim_count,
+        tx_fees=delta_tx_fees,
+        tx_bytes=delta_tx_bytes,
     )
     if getattr(block, "statistics", None) != expected_statistics:
         node.logger.debug(

@@ -2,7 +2,7 @@
 
 A block is an expr tree: a root whose head is the inner pair and whose tail is
 the ``block`` symbol. The inner pair is a list of two: the body and the
-signature. The body is a list of 21 fields. Thirteen fields are ints. The decoder
+signature. The body is a list of 18 fields. Ten fields are ints. The decoder
 reads each int, which needs the int expr and its payload bytes expr. Without a
 shape, each of those is its own request.
 
@@ -17,9 +17,6 @@ from astreum.expression.shape import HOLD, INT, SEND, pair, repeat
 
 # Body fields in the order the decoder reads them.
 _BODY_FIELDS = (
-    INT,   # global loaned
-    INT,   # global defaulted
-    INT,   # global loan count
     SEND,  # accounts
     SEND,  # bloom
     INT,   # chain id
@@ -42,7 +39,7 @@ _BODY_FIELDS = (
 
 
 def _body_shape() -> bytes:
-    """Build the rule for the 21-field body list.
+    """Build the rule for the 18-field body list.
 
     Returns:
         bytes: A chain of PAIR rules, one per field.

@@ -14,7 +14,10 @@ from astreum.storage.radix import (
 from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 from astreum.consensus.transaction.model import Transaction
-from astreum.consensus.block.rate_window import all_time_rate_fraction
+from astreum.consensus.models.statistics import (
+    BlockStatistics,
+    all_time_rate_fraction,
+)
 from astreum.consensus.transaction.treasury.record import (
     load_user_record,
     LoanType,
@@ -305,8 +308,7 @@ def _handle_unsecured_borrow(
     # The chain's total_balance is a level and a mint moves it.
     sender_account.balance += principal
 
-    block.global_loaned = getattr(block, "global_loaned", 0) + principal
-    block.global_loan_count = getattr(block, "global_loan_count", 0) + 1
+    block.statistics = (block.statistics or BlockStatistics()).with_loan(principal)
 
     _extend_pending_exprs(
         block, loan_exprs + _trie_exprs(loans_trie) + borrower_record_exprs

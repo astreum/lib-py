@@ -23,6 +23,7 @@ HELPERS_DIR = Path(__file__).resolve().parent
 if str(HELPERS_DIR) not in sys.path:
     sys.path.insert(0, str(HELPERS_DIR))
 
+from astreum.consensus.models.statistics import BlockStatistics
 from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 from astreum.consensus.transaction import apply_transaction, create_transaction
@@ -139,8 +140,8 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
         self.assertEqual(loan.insurance_interval_fee, 0)  # first-ever unsecured loan
         self.assertEqual(loan.missed_count, 0)
         self.assertEqual(loan.owner, TREASURY_ADDRESS)
-        self.assertEqual(self.block.global_loaned, principal)
-        self.assertEqual(self.block.global_loan_count, 1)
+        self.assertEqual(self.block.statistics.total_loaned, principal)
+        self.assertEqual(self.block.statistics.total_loan_count, 1)
 
     def test_a_treasury_balance_below_the_principal_does_not_gate_the_borrow(self):
         principal = 100
@@ -185,9 +186,11 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
 
     def test_the_premium_is_the_measured_interval_fee_not_a_haircut(self):
         principal = 100
-        self.block.global_loan_count = 10
-        self.block.global_loaned = 10_000
-        self.block.global_defaulted = 3_333
+        self.block.statistics = BlockStatistics(
+            total_loan_count=10,
+            total_loaned=10_000,
+            total_written_off=3_333,
+        )
 
         fee = expected_insurance_interval_fee(
             principal=principal, global_loan_count=10,
@@ -212,9 +215,11 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
 
     def test_a_premium_at_or_above_the_principal_fails(self):
         # Every loaned unit defaulted: p = 1, so I = L.
-        self.block.global_loan_count = 10
-        self.block.global_loaned = 10_000
-        self.block.global_defaulted = 10_000
+        self.block.statistics = BlockStatistics(
+            total_loan_count=10,
+            total_loaned=10_000,
+            total_written_off=10_000,
+        )
 
         self._borrow(principal=100, treasury_balance=0)
 

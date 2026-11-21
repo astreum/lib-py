@@ -16,6 +16,8 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from astreum.consensus.models.statistics import BlockStatistics  # noqa: E402
+
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat  # noqa: E402
 
@@ -75,7 +77,7 @@ def _mined_block(previous, key, *, sign=True, pow_ok=True, height=None):
         total_base_fee=0,
         transaction_count=0,
         total_storage_fee=0,
-        statistics=[(1, 1, 1, 0, 0, 0)],
+        statistics=BlockStatistics(1, 1, 1, 0, 0, 0, 0, 0, 0),
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
         validation_difficulty=calculate_block_difficulty(previous.timestamp, timestamp, previous.validation_difficulty),
@@ -108,7 +110,7 @@ def _genesis_like(key):
         total_base_fee=0,
         transaction_count=0,
         total_storage_fee=0,
-        statistics=[(1, 1, 1, 0, 0, 0)],
+        statistics=BlockStatistics(1, 1, 1, 0, 0, 0, 0, 0, 0),
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
         validation_difficulty=1,

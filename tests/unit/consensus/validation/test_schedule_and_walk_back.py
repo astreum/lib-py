@@ -27,6 +27,7 @@ from astreum.consensus.validation.worker import (  # noqa: E402
     _walk_back,
     make_validation_worker,
 )
+from astreum.consensus.models.statistics import BlockStatistics  # noqa: E402
 from astreum.expression import ZERO32, resolve_inner_exprs  # noqa: E402
 from astreum.node import Node  # noqa: E402
 from astreum.storage.exprs import put_expr_in_hot_storage  # noqa: E402
@@ -120,7 +121,7 @@ class TestWorkerLoop(unittest.TestCase):
             height=2,
             accounts_hash=_h(0x0A),
             expr_id=head,
-            statistics=[(1, 1, 1, 0, 0, 0)],
+            statistics=BlockStatistics(1, 1, 1, 0, 0, 0),
         )
         draws = []
 
@@ -194,7 +195,7 @@ class TestWorkerBatchFetch(unittest.TestCase):
             accounts_hash=self.ACCOUNTS_ROOT,
             expr_id=head,
             bloom_hash=ZERO32,
-            statistics=[(1, 1, 1, 0, 0, 0)],
+            statistics=BlockStatistics(1, 1, 1, 0, 0, 0),
         )
         storage_account = SimpleNamespace(
             data=SimpleNamespace(root_hash=self.STORAGE_ROOT, root_block=self.STORAGE_BLOCK)
@@ -328,7 +329,7 @@ class TestWorkerBuildTime(unittest.TestCase):
             bloom_hash=ZERO32,
             validation_difficulty=1,
             storage_difficulty=0,
-            statistics=[(1, 1, 1, 0, 0, 0)],
+            statistics=BlockStatistics(1, 1, 1, 0, 0, 0),
         )
         account = SimpleNamespace(
             data=SimpleNamespace(root_hash=_h(0x0B), root_block=_h(0x0C), nodes={}),
@@ -345,6 +346,7 @@ class TestWorkerBuildTime(unittest.TestCase):
             storage_claim_count=0,
             storage_votes=0,
             total_balance=1,
+            statistics=None,
             accounts=SimpleNamespace(
                 get_account=lambda *a, **k: account,
                 pending_exprs=[],
@@ -399,7 +401,6 @@ class TestWorkerBuildTime(unittest.TestCase):
              mock.patch.object(worker_module, "generate_initial_storage_record", return_value=None), \
              mock.patch.object(worker_module, "BloomTree", mock.MagicMock()), \
              mock.patch.object(worker_module, "included_transaction_exprs", return_value=[]), \
-             mock.patch.object(worker_module, "update_statistics"), \
              mock.patch.object(worker_module, "extract_accounts_exprs", return_value=[]), \
              mock.patch.object(worker_module, "calculate_block_difficulty", return_value=1), \
              mock.patch.object(worker_module, "generate_block_nonce", side_effect=search), \

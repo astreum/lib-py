@@ -62,7 +62,7 @@ def fair_interval(parent) -> int | None:
     height = getattr(parent, "height", 0) or 0
     if height <= 0:
         return None
-    claims = stats[0][3]
+    claims = stats.total_claims
     if claims <= 0:
         return None
     lanes = PROVIDERS_PER_RECORD * height

@@ -9,6 +9,7 @@ from astreum.storage.radix import RadixTree, get_from_radix_tree, put_in_radix_t
 from astreum.consensus.block.rate import calculate_quote_rate
 from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
+from astreum.consensus.models.statistics import BlockStatistics
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.transaction.treasury.record import (
     load_loan_record,
@@ -260,7 +261,9 @@ def handle_treasury_close(
     pending_exprs = loan_exprs + _trie_exprs(loans_trie) + user_record_exprs
 
     if write_off_amount:
-        block.global_defaulted = getattr(block, "global_defaulted", 0) + write_off_amount
+        block.statistics = (
+            block.statistics or BlockStatistics()
+        ).with_write_off(write_off_amount)
 
     block.pending_exprs.extend(pending_exprs)
     block.accounts.set_account(TREASURY_ADDRESS, treasury_account)

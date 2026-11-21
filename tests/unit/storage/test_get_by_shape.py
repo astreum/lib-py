@@ -13,7 +13,8 @@ for path in (ROOT, SRC_DIR):
 
 from astreum.consensus.block.encoding.decode import get_block_from_storage  # noqa: E402
 from astreum.consensus.block.encoding.expr import get_block_expr  # noqa: E402
-from astreum.consensus.block.encoding.shape import BLOCK_SHAPE  # noqa: E402
+from astreum.consensus.block.encoding.shape import BLOCK_SHAPE
+from astreum.consensus.models.statistics import BlockStatistics  # noqa: E402
 from astreum.expression import (  # noqa: E402
     RESOLUTION_DYNAMIC,
     RESOLUTION_SINGLE,
@@ -116,7 +117,7 @@ class TestGetByShape(unittest.TestCase):
 
 class TestBlockShape(unittest.TestCase):
     def setUp(self):
-        self.block = _make_block(statistics=[(1, 1, 1, 2, 3, 4)])
+        self.block = _make_block(statistics=BlockStatistics(1, 1, 1, 2, 3, 4, 0, 0, 0))
         self.expr = get_block_expr(self.block)
         self.store = make_store(self.expr)
 
@@ -144,7 +145,7 @@ class TestBlockShape(unittest.TestCase):
             decoded = get_block_from_storage(node, self.expr.hash(), load_bloom=False)
         network.assert_not_called()
         self.assertEqual(decoded.height, self.block.height)
-        self.assertEqual(decoded.statistics, [(1, 1, 1, 2, 3, 4)])
+        self.assertEqual(decoded.statistics, BlockStatistics(1, 1, 1, 2, 3, 4))
         self.assertEqual(decoded.timestamp, self.block.timestamp)
 
     def test_decode_makes_one_shaped_request(self):

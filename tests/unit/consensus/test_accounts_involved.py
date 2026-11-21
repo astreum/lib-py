@@ -20,9 +20,7 @@ def _block():
     block.accounts = Accounts()
     block.pending_exprs = []
     block.total_balance = 0
-    block.global_loaned = 0
-    block.global_defaulted = 0
-    block.global_loan_count = 0
+    block.statistics = None
     block.storage_votes = 0
     block.storage_claim_count = 0
     return block

@@ -3,6 +3,7 @@ from typing import List, Optional, TYPE_CHECKING
 from astreum.expression import Expr, ZERO32
 from astreum.consensus.models.accounts import Accounts
 from astreum.consensus.models.block import Block
+from astreum.consensus.models.statistics import BlockStatistics
 
 if TYPE_CHECKING:
     from astreum.communication.models.relay_endpoint import RelayEndpoint
@@ -37,12 +38,9 @@ def create_block(
     transactions: Optional[List["Transaction"]] = None,
     receipts: Optional[List["Receipt"]] = None,
     receipts_trie: Optional["RadixTree"] = None,
-    statistics: Optional[list] = None,
+    statistics: BlockStatistics | None = None,
     pending_exprs: Optional[List[Expr]] = None,
     total_balance: int = 0,
-    global_loaned: int = 0,
-    global_defaulted: int = 0,
-    global_loan_count: int = 0,
     contact: Optional["RelayEndpoint"] = None,
 ) -> Block:
     previous_block_hash = previous_block_hash or ZERO32
@@ -92,8 +90,5 @@ def create_block(
         statistics=statistics,
         pending_exprs=pending_exprs,
         total_balance=total_balance,
-        global_loaned=global_loaned,
-        global_defaulted=global_defaulted,
-        global_loan_count=global_loan_count,
         contact=contact,
     )

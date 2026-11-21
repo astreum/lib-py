@@ -18,6 +18,7 @@ from astreum.consensus.block.rate import (
     next_storage_price,
 )
 from astreum.consensus.constants import PROVIDERS_PER_RECORD
+from astreum.consensus.models.statistics import BlockStatistics
 
 
 def _previous_block(
@@ -29,16 +30,14 @@ def _previous_block(
 ):
     return SimpleNamespace(
         height=0,
-        statistics=[
-            (
-                total_fees,
-                1,
-                cumulative_total_balance,
-                0,
-                total_tx_fees,
-                total_tx_bytes,
-            )
-        ],
+        statistics=BlockStatistics(
+            total_fees,
+            1,
+            cumulative_total_balance,
+            0,
+            total_tx_fees,
+            total_tx_bytes,
+        ),
     )
 
 
@@ -61,6 +60,13 @@ class TestFeeRate(unittest.TestCase):
             calculate_fee_rate(block),
             Fraction(1, 2),
         )
+
+    def test_raises_when_the_previous_block_has_no_statistics(self):
+        block = SimpleNamespace(
+            previous_block=SimpleNamespace(statistics=None)
+        )
+        with self.assertRaisesRegex(ValueError, "statistics are required"):
+            calculate_fee_rate(block)
 
     def test_raises_when_pair_has_no_bytes(self):
         block = _block(total_tx_fees=3, total_tx_bytes=0)

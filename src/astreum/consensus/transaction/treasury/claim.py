@@ -9,6 +9,7 @@ from astreum.storage.radix import RadixTree, put_in_radix_tree
 from astreum.consensus.account import create_account
 from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
+from astreum.consensus.models.statistics import BlockStatistics
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.transaction.from_storage import get_transaction_from_storage
 from astreum.consensus.transaction.treasury.record import (
@@ -146,7 +147,9 @@ def handle_treasury_claim(
         treasury_account.data_hash = treasury_account.data.root_hash or ZERO32
         borrower_record_exprs, _ = resolve_inner_exprs(lookup, updated_borrower_record.expr(), contact=block.contact)
 
-        block.global_defaulted = (getattr(block, "global_defaulted", 0) or 0) + payout
+        block.statistics = (
+            block.statistics or BlockStatistics()
+        ).with_write_off(payout)
 
         pending_exprs = loan_exprs + _trie_exprs(loans_trie) + borrower_record_exprs
         block.pending_exprs.extend(pending_exprs)

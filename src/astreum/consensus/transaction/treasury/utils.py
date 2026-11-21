@@ -103,9 +103,9 @@ def insurance_interval_fee(
 
     ``p = (defaulted * gc + gd) / (loaned * gc + gl)``
 
-    and the premium is ``ceil(principal * p)``. The global counters live on
-    the block: ``global_loan_count`` (``gc``), ``global_defaulted`` (``gd``),
-    and ``global_loaned`` (``gl``).
+    and the premium is ``ceil(principal * p)``. The all-time counters live
+    in the block statistics: ``total_loan_count`` (``gc``),
+    ``total_written_off`` (``gd``), and ``total_loaned`` (``gl``).
 
     Args:
         principal: The insured principal, ``L`` for a borrow or ``C`` for a
@@ -118,9 +118,10 @@ def insurance_interval_fee(
         The premium, or `None` when a counter is positive but the blend's
         denominator is not. With no global loans the premium is `0`.
     """
-    gc = getattr(block, "global_loan_count", 0) or 0
-    gd = getattr(block, "global_defaulted", 0) or 0
-    gl = getattr(block, "global_loaned", 0) or 0
+    stats = getattr(block, "statistics", None)
+    gc = stats.total_loan_count if stats is not None else 0
+    gd = stats.total_written_off if stats is not None else 0
+    gl = stats.total_loaned if stats is not None else 0
     if gc <= 0:
         return 0
     denominator = loaned * gc + gl

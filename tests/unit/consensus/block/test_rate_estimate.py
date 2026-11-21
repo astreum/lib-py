@@ -13,15 +13,14 @@ from astreum.consensus.block.rate import (  # noqa: E402
     estimate_storage_rate,
     storage_fee_at_rate,
 )
+from astreum.consensus.models.statistics import BlockStatistics  # noqa: E402
+
 
 def _head(fee=100, stake=200, height=9):
-    """Build a fake head with single-entry statistics."""
-    statistics = [(fee, stake, stake, 0, 0, 0)]
+    """Build a fake head that exposes the statistics value."""
     return SimpleNamespace(
         height=height,
-        statistics=statistics,
-        cumulative_total_fee=fee,
-        cumulative_total_balance=stake,
+        statistics=BlockStatistics(fee, stake, stake, 0, 0, 0),
     )
 
 
@@ -44,7 +43,7 @@ class EstimateStorageRateTests(unittest.TestCase):
 
     def test_rate_no_window(self):
         head = _head(height=0)
-        self.assertEqual(len(head.statistics), 1)
+        self.assertIsNotNone(head.statistics)
         self.assertEqual(estimate_storage_rate(head, 4), Fraction(2))
 
     def test_rate_then_no_fee(self):

@@ -19,6 +19,7 @@ from astreum.consensus.block.encoding.decode import get_block_from_storage  # no
 from astreum.expression import ZERO32  # noqa: E402
 from astreum.communication.node import connect_node
 from astreum.communication.disconnect import disconnect_node
+from astreum.consensus.models.statistics import BlockStatistics  # noqa: E402
 from tests.e2e.harness import (  # noqa: E402
     STAKE,
     genesis_with,
@@ -117,9 +118,15 @@ class TestGenesisChain(unittest.TestCase):
 
             # Verify the set-up genesis statistics
             expected_stats = setup_statistics(STAKE)
-            self.assertEqual(block.statistics, expected_stats)
-            self.assertEqual(block.cumulative_total_fee, expected_stats[0][0])
-            self.assertEqual(block.cumulative_total_balance, expected_stats[0][2])
+            self.assertEqual(
+                block.statistics,
+                expected_stats,
+            )
+            self.assertEqual(block.statistics.total_fees, expected_stats.total_fees)
+            self.assertEqual(
+                block.statistics.cumulative_total_balance,
+                expected_stats.cumulative_total_balance,
+            )
 
 
             # Verify empty transactions / receipts

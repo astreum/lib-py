@@ -5,7 +5,7 @@ from queue import Empty
 from typing import Any, Callable
 
 from astreum.consensus.account import create_account
-from astreum.consensus.block.rate_window import update_statistics
+from astreum.consensus.models.statistics import BlockStatistics
 from astreum.consensus.block.reward import fee_income, validator_reward
 from astreum.expression import link_list_to_expr, resolve_inner_exprs, resolve_list_exprs
 from astreum.storage.exprs import put_expr_in_hot_storage
@@ -405,9 +405,7 @@ def make_validation_worker(
                 transactions=[],
                 receipts=[],
                 total_balance=initial_balance,
-                global_loaned=getattr(previous_block, "global_loaned", 0) or 0,
-                global_defaulted=getattr(previous_block, "global_defaulted", 0) or 0,
-                global_loan_count=getattr(previous_block, "global_loan_count", 0) or 0,
+                statistics=getattr(previous_block, "statistics", None),
                 contact=head_holder,
             )
             node.logger.debug(
@@ -537,13 +535,14 @@ def make_validation_worker(
 
             delta_fee = fee_income(new_block.receipts)
             delta_tx_fees = total_transaction_fee
-            new_block.statistics = update_statistics(
-                getattr(previous_block, "statistics", None),
-                new_block.total_balance,
-                delta_fee,
-                new_block.storage_claim_count,
-                delta_tx_fees,
-                delta_tx_bytes,
+            new_block.statistics = (
+                new_block.statistics or BlockStatistics()
+            ).updated(
+                total_balance=new_block.total_balance,
+                fee_income=delta_fee,
+                claims=new_block.storage_claim_count,
+                tx_fees=delta_tx_fees,
+                tx_bytes=delta_tx_bytes,
             )
 
             transactions = new_block.transactions or []

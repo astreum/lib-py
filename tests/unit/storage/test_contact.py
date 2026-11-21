@@ -18,6 +18,8 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from astreum.consensus.models.statistics import BlockStatistics  # noqa: E402
+
 from astreum.communication.models.relay_endpoint import RelayEndpoint  # noqa: E402
 from astreum.consensus.block.create import create_block  # noqa: E402
 from astreum.consensus.block.encoding.decode import get_block_from_storage  # noqa: E402
@@ -260,7 +262,7 @@ def _block(**overrides):
         total_base_fee=0,
         transaction_count=0,
         total_storage_fee=0,
-        statistics=[(1, 1, 1, 0, 0, 0)],
+        statistics=BlockStatistics(1, 1, 1, 0, 0, 0, 0, 0, 0),
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
         validation_difficulty=1,

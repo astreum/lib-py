@@ -14,6 +14,8 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from astreum.consensus.models.statistics import BlockStatistics  # noqa: E402
+
 from astreum.consensus.transaction import apply_transaction
 from astreum.consensus.transaction.apply import demand_pair
 from astreum.consensus.transaction.model import Transaction
@@ -114,7 +116,7 @@ def _make_previous_block() -> Block:
         total_base_fee=0,
         transaction_count=0,
         total_storage_fee=0,
-        statistics=[(1, 1, 1, 0, 1, 1_000_000)],
+        statistics=BlockStatistics(1, 1, 1, 0, 1, 1_000_000, 0, 0, 0),
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
         validation_difficulty=1,

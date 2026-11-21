@@ -6,6 +6,7 @@ from astreum.expression import Expr, NIL, get_expr_head_hash, resolve_list_exprs
 from astreum.storage.exprs import get_expr_by_shape, get_expr_list
 from astreum.consensus.block.encoding.shape import BLOCK_SHAPE
 from astreum.consensus.models.block import Block
+from astreum.consensus.models.statistics import BlockStatistics
 from astreum.consensus.block.create import create_block
 from astreum.crypto.bloom_tree import BloomTree
 
@@ -85,15 +86,12 @@ def get_block_from_storage(
         raise ValueError(
             f"unable to resolve block body (missed={[h.hex()[:8] for h in missed]})"
         )
-    if len(body_nodes) != 21:
+    if len(body_nodes) != 18:
         raise ValueError(
-            f"malformed block body length (got={len(body_nodes)}, expected=21)"
+            f"malformed block body length (got={len(body_nodes)}, expected=18)"
         )
 
     (
-        global_loaned_node,
-        global_defaulted_node,
-        global_loan_count_node,
         accounts_link,
         bloom_link,
         chain_id_node,
@@ -114,12 +112,6 @@ def get_block_from_storage(
         statistics_node,
     ) = body_nodes
 
-    if not get_expr_tag(global_loaned_node, astreum_node, contact, block_hash) == "int":
-        raise ValueError("expected Int for global_loaned")
-    if not get_expr_tag(global_defaulted_node, astreum_node, contact, block_hash) == "int":
-        raise ValueError("expected Int for global_defaulted")
-    if not get_expr_tag(global_loan_count_node, astreum_node, contact, block_hash) == "int":
-        raise ValueError("expected Int for global_loan_count")
     if not get_expr_tag(accounts_link, astreum_node, contact, block_hash) == "link":
         raise ValueError("expected Link for accounts_hash")
     if not get_expr_tag(bloom_link, astreum_node, contact, block_hash) == "link":
@@ -165,7 +157,7 @@ def get_block_from_storage(
             raise ValueError(
                 f"statistics must contain at most one entry (got={len(stat_nodes)})"
             )
-        statistics = []
+        statistics = None
         for j, entry_node in enumerate(stat_nodes):
             if entry_node is NIL:
                 continue
@@ -174,14 +166,19 @@ def get_block_from_storage(
                 raise ValueError(
                     f"unable to resolve statistics entry {j} (missed={[h.hex()[:8] for h in missed]})"
                 )
-            if len(int_nodes) == 6:
-                statistics.append(tuple(get_expr_value(n, astreum_node, contact, block_hash) for n in int_nodes))
-            else:
+            expected_values = len(BlockStatistics.__dataclass_fields__)
+            if len(int_nodes) != expected_values:
                 raise ValueError(
                     f"invalid statistics entry {j} length (got={len(int_nodes)})"
                 )
+            statistics = BlockStatistics(
+                *(
+                    get_expr_value(n, astreum_node, contact, block_hash)
+                    for n in int_nodes
+                )
+            )
     elif get_expr_tag(statistics_node, astreum_node, contact, block_hash) == "symbol":
-        statistics = []
+        statistics = None
     else:
         raise ValueError("expected Link or Symbol for statistics")
 
@@ -208,9 +205,7 @@ def get_block_from_storage(
         expr_id=block_hash,
         body_hash=body.hash(),
         statistics=statistics,
-        global_loaned=get_expr_value(global_loaned_node, astreum_node, contact, block_hash),
-        global_defaulted=get_expr_value(global_defaulted_node, astreum_node, contact, block_hash),
-        global_loan_count=get_expr_value(global_loan_count_node, astreum_node, contact, block_hash),
+        total_balance=statistics.total_balance if statistics else 0,
         contact=contact,
     )
 
@@ -251,9 +246,9 @@ def get_previous_block_hash_local(astreum_node: Any, block_hash: bytes) -> bytes
         if missed or len(inner_nodes) != 2:
             return None
         body_nodes, missed = resolve_list_exprs(astreum_node, inner_nodes[0], local=True)
-        if missed or len(body_nodes) != 21:
+        if missed or len(body_nodes) != 18:
             return None
-        # Position 9 of the body is the previous block link.
-        return get_expr_head_hash(body_nodes[9])
+        # Position 6 of the body is the previous block link.
+        return get_expr_head_hash(body_nodes[6])
     except Exception:
         return None

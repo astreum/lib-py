@@ -15,6 +15,7 @@ for path in (ROOT, ROOT / "src"):
         sys.path.insert(0, str(path))
 
 from astreum.consensus.account.model import ACCOUNT_SHAPE  # noqa: E402
+from astreum.consensus.models.statistics import BlockStatistics  # noqa: E402
 from astreum.consensus.block.verify import transactions as verify_module  # noqa: E402
 from astreum.consensus.block.verify.transactions import verify_block_transactions  # noqa: E402
 from astreum.consensus.transaction.storage.model import STORAGE_RECORD_SHAPE  # noqa: E402
@@ -32,7 +33,7 @@ class TestVerifyBatch(unittest.TestCase):
             bloom_hash=None,
             expr_id=os.urandom(32),
             height=3,
-            statistics=[(1, 1, 1, 0, 0, 0)],
+            statistics=BlockStatistics(1, 1, 1, 0, 0, 0, 0, 0, 0),
         )
         block = SimpleNamespace(
             expr_id=os.urandom(32),

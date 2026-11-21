@@ -31,9 +31,9 @@ if str(HELPERS_DIR) not in sys.path:
 
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS
 from astreum.consensus.block.rate import calculate_quote_rate
-from astreum.consensus.block.rate_window import update_statistics
 from astreum.consensus.block.reward import fee_income, validator_reward
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
+from astreum.consensus.models.statistics import BlockStatistics
 from astreum.consensus.transaction import apply_transaction
 from astreum.consensus.transaction import apply as apply_module
 from astreum.consensus.transaction.apply import demand_pair
@@ -261,14 +261,15 @@ class TestClaimOrigination(unittest.TestCase):
         self.assertEqual(booked, receipt.total_fee)
         self.assertEqual(fee_income(self.block.receipts), booked)
         before = self.prev_block.statistics
-        after = update_statistics(
-            before,
-            self.block.total_balance,
-            fee_income(self.block.receipts),
-            self.block.storage_claim_count,
-            *demand_pair(self.node, self.block),
+        tx_fees, tx_bytes = demand_pair(self.node, self.block)
+        after = before.updated(
+            total_balance=self.block.total_balance,
+            fee_income=fee_income(self.block.receipts),
+            claims=self.block.storage_claim_count,
+            tx_fees=tx_fees,
+            tx_bytes=tx_bytes,
         )
-        self.assertEqual(after[0][0] - before[0][0], booked)
+        self.assertEqual(after.total_fees - before.total_fees, booked)
 
     # ------------------------------------------------------------------
     # amount == 0: the loan finances the storage fee
@@ -397,9 +398,11 @@ class TestClaimOrigination(unittest.TestCase):
         # the claimant's own history and the global counters, applied to the
         # claim-cost principal C, rounded up.
         sender, _ = seed_sender_account(self.block, balance=1_000_000)
-        self.block.global_loan_count = 10
-        self.block.global_loaned = 10_000
-        self.block.global_defaulted = 3_333
+        self.block.statistics = BlockStatistics(
+            total_loan_count=10,
+            total_loaned=10_000,
+            total_written_off=3_333,
+        )
         seed_treasury_account(
             self.node,
             self.block,

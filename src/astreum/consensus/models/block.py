@@ -3,6 +3,7 @@ from typing import Any, List, Optional, TYPE_CHECKING
 
 from astreum.expression import Expr, ZERO32
 from astreum.consensus.models.accounts import Accounts
+from astreum.consensus.models.statistics import BlockStatistics
 
 if TYPE_CHECKING:
     from astreum.communication.models.relay_endpoint import RelayEndpoint
@@ -42,14 +43,11 @@ class Block:
     transactions: Optional[List["Transaction"]]
     receipts: Optional[List["Receipt"]]
     receipts_trie: Optional["RadixTree"]
-    statistics: Optional[list]
+    statistics: Optional[BlockStatistics]
     pending_exprs: List[Expr]
     bloom_tree: Optional["BloomTree"]
     pending_bloom_keys: set[bytes]
     total_balance: int
-    global_loaned: int
-    global_defaulted: int
-    global_loan_count: int
     contact: Optional["RelayEndpoint"]
     _expr: Optional["Expr"]
     
@@ -81,12 +79,9 @@ class Block:
         transactions: Optional[List["Transaction"]] = None,
         receipts: Optional[List["Receipt"]] = None,
         receipts_trie: Optional["RadixTree"] = None,
-        statistics: Optional[list] = None,
+        statistics: Optional[BlockStatistics] = None,
         pending_exprs: Optional[List[Expr]] = None,
         total_balance: int = 0,
-        global_loaned: int = 0,
-        global_defaulted: int = 0,
-        global_loan_count: int = 0,
         storage_votes: int = 0,
         storage_claim_count: int = 0,
         contact: Optional["RelayEndpoint"] = None,
@@ -129,15 +124,12 @@ class Block:
         self.receipts = receipts
         self.receipts_trie = receipts_trie
         self.pending_exprs = list(pending_exprs or [])
-        self.statistics = statistics or []
+        self.statistics = statistics
         self.bloom_tree = None
         self.pending_bloom_keys = set()
         # Accounts whose 0|0|0|0|I element is in the bloom leaf of this block.
         self.involved_accounts: set[bytes] = set()
         self.total_balance = total_balance
-        self.global_loaned = global_loaned
-        self.global_defaulted = global_defaulted
-        self.global_loan_count = global_loan_count
         self.storage_votes = storage_votes
         self.storage_claim_count = storage_claim_count
         self._expr = None
@@ -159,9 +151,7 @@ class Block:
         saved_involved = set(self.accounts.involved)
         saved_supply_balances = self.accounts.supply_snapshot()
         saved_total_balance = self.total_balance
-        saved_global_loaned = self.global_loaned
-        saved_global_defaulted = self.global_defaulted
-        saved_global_loan_count = self.global_loan_count
+        saved_statistics = self.statistics
         saved_storage_votes = self.storage_votes
         saved_storage_claim_count = self.storage_claim_count
         return (
@@ -170,9 +160,7 @@ class Block:
             saved_involved,
             saved_supply_balances,
             saved_total_balance,
-            saved_global_loaned,
-            saved_global_defaulted,
-            saved_global_loan_count,
+            saved_statistics,
             saved_storage_votes,
             saved_storage_claim_count,
         )
@@ -191,9 +179,7 @@ class Block:
             saved_involved,
             saved_supply_balances,
             saved_total_balance,
-            saved_global_loaned,
-            saved_global_defaulted,
-            saved_global_loan_count,
+            saved_statistics,
             saved_storage_votes,
             saved_storage_claim_count,
         ) = snapshot
@@ -202,9 +188,7 @@ class Block:
         self.accounts.supply_restore(saved_supply_balances)
         self.pending_exprs = saved_pending_exprs
         self.total_balance = saved_total_balance
-        self.global_loaned = saved_global_loaned
-        self.global_defaulted = saved_global_defaulted
-        self.global_loan_count = saved_global_loan_count
+        self.statistics = saved_statistics
         self.storage_votes = saved_storage_votes
         self.storage_claim_count = saved_storage_claim_count
 
@@ -219,33 +203,5 @@ class Block:
             The sum of transaction and storage fees.
         """
         return (self.total_transaction_fee or 0) + (self.total_storage_fee or 0)
-
-    @property
-    def cumulative_total_fee(self) -> int:
-        """Get the cumulative total fee.
-
-        Args:
-            None.
-
-        Returns:
-            The cumulative fee from statistics.
-        """
-        if self.statistics:
-            return self.statistics[0][0]
-        return 0
-
-    @property
-    def cumulative_total_balance(self) -> int:
-        """Get the cumulative total balance.
-
-        Args:
-            None.
-
-        Returns:
-            The cumulative total balance from statistics.
-        """
-        if self.statistics:
-            return self.statistics[0][2]
-        return 0
 
 

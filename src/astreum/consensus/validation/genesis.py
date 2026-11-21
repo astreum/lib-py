@@ -10,6 +10,7 @@ from astreum.consensus.transaction.treasury.record import (
 )
 from astreum.consensus.models.accounts import Accounts
 from astreum.consensus.models.block import Block
+from astreum.consensus.models.statistics import BlockStatistics
 from astreum.consensus.block.create import create_block
 from astreum.expression import ZERO32
 from astreum.storage.radix import RadixTree, put_in_radix_tree
@@ -60,7 +61,7 @@ def create_genesis_block(
         total_base_fee=0,
         transaction_count=0,
         total_storage_fee=0,
-        statistics=[(0, 1, 1, 0, 0, 0)],
+        statistics=BlockStatistics(0, 1, 1, 0, 0, 0, 0, 0, 0),
         transactions_hash=ZERO32,
         receipts_hash=ZERO32,
         validation_difficulty=0,

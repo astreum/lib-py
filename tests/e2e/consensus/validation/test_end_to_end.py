@@ -81,7 +81,7 @@ from tests.e2e.harness import (  # noqa: E402
     setup_statistics,
     tx_hashes,
 )
-from astreum.consensus.block.rate_window import update_statistics  # noqa: E402
+from astreum.consensus.models.statistics import BlockStatistics  # noqa: E402
 from astreum.expression.helpers import get_expr_builtin_tag
 
 STAKE = 8
@@ -609,6 +609,13 @@ class TestEndToEnd(unittest.TestCase):
         loaded.previous_block = get_block_from_storage(node, block.previous_block_hash)
         return loaded
 
+    def test_a_loaded_block_carries_the_supply_level(self) -> None:
+        for block in self.chain[1:-1]:
+            loaded = self._load(self.node, block)
+            self.assertEqual(
+                loaded.total_balance, loaded.statistics.total_balance
+            )
+
     def test_the_creator_verifies_its_own_blocks_with_transactions(self) -> None:
         for block in self.chain[1:-1]:
             ok, reason = verify_block_transactions(self.node, block)
@@ -623,7 +630,7 @@ class TestEndToEnd(unittest.TestCase):
         for parent, block in zip(self.chain, self.chain[1:]):
             reward, storage_fee = self._fees(block)
             self.assertEqual(
-                block.cumulative_total_fee - parent.cumulative_total_fee,
+                block.statistics.total_fees - parent.statistics.total_fees,
                 reward + storage_fee,
                 f"height {block.height}",
             )
@@ -645,14 +652,14 @@ class TestEndToEnd(unittest.TestCase):
         )
         parent = block.previous_block
         stats = block.statistics
-        # The old rule added nothing for an empty block.
-        block.statistics = update_statistics(
-            parent.statistics,
-            block.total_balance,
-            0,
-            stats[0][3] - parent.statistics[0][3],
-            0,
-            0,
+        # The old rule added nothing for an empty block: no supply level
+        # entered the cumulative balance and no level was stored.
+        block.statistics = parent.statistics.updated(
+            total_balance=0,
+            fee_income=0,
+            claims=0,
+            tx_fees=0,
+            tx_bytes=0,
         )
         try:
             ok, reason = verify_block_transactions(self.node, block)
@@ -664,8 +671,8 @@ class TestEndToEnd(unittest.TestCase):
     def test_every_block_keeps_storage_difficulty_zero(self) -> None:
         for block in self.chain:
             self.assertEqual(block.storage_difficulty, 0, f"height {block.height}")
-        self.assertEqual(self.chain[0].statistics[0][3], 0)
-        self.assertEqual(self.chain[-1].statistics[0][3], 1)
+        self.assertEqual(self.chain[0].statistics.total_claims, 0)
+        self.assertEqual(self.chain[-1].statistics.total_claims, 1)
 
     def test_a_block_with_a_wrong_storage_difficulty_is_rejected(self) -> None:
         block = self.chain[2]

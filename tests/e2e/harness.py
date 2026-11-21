@@ -29,6 +29,7 @@ from astreum.consensus.block.create import create_block  # noqa: E402
 from astreum.consensus.block.encoding.decode import get_block_from_storage  # noqa: E402
 from astreum.consensus.constants import STORAGE_ADDRESS, TREASURY_ADDRESS  # noqa: E402
 from astreum.consensus.models.accounts import Accounts  # noqa: E402
+from astreum.consensus.models.statistics import BlockStatistics  # noqa: E402
 from astreum.consensus.models.receipt import Receipt  # noqa: E402
 from astreum.consensus.transaction import create_transaction  # noqa: E402
 from astreum.consensus.transaction.code import TransactionCode  # noqa: E402
@@ -118,7 +119,7 @@ def wait_until(predicate, timeout: float, message: str, nodes=(), interval: floa
 # --------------------------------------------------------------------- genesis
 
 
-def setup_statistics(total: int, funds_total: int = 0) -> list[tuple[int, ...]]:
+def setup_statistics(total: int, funds_total: int = 0) -> BlockStatistics:
     """Return the all-time statistics entry a test chain starts with.
 
     A raw genesis has no fee history, so no block past it can price its
@@ -137,7 +138,9 @@ def setup_statistics(total: int, funds_total: int = 0) -> list[tuple[int, ...]]:
         The single all-time statistics entry.
     """
     level = total + funds_total
-    return [(level, level, 2 * level, 0, 1, 1_000_000)]
+    return BlockStatistics(
+        level, level, 2 * level, 0, 1, 1_000_000, 0, 0, 0
+    )
 
 
 def genesis_with(

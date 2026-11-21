@@ -296,7 +296,7 @@ class TestTreasuryClose(unittest.TestCase):
         # An unsecured close writes off arrears; their face value is not
         # interest, so nothing reaches total_interest_paid.
         self.assertEqual(user.total_interest_paid, 0)
-        self.assertEqual(getattr(block, "global_defaulted", 0), 3 * PAYMENT)
+        self.assertEqual((block.statistics.total_written_off if block.statistics else 0), 3 * PAYMENT)
         self.assertEqual(
             block.accounts.get_account(TREASURY_ADDRESS, self.node).balance,
             treasury_before + PRINCIPAL,
@@ -330,7 +330,7 @@ class TestTreasuryClose(unittest.TestCase):
         self.assertEqual(loan.paid_until_block, 0)
         self.assertEqual(loan.missed_count, 3)
         self.assertEqual(user.defaulted, 3 * PAYMENT)
-        self.assertEqual(getattr(block, "global_defaulted", 0), 3 * PAYMENT)
+        self.assertEqual((block.statistics.total_written_off if block.statistics else 0), 3 * PAYMENT)
 
     def test_close_unsecured_refunds_excess_to_the_sender_account(self):
         block = self._make_block(height=5)
@@ -400,7 +400,7 @@ class TestTreasuryClose(unittest.TestCase):
         user, loan = self._get_user_and_loan(block, sender_pk, loan_tx_id)
         self.assertEqual(loan.missed_count, 0)
         self.assertEqual(user.defaulted, 0)
-        self.assertEqual(getattr(block, "global_defaulted", 0), 0)
+        self.assertEqual((block.statistics.total_written_off if block.statistics else 0), 0)
         self.assertEqual(
             block.accounts.get_account(TREASURY_ADDRESS, self.node).balance,
             treasury_before + PRINCIPAL,
@@ -420,7 +420,7 @@ class TestTreasuryClose(unittest.TestCase):
         user, loan = self._get_user_and_loan(block, sender_pk, loan_tx_id)
         self.assertEqual(loan.missed_count, 1)
         self.assertEqual(user.defaulted, PAYMENT)
-        self.assertEqual(getattr(block, "global_defaulted", 0), PAYMENT)
+        self.assertEqual((block.statistics.total_written_off if block.statistics else 0), PAYMENT)
         self.assertEqual(
             block.accounts.get_account(TREASURY_ADDRESS, self.node).balance,
             treasury_before + PRINCIPAL,

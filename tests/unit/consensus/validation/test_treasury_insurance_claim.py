@@ -9,7 +9,7 @@ whole through ``TREASURY_CLAIM``:
 - the pointer advances to the current height;
 - the payout is the write-off event: the borrower's ``missed_count`` grows by
   the overdue blocks, the borrower's ``defaulted`` and the block's
-  ``global_defaulted`` grow by the paid amount;
+  ``total_written_off`` grows by the paid amount;
 - initiation is permissionless: any sender may claim, pays the claim's own
   fees, and the payout always goes to the loan's owner;
 - a loan owned by the treasury pays the treasury;
@@ -263,7 +263,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         self.assertEqual(record.defaulted, 1_000 + 3 * PAYMENT)
         # The history that feeds the estimator is otherwise untouched.
         self.assertEqual(record.loaned, 5_000)
-        self.assertEqual(getattr(block, "global_defaulted", 0), 3 * PAYMENT)
+        self.assertEqual((block.statistics.total_written_off if block.statistics else 0), 3 * PAYMENT)
 
     def test_a_second_claim_with_no_arrears_fails(self):
         block = self._make_block(height=8)
@@ -275,7 +275,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         first = self._claim(block, owner_pk, owner_key, self._loan_id)
         self.assertEqual(first.status, STATUS_SUCCESS)
         owner_after_first = self._balance(block, owner_pk)
-        global_after_first = getattr(block, "global_defaulted", 0)
+        global_after_first = (block.statistics.total_written_off if block.statistics else 0)
 
         second = self._claim(block, stranger_pk, stranger_key, self._loan_id)
 
@@ -284,7 +284,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         loan = self._loan(block, borrower_pk, self._loan_id)
         self.assertEqual(loan.paid_until_block, 8)
         self.assertEqual(loan.missed_count, 3)
-        self.assertEqual(getattr(block, "global_defaulted", 0), global_after_first)
+        self.assertEqual((block.statistics.total_written_off if block.statistics else 0), global_after_first)
 
     def test_a_closed_loan_fails(self):
         block = self._make_block(height=8)
@@ -296,7 +296,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
 
         self.assertEqual(receipt.status, STATUS_FAILED)
         self.assertEqual(self._balance(block, owner_pk), 7 - receipt.total_fee)
-        self.assertEqual(getattr(block, "global_defaulted", 0), 0)
+        self.assertEqual((block.statistics.total_written_off if block.statistics else 0), 0)
 
     def test_a_prepaid_pointer_has_nothing_to_claim(self):
         block = self._make_block(height=8)
@@ -324,7 +324,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
 
         self.assertEqual(receipt.status, STATUS_FAILED)
         self.assertEqual(self._balance(block, owner_pk), 7 - receipt.total_fee)
-        self.assertEqual(getattr(block, "global_defaulted", 0), 0)
+        self.assertEqual((block.statistics.total_written_off if block.statistics else 0), 0)
 
     # --- same-block visibility ---
 
@@ -379,7 +379,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         self.assertEqual(
             self._user_record(block, borrower_pk).defaulted, 3 * PAYMENT
         )
-        self.assertEqual(getattr(block, "global_defaulted", 0), 3 * PAYMENT)
+        self.assertEqual((block.statistics.total_written_off if block.statistics else 0), 3 * PAYMENT)
 
     def test_the_payout_creates_the_owner_account_when_missing(self):
         # A permissionless claim must be able to make a real owner whole even
@@ -434,7 +434,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         )
         record = self._user_record(block, borrower_pk)
         self.assertEqual(record.defaulted, 3 * PAYMENT)
-        self.assertEqual(getattr(block, "global_defaulted", 0), 3 * PAYMENT)
+        self.assertEqual((block.statistics.total_written_off if block.statistics else 0), 3 * PAYMENT)
 
     # --- the claim-cost loan rides the same branch ---
 
@@ -463,7 +463,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         self.assertEqual(
             self._user_record(block, borrower_pk).defaulted, 3 * PAYMENT
         )
-        self.assertEqual(getattr(block, "global_defaulted", 0), 3 * PAYMENT)
+        self.assertEqual((block.statistics.total_written_off if block.statistics else 0), 3 * PAYMENT)
         self._assert_no_fund(block)
 
     # --- guard failures leave no state behind ---
@@ -485,7 +485,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         self.assertEqual(loan.missed_count, 0)
         record = self._user_record(block, borrower_pk)
         self.assertEqual(record.defaulted, 0)
-        self.assertEqual(getattr(block, "global_defaulted", 0), 0)
+        self.assertEqual((block.statistics.total_written_off if block.statistics else 0), 0)
 
     def test_a_zero_payment_amount_fails(self):
         block = self._make_block(height=8)
@@ -506,7 +506,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         self.assertEqual(
             self._user_record(block, borrower_pk).defaulted, 0
         )
-        self.assertEqual(getattr(block, "global_defaulted", 0), 0)
+        self.assertEqual((block.statistics.total_written_off if block.statistics else 0), 0)
 
 
 if __name__ == "__main__":

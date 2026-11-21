@@ -10,7 +10,7 @@ from astreum.consensus.constants import TREASURY_ADDRESS
 from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.transaction.from_storage import get_transaction_from_storage
-from astreum.consensus.block.rate_window import all_time_rate_fraction
+from astreum.consensus.models.statistics import all_time_rate_fraction
 from astreum.consensus.transaction.treasury.record import (
     load_loan_record,
     load_user_record,

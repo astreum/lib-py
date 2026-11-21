@@ -23,6 +23,7 @@ if str(SRC_DIR) not in sys.path:
 
 from astreum.node import Node
 from astreum.consensus.validation.node import validate_blockchain
+from astreum.consensus.models.statistics import BlockStatistics
 from astreum.consensus.transaction import Transaction, TransactionCode
 from astreum.communication.node import connect_node
 from astreum.communication.disconnect import disconnect_node
@@ -70,10 +71,10 @@ class TestValidationQueue(unittest.TestCase):
             # Inflate the cumulative fee so the storage-fee denominator
             # keeps storage fees near zero, and seed the demand pair so
             # the measured byte price exists.
-            genesis.statistics[0] = (
+            genesis.statistics = BlockStatistics(
                 10_000_000,
-                genesis.statistics[0][1],
-                genesis.statistics[0][2],
+                genesis.statistics.total_balance,
+                genesis.statistics.cumulative_total_balance,
                 0,
                 1,
                 1_000_000,

@@ -8,7 +8,7 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from astreum.consensus.block.rate_window import update_statistics  # noqa: E402
+from astreum.consensus.models.statistics import BlockStatistics  # noqa: E402
 from astreum.consensus.block.reward import fee_income, validator_reward  # noqa: E402
 
 
@@ -42,11 +42,14 @@ class TestFeeIncome(unittest.TestCase):
         self.assertEqual(fee_income([]), 0)
 
     def test_an_empty_block_leaves_every_statistics_delta_at_zero(self):
-        previous = [(7, 100, 200, 3, 11, 500)]
-        statistics = update_statistics(previous, 100, fee_income([]), 0, 0, 0)
+        previous = BlockStatistics(7, 100, 200, 3, 11, 500)
+        statistics = previous.updated(
+            total_balance=100, fee_income=fee_income([]), claims=0,
+            tx_fees=0, tx_bytes=0,
+        )
         # Only the cumulative balance advances: it adds the supply level of
         # this block. The fee, claim, tx-fee, and tx-byte counters stand still.
-        self.assertEqual(statistics[0], (7, 100, 300, 3, 11, 500))
+        self.assertEqual(statistics, BlockStatistics(7, 100, 300, 3, 11, 500))
 
     def test_fee_income_is_the_reward_plus_the_storage_fee(self):
         receipts = [

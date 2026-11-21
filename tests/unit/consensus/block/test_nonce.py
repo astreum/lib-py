@@ -7,6 +7,8 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from astreum.consensus.models.statistics import BlockStatistics  # noqa: E402
+
 from astreum.consensus.block.create import create_block  # noqa: E402
 from astreum.consensus.block.nonce import generate_block_nonce  # noqa: E402
 from astreum.consensus.block.utils.bits import count_leading_zero_bits  # noqa: E402
@@ -26,7 +28,7 @@ class TestBlockNonce(unittest.TestCase):
         total_base_fee=0,
         transaction_count=0,
             total_storage_fee=0,
-            statistics=[(1, 1, 1, 0, 0, 0)],
+            statistics=BlockStatistics(1, 1, 1, 0, 0, 0, 0, 0, 0),
             transactions_hash=None,
             receipts_hash=None,
             validation_difficulty=1,

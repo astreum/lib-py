@@ -14,6 +14,7 @@ from astreum.machine.main import Machine
 from astreum.crypto.bloom_tree import BloomTree
 from astreum.crypto.bloom_search.variants import make_search_variants
 from astreum.consensus.block.rate import calculate_storage_fee
+from astreum.consensus.models.statistics import BlockStatistics
 from astreum.consensus.transaction.bloom.pending import finalize_pending_bloom_inserts
 from astreum.consensus.models.receipt import STATUS_SUCCESS, STATUS_FAILED
 from astreum.expression.helpers import get_expr_builtin_tag
@@ -32,11 +33,8 @@ def _make_tx(hash_val=None, sender=None, recipient=None):
 
 def _make_block(height=100, previous_block=None):
     if previous_block is None:
-        prev_stats = (1_000_000, 1_000_000, 1_000_000, 0, 1, 1)
         previous_block = type('Prev', (), {
-            'statistics': [prev_stats],
-            'cumulative_total_fee': prev_stats[0],
-            'cumulative_total_balance': prev_stats[2],
+            'statistics': BlockStatistics(1_000_000, 1_000_000, 1_000_000, 0, 1, 1),
         })()
     block = type('Block', (), {
         'height': height,

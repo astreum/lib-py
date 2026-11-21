@@ -3,7 +3,10 @@ from __future__ import annotations
 from fractions import Fraction
 from types import SimpleNamespace
 
-from astreum.consensus.block.rate_window import all_time_rate_fraction
+from astreum.consensus.models.statistics import (
+    BlockStatistics,
+    all_time_rate_fraction,
+)
 from astreum.consensus.constants import PROVIDERS_PER_RECORD
 
 # Fixed-point scale for the bootstrap power ``(1 + r_bar)^(-h)``. The
@@ -22,7 +25,7 @@ def calculate_discount_rate(block: object, node=None, range_blocks: int = 0) -> 
     """Calculate the all-time settlement ratio of *block*.
 
     The ratio is ``r_bar = total_fees / cumulative_total_balance`` from
-    entry 0 of the previous block's statistics tuple.
+    the previous block's statistics.
 
     Args:
         block: The block to calculate from.
@@ -108,7 +111,7 @@ def calculate_fee_rate(block: object) -> Fraction:
     """Return the measured byte price of *block*.
 
     The price is ``fee_rate = total_tx_fees / total_tx_bytes`` from
-    entry 0 of the previous block's statistics tuple. The pair counts
+    the previous block's statistics. The pair counts
     inclusion fees only: the base fee plus the execution fee of every
     receipt. Storage fees are not demand and are excluded.
 
@@ -135,7 +138,7 @@ def calculate_fee_rate(block: object) -> Fraction:
             "previous block statistics are required for the measured byte price"
         )
 
-    total_tx_fees, total_tx_bytes = stats[0][4], stats[0][5]
+    total_tx_fees, total_tx_bytes = stats.total_tx_fees, stats.total_tx_bytes
     if total_tx_fees <= 0:
         raise ValueError(
             "previous block total_tx_fees must be greater than zero"
@@ -193,13 +196,16 @@ def estimate_storage_rate(head: object, window: int) -> Fraction:
         window: Inclusion window in blocks (ignored).
 
     Returns:
-        The all-time storage rate as ``cumulative_total_balance / cumulative_total_fee``.
+        The all-time storage rate as ``cumulative_total_balance / total_fees``.
 
     Raises:
-        ValueError: If the head cumulative total fee is not greater than zero.
+        ValueError: If the head total fees are not greater than zero.
     """
-    cumulative_fee = int(head.cumulative_total_fee)
-    cumulative_total_balance = int(head.cumulative_total_balance)
+    stats = getattr(head, "statistics", None)
+    if not isinstance(stats, BlockStatistics):
+        raise ValueError("head statistics are required for the storage rate")
+    cumulative_fee = int(stats.total_fees)
+    cumulative_total_balance = int(stats.cumulative_total_balance)
     if cumulative_fee <= 0:
         raise ValueError("head cumulative total fees must be greater than zero")
 

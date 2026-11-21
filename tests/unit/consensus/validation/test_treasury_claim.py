@@ -257,7 +257,7 @@ class TestTreasuryClaim(unittest.TestCase):
         # A secured claim collects interest; it is not a default write-off.
         self.assertEqual(loan.missed_count, 0)
         self.assertEqual(user.defaulted, 0)
-        self.assertEqual(getattr(block, "global_defaulted", 0), 0)
+        self.assertEqual((block.statistics.total_written_off if block.statistics else 0), 0)
 
     # --- eligibility ---
 

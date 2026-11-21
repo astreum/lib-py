@@ -199,7 +199,7 @@ class TestTreasuryRepay(unittest.TestCase):
         self.assertEqual(loan.missed_count, 3)  # blocks 6, 7, 8
         self.assertEqual(loan.paid_until_block, 10)  # 8 + two paid blocks
         self.assertEqual(user.defaulted, 3 * PAYMENT)
-        self.assertEqual(getattr(block, "global_defaulted", 0), 3 * PAYMENT)
+        self.assertEqual(block.statistics.total_written_off, 3 * PAYMENT)
         self.assertEqual(user.total_interest_paid, 2 * PAYMENT)
         self.assertEqual(
             block.accounts.get_account(TREASURY_ADDRESS, self.node).balance,
@@ -247,7 +247,9 @@ class TestTreasuryRepay(unittest.TestCase):
         user, loan = self._get_user_and_loan(block, sender_pk, loan_tx_id)
         self.assertEqual(loan.missed_count, 0)
         self.assertEqual(user.defaulted, 0)
-        self.assertEqual(getattr(block, "global_defaulted", 0), 0)
+        self.assertEqual(
+            block.statistics.total_written_off if block.statistics else 0, 0
+        )
         self.assertEqual(loan.paid_until_block, 8)  # one block paid, past the arrears
 
     # --- overdue boundary: pointer == current_height and both sides ---

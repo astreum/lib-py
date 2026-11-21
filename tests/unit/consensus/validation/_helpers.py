@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from astreum.consensus.account import create_account
 from astreum.consensus.account.model import Account
+from astreum.consensus.models.statistics import BlockStatistics
 from astreum.consensus.transaction.channel.model import Channel
 from astreum.consensus.transaction.code import TransactionCode
 from astreum.consensus.transaction.model import Transaction
@@ -180,16 +181,14 @@ def make_previous_block(
         receipts_hash=ZERO32,
         validation_difficulty=validation_difficulty,
         validator_public_key_bytes=os.urandom(32),
-        statistics=[
-            (
-                cumulative_fee,
-                total_balance,
-                cumulative_total_balance,
-                0,
-                total_tx_fees,
-                total_tx_bytes,
-            )
-        ],
+        statistics=BlockStatistics(
+            cumulative_fee,
+            total_balance,
+            cumulative_total_balance,
+            0,
+            total_tx_fees,
+            total_tx_bytes,
+        ),
     )
 
 
@@ -221,7 +220,9 @@ def make_block(
     block.transactions = []
     block.receipts = []
     block.bloom_tree = BloomTree()
-    block.total_balance = prev_block.statistics[0][1] if prev_block.statistics else 0
+    block.total_balance = (
+        prev_block.statistics.total_balance if prev_block.statistics else 0
+    )
     return block
 
 

@@ -20,13 +20,17 @@ from astreum.consensus.transaction.storage.difficulty import (  # noqa: E402
     takeover_vote,
 )
 
+from astreum.consensus.models.statistics import BlockStatistics  # noqa: E402
+
 ID = b"\x00" * 32
 NEAR16 = b"\x00\x00\xff" + b"\x00" * 29
 NEAR8 = b"\x00\xff" + b"\x00" * 30
 
 
 def _parent(height, claims):
-    return SimpleNamespace(height=height, statistics=[(0, 0, 0, claims, 0, 0)])
+    return SimpleNamespace(
+        height=height, statistics=BlockStatistics(0, 0, 0, claims, 0, 0)
+    )
 
 
 class StorageDifficultyTests(unittest.TestCase):
