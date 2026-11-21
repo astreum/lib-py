@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from fractions import Fraction
-from types import SimpleNamespace
 
 from astreum.consensus.models.statistics import (
     BlockStatistics,
@@ -107,56 +106,11 @@ def calculate_quote_rate(block: object) -> Fraction:
     )
 
 
-def calculate_fee_rate(block: object) -> Fraction:
-    """Return the measured byte price of *block*.
-
-    The price is ``fee_rate = total_tx_fees / total_tx_bytes`` from
-    the previous block's statistics. The pair counts
-    inclusion fees only: the base fee plus the execution fee of every
-    receipt. Storage fees are not demand and are excluded.
-
-    Args:
-        block: The block with a ``previous_block`` tuple.
-
-    Returns:
-        The measured price as a Fraction.
-
-    Raises:
-        ValueError: If the previous block or its statistics are
-            unavailable, or if either pair total is zero. An empty pair
-            has no price.
-    """
-    previous_block = block.previous_block
-    if previous_block is None:
-        raise ValueError(
-            "previous block is required for the measured byte price"
-        )
-
-    stats = previous_block.statistics
-    if not stats:
-        raise ValueError(
-            "previous block statistics are required for the measured byte price"
-        )
-
-    total_tx_fees, total_tx_bytes = stats.total_tx_fees, stats.total_tx_bytes
-    if total_tx_fees <= 0:
-        raise ValueError(
-            "previous block total_tx_fees must be greater than zero"
-        )
-    if total_tx_bytes <= 0:
-        raise ValueError(
-            "previous block total_tx_bytes must be greater than zero"
-        )
-    return Fraction(total_tx_fees, total_tx_bytes)
-
-
 def calculate_storage_fee(block: object, total_bytes: int) -> int:
-    """Calculate the storage fee at the measured byte price.
+    """Calculate the storage fee for *total_bytes*.
 
-    The fee is ``2 * ceil(total_bytes * fee_rate / r_q)`` where
-    ``fee_rate`` is the demand pair from the previous block and ``r_q``
-    is the quote for the block's height. The factor of two covers
-    ``PROVIDERS_PER_RECORD`` copies of the data.
+    The fee is one astre per byte per provider copy. It does not read the
+    block's statistics or the quote.
 
     Args:
         block: The block to calculate from.
@@ -164,23 +118,23 @@ def calculate_storage_fee(block: object, total_bytes: int) -> int:
 
     Returns:
         The storage fee in units. The fee covers ``PROVIDERS_PER_RECORD``
-        copies of the data.
-
-    Raises:
-        ValueError: If the block has no previous block, the previous block
-            quote is zero, or the demand pair has no price. The fee is never
-            invented.
+        copies of the data. It is zero when the block has no previous block.
     """
     if block.previous_block is None:
-        raise ValueError("previous block is required for the storage fee")
+        return 0
+    return storage_fee(total_bytes)
 
-    quote = calculate_quote_rate(block)
-    if quote <= 0:
-        raise ValueError(
-            "previous block cumulative total fees must be greater than zero"
-        )
-    fee_rate = calculate_fee_rate(block)
-    return storage_fee_at_rate(fee_rate, quote, total_bytes)
+
+def storage_fee(walk_size: int) -> int:
+    """Return the storage fee for *walk_size* bytes.
+
+    Args:
+        walk_size: Total bytes to store.
+
+    Returns:
+        The fee in units, one astre per byte per provider copy.
+    """
+    return PROVIDERS_PER_RECORD * walk_size
 
 
 def estimate_storage_rate(head: object, window: int) -> Fraction:
@@ -209,55 +163,3 @@ def estimate_storage_rate(head: object, window: int) -> Fraction:
 
     return Fraction(cumulative_total_balance, cumulative_fee)
 
-
-def storage_fee_at_rate(
-    fee_rate: Fraction, quote: Fraction, walk_size: int
-) -> int:
-    """Calculate the storage fee for *walk_size* bytes.
-
-    The fee is ``2 * ceil(walk_size * fee_rate / quote)``. The division
-    is exact rational arithmetic, so a byte count on a ceiling boundary
-    is not rounded up by float error.
-
-    Args:
-        fee_rate: The measured byte price, fee per byte.
-        quote: The storage quote ``r_q``.
-        walk_size: Total bytes to store.
-
-    Returns:
-        The storage fee in units. The fee covers ``PROVIDERS_PER_RECORD``
-        copies of the data.
-
-    Raises:
-        ValueError: If the fee rate or the quote is not positive.
-    """
-    if fee_rate <= 0:
-        raise ValueError("fee rate must be greater than zero")
-    if quote <= 0:
-        raise ValueError("quote must be greater than zero")
-
-    numerator = walk_size * fee_rate.numerator * quote.denominator
-    denominator = fee_rate.denominator * quote.numerator
-    return ((numerator + denominator - 1) // denominator) * PROVIDERS_PER_RECORD
-
-
-def next_storage_price(head: object) -> tuple[Fraction, Fraction]:
-    """Return the storage price that applies to the block after *head*.
-
-    The storage fee of the next block reads *head* as its previous
-    block and uses ``head.height + 1`` for the quote.
-
-    Args:
-        head: The latest block.
-
-    Returns:
-        ``(fee_rate, quote)`` for the next block.
-
-    Raises:
-        ValueError: If the head has no measured demand pair.
-    """
-    next_block = SimpleNamespace(
-        height=head.height + 1,
-        previous_block=head,
-    )
-    return calculate_fee_rate(next_block), calculate_quote_rate(next_block)

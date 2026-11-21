@@ -75,8 +75,8 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
         self.node = _FakeNode()
         self.prev_block = make_previous_block(
             cumulative_total_balance=STAKE, total_balance=STAKE,
-            cumulative_fee=CTF, total_tx_fees=1, total_tx_bytes=1_000_000,
-        )
+            cumulative_fee=CTF,
+            )
         self.block = make_block(self.node, self.prev_block, height=1)
         seed_storage_account(self.block)
 
@@ -186,11 +186,7 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
 
     def test_the_premium_is_the_measured_interval_fee_not_a_haircut(self):
         principal = 100
-        self.block.statistics = BlockStatistics(
-            total_loan_count=10,
-            total_loaned=10_000,
-            total_written_off=3_333,
-        )
+        self.block.statistics = BlockStatistics(total_loan_count=10, total_loaned=10_000, total_written_off=3_333)
 
         fee = expected_insurance_interval_fee(
             principal=principal, global_loan_count=10,
@@ -215,11 +211,7 @@ class TestTreasuryUnsecuredBorrow(unittest.TestCase):
 
     def test_a_premium_at_or_above_the_principal_fails(self):
         # Every loaned unit defaulted: p = 1, so I = L.
-        self.block.statistics = BlockStatistics(
-            total_loan_count=10,
-            total_loaned=10_000,
-            total_written_off=10_000,
-        )
+        self.block.statistics = BlockStatistics(total_loan_count=10, total_loaned=10_000, total_written_off=10_000)
 
         self._borrow(principal=100, treasury_balance=0)
 

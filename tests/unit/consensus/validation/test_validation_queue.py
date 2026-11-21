@@ -71,14 +71,7 @@ class TestValidationQueue(unittest.TestCase):
             # Inflate the cumulative fee so the storage-fee denominator
             # keeps storage fees near zero, and seed the demand pair so
             # the measured byte price exists.
-            genesis.statistics = BlockStatistics(
-                10_000_000,
-                genesis.statistics.total_balance,
-                genesis.statistics.cumulative_total_balance,
-                0,
-                1,
-                1_000_000,
-            )
+            genesis.statistics = BlockStatistics(10_000_000, genesis.statistics.total_balance, genesis.statistics.cumulative_total_balance, 0)
             genesis.accounts_hash = (
                 genesis.accounts.update_trie(node) or ZERO32
             )

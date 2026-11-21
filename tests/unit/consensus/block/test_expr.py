@@ -43,7 +43,7 @@ def _make_block(**overrides):
         total_base_fee=11,
         transaction_count=3,
         total_storage_fee=0,
-        statistics=BlockStatistics(1, 1, 1, 0, 0, 0, 0, 0, 0),
+        statistics=BlockStatistics(1, 1, 1, 0, 0, 0, 0),
         transactions_hash=b"t" * 32,
         receipts_hash=b"r" * 32,
         validation_difficulty=1,
@@ -68,7 +68,7 @@ def _assert_block_fields(test_case: unittest.TestCase, b: Block):
     test_case.assertEqual(b.transaction_count, 3)
     test_case.assertEqual(b.total_storage_fee, 0)
     test_case.assertEqual(b.total_fee, 0)
-    test_case.assertEqual(b.statistics, BlockStatistics(1, 1, 1, 0, 0, 0))
+    test_case.assertEqual(b.statistics, BlockStatistics(1, 1, 1, 0))
     test_case.assertEqual(b.statistics.total_fees, 1)
     test_case.assertEqual(b.statistics.cumulative_total_balance, 1)
     test_case.assertEqual(b.transactions_hash, b"t" * 32)
@@ -149,7 +149,7 @@ class TestBlockExprColdStorage(unittest.TestCase):
         self.assertEqual(get_block_expr(b2).hash(), block_id)
 
     def test_statistics_roundtrip_claims(self):
-        stats = BlockStatistics(10, 20, 30, 3, 4, 5)
+        stats = BlockStatistics(10, 20, 30, 3)
         b = _make_block(statistics=stats)
         block_expr = get_block_expr(b)
         block_id = block_expr.hash()
@@ -190,14 +190,14 @@ class TestBlockExprColdStorage(unittest.TestCase):
         return bad_expr.hash()
 
     def test_decode_accepts_wire_statistics_sizes(self):
-        block_hash = self._put_with_statistics([9])
+        block_hash = self._put_with_statistics([7])
         b2 = get_block_from_storage(astreum_node=self.node, block_hash=block_hash)
         self.assertEqual(
-            b2.statistics, BlockStatistics(1, 2, 3, 4, 5, 6, 7, 8, 9)
+            b2.statistics, BlockStatistics(1, 2, 3, 4, 5, 6, 7)
         )
 
     def test_decode_rejects_statistics_entry_0_with_wrong_count(self):
-        for size in (2, 4, 5, 6):
+        for size in (2, 4, 5, 6, 8):
             with self.subTest(size=size):
                 block_hash = self._put_with_statistics([size])
                 with self.assertRaisesRegex(ValueError, "invalid statistics entry 0 length"):
@@ -228,14 +228,14 @@ class TestBlockExprColdStorage(unittest.TestCase):
         return bad_expr.hash()
 
     def test_decode_accepts_wire_statistics_sizes(self):
-        block_hash = self._put_with_statistics([9])
+        block_hash = self._put_with_statistics([7])
         b2 = get_block_from_storage(astreum_node=self.node, block_hash=block_hash)
         self.assertEqual(
-            b2.statistics, BlockStatistics(1, 2, 3, 4, 5, 6, 7, 8, 9)
+            b2.statistics, BlockStatistics(1, 2, 3, 4, 5, 6, 7)
         )
 
     def test_decode_rejects_statistics_entry_0_with_wrong_count(self):
-        for size in (2, 4, 5, 6):
+        for size in (2, 4, 5, 6, 8):
             with self.subTest(size=size):
                 block_hash = self._put_with_statistics([size])
                 with self.assertRaisesRegex(ValueError, "invalid statistics entry 0 length"):
@@ -251,7 +251,7 @@ class TestBlockExprColdStorage(unittest.TestCase):
 
 class TestBlockCounters(unittest.TestCase):
     def test_genesis_quote_is_zero(self):
-        b = _make_block(height=0, statistics=BlockStatistics(0, 1, 1, 0, 0, 0, 0, 0, 0))
+        b = _make_block(height=0, statistics=BlockStatistics(0, 1, 1, 0, 0, 0, 0))
         self.assertEqual(calculate_quote_rate(b), Fraction(0))
 
     def test_block_body_has_18_fields(self):

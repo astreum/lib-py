@@ -36,7 +36,6 @@ from astreum.consensus.models.receipt import STATUS_FAILED, STATUS_SUCCESS
 from astreum.consensus.models.statistics import BlockStatistics
 from astreum.consensus.transaction import apply_transaction
 from astreum.consensus.transaction import apply as apply_module
-from astreum.consensus.transaction.apply import demand_pair
 from astreum.consensus.transaction.code import TransactionCode
 from astreum.consensus.transaction.model import Transaction
 from astreum.consensus.transaction.storage.model import (
@@ -261,14 +260,7 @@ class TestClaimOrigination(unittest.TestCase):
         self.assertEqual(booked, receipt.total_fee)
         self.assertEqual(fee_income(self.block.receipts), booked)
         before = self.prev_block.statistics
-        tx_fees, tx_bytes = demand_pair(self.node, self.block)
-        after = before.updated(
-            total_balance=self.block.total_balance,
-            fee_income=fee_income(self.block.receipts),
-            claims=self.block.storage_claim_count,
-            tx_fees=tx_fees,
-            tx_bytes=tx_bytes,
-        )
+        after = before.updated(total_balance=self.block.total_balance, fee_income=fee_income(self.block.receipts), claims=self.block.storage_claim_count)
         self.assertEqual(after.total_fees - before.total_fees, booked)
 
     # ------------------------------------------------------------------
@@ -398,11 +390,7 @@ class TestClaimOrigination(unittest.TestCase):
         # the claimant's own history and the global counters, applied to the
         # claim-cost principal C, rounded up.
         sender, _ = seed_sender_account(self.block, balance=1_000_000)
-        self.block.statistics = BlockStatistics(
-            total_loan_count=10,
-            total_loaned=10_000,
-            total_written_off=3_333,
-        )
+        self.block.statistics = BlockStatistics(total_loan_count=10, total_loaned=10_000, total_written_off=3_333)
         seed_treasury_account(
             self.node,
             self.block,

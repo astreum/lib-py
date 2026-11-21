@@ -124,7 +124,7 @@ class TestWorkerLoop(unittest.TestCase):
             height=2,
             accounts_hash=_h(0x0A),
             expr_id=head,
-            statistics=BlockStatistics(1, 1, 1, 0, 0, 0),
+            statistics=BlockStatistics(1, 1, 1, 0),
         )
         draws = []
 
@@ -201,7 +201,7 @@ class TestWorkerBatchFetch(unittest.TestCase):
             accounts_hash=self.ACCOUNTS_ROOT,
             expr_id=head,
             bloom_hash=ZERO32,
-            statistics=BlockStatistics(1, 1, 1, 0, 0, 0),
+            statistics=BlockStatistics(1, 1, 1, 0),
         )
         storage_account = SimpleNamespace(
             data=SimpleNamespace(root_hash=self.STORAGE_ROOT, root_block=self.STORAGE_BLOCK)
@@ -336,7 +336,7 @@ class TestWorkerBuildTime(unittest.TestCase):
             bloom_hash=ZERO32,
             validation_difficulty=1,
             storage_difficulty=0,
-            statistics=BlockStatistics(1, 1, 1, 0, 0, 0),
+            statistics=BlockStatistics(1, 1, 1, 0),
         )
         account = SimpleNamespace(
             data=SimpleNamespace(root_hash=_h(0x0B), root_block=_h(0x0C), nodes={}),
@@ -351,11 +351,13 @@ class TestWorkerBuildTime(unittest.TestCase):
             nonce=0,
             bloom_hash=ZERO32,
             storage_claim_count=0,
+            validator_public_key_bytes=self.KEY,
             storage_votes=0,
             total_balance=1,
             statistics=None,
             accounts=SimpleNamespace(
                 get_account=lambda *a, **k: account,
+                set_account=lambda *a, **k: None,
                 pending_exprs=[],
                 update_trie=lambda _node: _h(0x0E),
                 _trie=SimpleNamespace(nodes={}, root_hash=None),

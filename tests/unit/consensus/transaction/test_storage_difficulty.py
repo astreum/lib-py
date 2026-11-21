@@ -29,7 +29,7 @@ NEAR8 = b"\x00\xff" + b"\x00" * 30
 
 def _parent(height, claims):
     return SimpleNamespace(
-        height=height, statistics=BlockStatistics(0, 0, 0, claims, 0, 0)
+        height=height, statistics=BlockStatistics(0, 0, 0, claims)
     )
 
 

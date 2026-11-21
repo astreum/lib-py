@@ -67,8 +67,8 @@ class TestTreasuryBorrow(unittest.TestCase):
         self.node = _FakeNode()
         self.prev_block = make_previous_block(
             cumulative_total_balance=STAKE, total_balance=STAKE,
-            cumulative_fee=CTF, total_tx_fees=1, total_tx_bytes=1_000_000,
-        )
+            cumulative_fee=CTF,
+            )
         self.block = make_block(self.node, self.prev_block, height=1)
         seed_storage_account(self.block)
 
@@ -436,8 +436,8 @@ class TestTreasuryBorrow(unittest.TestCase):
         # handler, so the plan's guard is checked at the handler boundary.
         prev_block = make_previous_block(
             cumulative_total_balance=STAKE, total_balance=STAKE,
-            cumulative_fee=0, total_tx_fees=1, total_tx_bytes=1_000_000,
-        )
+            cumulative_fee=0,
+            )
         self.block = make_block(self.node, prev_block, height=1)
         seed_storage_account(self.block)
         sender_pk, sender_key = seed_sender_account(self.block, balance=10_000_000)
@@ -465,8 +465,8 @@ class TestTreasuryBorrow(unittest.TestCase):
     def test_zero_cumulative_balance_fails(self):
         prev_block = make_previous_block(
             cumulative_total_balance=0, total_balance=0,
-            cumulative_fee=CTF, total_tx_fees=1, total_tx_bytes=1_000_000,
-        )
+            cumulative_fee=CTF,
+            )
         self.block = make_block(self.node, prev_block, height=1)
         seed_storage_account(self.block)
         sender_pk, sender_key = seed_sender_account(self.block, balance=10_000_000)

@@ -20,7 +20,6 @@ from astreum.consensus.models.receipt import Receipt
 from astreum.consensus.block.create import create_block
 from astreum.consensus.block.encoding.expr import get_block_expr
 from astreum.consensus.transaction import apply_transaction_obj
-from astreum.consensus.transaction.apply import demand_pair
 from astreum.consensus.transaction.from_storage import get_transaction_from_storage
 from astreum.consensus.transaction.storage.difficulty import next_storage_difficulty
 from astreum.consensus.transaction.storage.initial import (
@@ -638,23 +637,12 @@ def verify_block_transactions(node: Any, block: Any) -> tuple[bool, Optional[str
     treasury_balance = treasury_account.balance or 0
 
     delta_fee = fee_income(work_block.receipts)
-    try:
-        delta_tx_fees, delta_tx_bytes = demand_pair(node, work_block)
-    except ValueError as exc:
-        node.logger.debug(
-            "Block verify demand pair unavailable block=%s: %s",
-            _hex(block.expr_id),
-            exc,
-        )
-        return False, "demand pair unavailable"
     expected_statistics = (
         work_block.statistics or BlockStatistics()
     ).updated(
         total_balance=work_block.total_balance,
         fee_income=delta_fee,
         claims=work_block.storage_claim_count,
-        tx_fees=delta_tx_fees,
-        tx_bytes=delta_tx_bytes,
     )
     if block.statistics != expected_statistics:
         node.logger.debug(

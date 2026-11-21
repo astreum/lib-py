@@ -87,9 +87,7 @@ class TestClaimBuyout(unittest.TestCase):
         self.prev_block = make_previous_block(
             cumulative_fee=1,
             cumulative_total_balance=4,
-            total_tx_fees=1,
-            total_tx_bytes=1,
-        )
+            )
         self.block = make_block(self.node, self.prev_block, height=1)
         seed_storage_account(self.block)
 

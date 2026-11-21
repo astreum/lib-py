@@ -20,7 +20,6 @@ from astreum.consensus.block.encoding.decode import (
     get_previous_block_hash_local,
 )
 from astreum.consensus.transaction import Transaction, apply_transaction_obj
-from astreum.consensus.transaction.apply import demand_pair
 from astreum.consensus.account.model import ACCOUNT_SHAPE
 from astreum.consensus.block.verify.transactions import _fetch_new_nodes
 from astreum.consensus.transaction.storage.difficulty import next_storage_difficulty
@@ -510,7 +509,9 @@ def make_validation_worker(
                     new_block.pending_exprs.append(get_radix_node_expr(trie_node))
                 storage_account.data_hash = storage_account.data.root_hash
 
-            total_transaction_fee, delta_tx_bytes = demand_pair(node, new_block)
+            total_transaction_fee = sum(
+                r.base_fee + r.execution_fee for r in new_block.receipts
+            )
             total_base_fee = sum(r.base_fee for r in new_block.receipts)
             transaction_count = len(new_block.receipts)
             total_storage_fee = sum(r.storage_fee for r in new_block.receipts)
@@ -534,15 +535,12 @@ def make_validation_worker(
             new_block.total_balance += reward_amount
 
             delta_fee = fee_income(new_block.receipts)
-            delta_tx_fees = total_transaction_fee
             new_block.statistics = (
                 new_block.statistics or BlockStatistics()
             ).updated(
                 total_balance=new_block.total_balance,
                 fee_income=delta_fee,
                 claims=new_block.storage_claim_count,
-                tx_fees=delta_tx_fees,
-                tx_bytes=delta_tx_bytes,
             )
 
             transactions = new_block.transactions or []

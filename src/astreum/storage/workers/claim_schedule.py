@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import heapq
 from dataclasses import dataclass, field
-from fractions import Fraction
 
-from astreum.consensus.block.rate import storage_fee_at_rate
+from astreum.consensus.block.rate import storage_fee
 from astreum.consensus.transaction.storage.difficulty import distance_delta, required_bits
 from astreum.consensus.validation.validator import SLOT_DURATION_SECONDS
 
@@ -24,19 +23,9 @@ def affordable_bits(budget: int) -> int:
     return budget.bit_length() - 1
 
 
-def claim_cost(
-    fee_rate: Fraction,
-    quote: Fraction,
-    base_fee: int,
-    bytes_per_claim: int,
-    band: int,
-) -> int:
-    overhead = base_fee + storage_fee_at_rate(
-        fee_rate, quote, _RECEIPT_OVERHEAD_BYTES
-    )
-    return storage_fee_at_rate(
-        fee_rate, quote, bytes_per_claim
-    ) + -(-overhead // band)
+def claim_cost(base_fee: int, bytes_per_claim: int, band: int) -> int:
+    overhead = base_fee + storage_fee(_RECEIPT_OVERHEAD_BYTES)
+    return storage_fee(bytes_per_claim) + -(-overhead // band)
 
 
 def min_elapsed(new_size: int, cost: int, min_profit: int, band: int) -> int:

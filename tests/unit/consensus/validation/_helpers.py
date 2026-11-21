@@ -160,8 +160,6 @@ def make_previous_block(
     cumulative_fee: int = 1,
     cumulative_total_balance: int = 1,
     total_balance: int = 1,
-    total_tx_fees: int = 1,
-    total_tx_bytes: int = 1,
     height: int = 0,
     validation_difficulty: int = 1,
 ) -> Block:
@@ -181,14 +179,7 @@ def make_previous_block(
         receipts_hash=ZERO32,
         validation_difficulty=validation_difficulty,
         validator_public_key_bytes=os.urandom(32),
-        statistics=BlockStatistics(
-            cumulative_fee,
-            total_balance,
-            cumulative_total_balance,
-            0,
-            total_tx_fees,
-            total_tx_bytes,
-        ),
+        statistics=BlockStatistics(cumulative_fee, total_balance, cumulative_total_balance, 0),
     )
 
 

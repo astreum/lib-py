@@ -654,13 +654,7 @@ class TestEndToEnd(unittest.TestCase):
         stats = block.statistics
         # The old rule added nothing for an empty block: no supply level
         # entered the cumulative balance and no level was stored.
-        block.statistics = parent.statistics.updated(
-            total_balance=0,
-            fee_income=0,
-            claims=0,
-            tx_fees=0,
-            tx_bytes=0,
-        )
+        block.statistics = parent.statistics.updated(total_balance=0, fee_income=0, claims=0)
         try:
             ok, reason = verify_block_transactions(self.node, block)
         finally:

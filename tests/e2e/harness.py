@@ -122,13 +122,10 @@ def wait_until(predicate, timeout: float, message: str, nodes=(), interval: floa
 def setup_statistics(total: int, funds_total: int = 0) -> BlockStatistics:
     """Return the all-time statistics entry a test chain starts with.
 
-    A raw genesis has no fee history, so no block past it can price its
-    storage record. Every test chain is SET UP: the all-time figures state
-    that the chain already ran at the spec's worked-example intensity 0.5
-    (total fees equal the supply level; the cumulative supply is twice it,
-    so ``r_bar = 0.5``), and the demand pair is the unit-fixture byte price
-    of 1 fee per 1,000,000 bytes. At that intensity a transfer's storage
-    fee is a few units, not the whole balance.
+    Every test chain is SET UP with a fee history: the all-time figures
+    state that the chain already ran at the spec's worked-example intensity
+    0.5 (total fees equal the supply level; the cumulative supply is twice
+    it, so ``r_bar = 0.5``).
 
     Args:
         total: The staked amount of the genesis being built.
@@ -138,9 +135,7 @@ def setup_statistics(total: int, funds_total: int = 0) -> BlockStatistics:
         The single all-time statistics entry.
     """
     level = total + funds_total
-    return BlockStatistics(
-        level, level, 2 * level, 0, 1, 1_000_000, 0, 0, 0
-    )
+    return BlockStatistics(level, level, 2 * level, 0)
 
 
 def genesis_with(

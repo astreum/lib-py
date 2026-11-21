@@ -76,8 +76,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         self.node = _FakeNode()
         self.prev_block = make_previous_block(
             cumulative_total_balance=100_000, cumulative_fee=1000,
-            total_tx_fees=1, total_tx_bytes=1_000_000,
-        )
+            )
 
     def _make_block(self, height):
         block = make_block(self.node, self.prev_block, height=height)
@@ -204,7 +203,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
     def test_the_claim_pays_the_owner_the_missed_amount_as_new_money(self):
         block = self._make_block(height=8)
         borrower_pk, _ = seed_sender_account(block, balance=1_000_000)
-        owner_pk, owner_key = seed_sender_account(block, balance=7)
+        owner_pk, owner_key = seed_sender_account(block, balance=100_000)
         treasury_seed = 50_000
         self._seed_loan(
             block, borrower_pk, paid_until=5, owner=owner_pk,
@@ -217,7 +216,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         self.assertEqual(receipt.status, STATUS_SUCCESS)
         self.assertEqual(
             self._balance(block, owner_pk),
-            7 + 3 * PAYMENT - receipt.total_fee,
+            100_000 + 3 * PAYMENT - receipt.total_fee,
         )
         # The treasury is never debited: the payout is minted, so its pot
         # keeps every unit it held.
@@ -233,7 +232,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
     def test_the_claim_advances_the_pointer_to_the_current_height(self):
         block = self._make_block(height=8)
         borrower_pk, _ = seed_sender_account(block, balance=1_000_000)
-        owner_pk, owner_key = seed_sender_account(block, balance=7)
+        owner_pk, owner_key = seed_sender_account(block, balance=100_000)
         self._seed_loan(block, borrower_pk, paid_until=7, owner=owner_pk)
 
         receipt = self._claim(block, owner_pk, owner_key, self._loan_id)
@@ -242,13 +241,13 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         self.assertEqual(self._loan(block, borrower_pk, self._loan_id).paid_until_block, 8)
         self.assertEqual(
             self._balance(block, owner_pk),
-            7 + PAYMENT - receipt.total_fee,
+            100_000 + PAYMENT - receipt.total_fee,
         )
 
     def test_the_payout_is_the_write_off_event(self):
         block = self._make_block(height=8)
         borrower_pk, _ = seed_sender_account(block, balance=1_000_000)
-        owner_pk, owner_key = seed_sender_account(block, balance=7)
+        owner_pk, owner_key = seed_sender_account(block, balance=100_000)
         self._seed_loan(
             block, borrower_pk, paid_until=5, owner=owner_pk,
             user_defaulted=1_000, user_loaned=5_000,
@@ -268,7 +267,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
     def test_a_second_claim_with_no_arrears_fails(self):
         block = self._make_block(height=8)
         borrower_pk, _ = seed_sender_account(block, balance=1_000_000)
-        owner_pk, owner_key = seed_sender_account(block, balance=7)
+        owner_pk, owner_key = seed_sender_account(block, balance=100_000)
         stranger_pk, stranger_key = seed_sender_account(block, balance=1_000_000)
         self._seed_loan(block, borrower_pk, paid_until=5, owner=owner_pk)
 
@@ -289,33 +288,33 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
     def test_a_closed_loan_fails(self):
         block = self._make_block(height=8)
         borrower_pk, _ = seed_sender_account(block, balance=1_000_000)
-        owner_pk, owner_key = seed_sender_account(block, balance=7)
+        owner_pk, owner_key = seed_sender_account(block, balance=100_000)
         self._seed_loan(block, borrower_pk, paid_until=0, owner=owner_pk)
 
         receipt = self._claim(block, owner_pk, owner_key, self._loan_id)
 
         self.assertEqual(receipt.status, STATUS_FAILED)
-        self.assertEqual(self._balance(block, owner_pk), 7 - receipt.total_fee)
+        self.assertEqual(self._balance(block, owner_pk), 100_000 - receipt.total_fee)
         self.assertEqual((block.statistics.total_written_off if block.statistics else 0), 0)
 
     def test_a_prepaid_pointer_has_nothing_to_claim(self):
         block = self._make_block(height=8)
         borrower_pk, _ = seed_sender_account(block, balance=1_000_000)
-        owner_pk, owner_key = seed_sender_account(block, balance=7)
+        owner_pk, owner_key = seed_sender_account(block, balance=100_000)
         self._seed_loan(block, borrower_pk, paid_until=9, owner=owner_pk)
 
         receipt = self._claim(block, owner_pk, owner_key, self._loan_id)
 
         self.assertEqual(receipt.status, STATUS_FAILED)
         self.assertEqual(self._loan(block, borrower_pk, self._loan_id).paid_until_block, 9)
-        self.assertEqual(self._balance(block, owner_pk), 7 - receipt.total_fee)
+        self.assertEqual(self._balance(block, owner_pk), 100_000 - receipt.total_fee)
 
     def test_a_malformed_pointer_below_creation_fails_closed(self):
         # The insured write-off paths reject a pointer below the creation
         # block; a claim must not mint an unbounded payout from it.
         block = self._make_block(height=8)
         borrower_pk, _ = seed_sender_account(block, balance=1_000_000)
-        owner_pk, owner_key = seed_sender_account(block, balance=7)
+        owner_pk, owner_key = seed_sender_account(block, balance=100_000)
         self._seed_loan(
             block, borrower_pk, paid_until=5, creation=10, owner=owner_pk,
         )
@@ -323,7 +322,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         receipt = self._claim(block, owner_pk, owner_key, self._loan_id)
 
         self.assertEqual(receipt.status, STATUS_FAILED)
-        self.assertEqual(self._balance(block, owner_pk), 7 - receipt.total_fee)
+        self.assertEqual(self._balance(block, owner_pk), 100_000 - receipt.total_fee)
         self.assertEqual((block.statistics.total_written_off if block.statistics else 0), 0)
 
     # --- same-block visibility ---
@@ -334,7 +333,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         # read them from the block before it can find the overdue loan.
         block = self._make_block(height=8)
         borrower_pk, borrower_key = seed_sender_account(block, balance=1_000_000)
-        owner_pk, owner_key = seed_sender_account(block, balance=7)
+        owner_pk, owner_key = seed_sender_account(block, balance=100_000)
         self._seed_loan(block, borrower_pk, paid_until=5, owner=owner_pk)
 
         borrow_tx = create_transaction(
@@ -362,7 +361,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
     def test_anyone_may_initiate_and_the_payout_goes_to_the_owner(self):
         block = self._make_block(height=8)
         borrower_pk, _ = seed_sender_account(block, balance=1_000_000)
-        owner_pk, _ = seed_sender_account(block, balance=7)
+        owner_pk, _ = seed_sender_account(block, balance=100_000)
         stranger_pk, stranger_key = seed_sender_account(block, balance=1_000_000)
         self._seed_loan(block, borrower_pk, paid_until=5, owner=owner_pk)
 
@@ -374,7 +373,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
             self._balance(block, stranger_pk),
             1_000_000 - receipt.total_fee,
         )
-        self.assertEqual(self._balance(block, owner_pk), 7 + 3 * PAYMENT)
+        self.assertEqual(self._balance(block, owner_pk), 100_000 + 3 * PAYMENT)
         self.assertEqual(self._loan(block, borrower_pk, self._loan_id).paid_until_block, 8)
         self.assertEqual(
             self._user_record(block, borrower_pk).defaulted, 3 * PAYMENT
@@ -441,7 +440,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
     def test_a_claim_cost_loan_rides_the_insurance_branch(self):
         block = self._make_block(height=8)
         borrower_pk, _ = seed_sender_account(block, balance=1_000_000)
-        owner_pk, owner_key = seed_sender_account(block, balance=7)
+        owner_pk, owner_key = seed_sender_account(block, balance=100_000)
         self._seed_loan(
             block, borrower_pk, paid_until=5, owner=owner_pk,
             loan_type=LoanType.CLAIM_COST, insurance_interval_fee=5,
@@ -452,7 +451,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         self.assertEqual(receipt.status, STATUS_SUCCESS)
         self.assertEqual(
             self._balance(block, owner_pk),
-            7 + 3 * PAYMENT - receipt.total_fee,
+            100_000 + 3 * PAYMENT - receipt.total_fee,
         )
         self.assertEqual(
             self._balance(block, TREASURY_ADDRESS),
@@ -471,7 +470,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
     def test_a_nonzero_amount_fails(self):
         block = self._make_block(height=8)
         borrower_pk, _ = seed_sender_account(block, balance=1_000_000)
-        owner_pk, owner_key = seed_sender_account(block, balance=7)
+        owner_pk, owner_key = seed_sender_account(block, balance=100_000)
         self._seed_loan(block, borrower_pk, paid_until=5, owner=owner_pk)
 
         receipt = self._claim(
@@ -479,7 +478,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         )
 
         self.assertEqual(receipt.status, STATUS_FAILED)
-        self.assertEqual(self._balance(block, owner_pk), 7 - receipt.total_fee)
+        self.assertEqual(self._balance(block, owner_pk), 100_000 - receipt.total_fee)
         loan = self._loan(block, borrower_pk, self._loan_id)
         self.assertEqual(loan.paid_until_block, 5)
         self.assertEqual(loan.missed_count, 0)
@@ -490,7 +489,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
     def test_a_zero_payment_amount_fails(self):
         block = self._make_block(height=8)
         borrower_pk, _ = seed_sender_account(block, balance=1_000_000)
-        owner_pk, owner_key = seed_sender_account(block, balance=7)
+        owner_pk, owner_key = seed_sender_account(block, balance=100_000)
         self._seed_loan(
             block, borrower_pk, paid_until=5, owner=owner_pk,
             payment_amount=0,
@@ -499,7 +498,7 @@ class TestTreasuryInsuranceClaim(unittest.TestCase):
         receipt = self._claim(block, owner_pk, owner_key, self._loan_id)
 
         self.assertEqual(receipt.status, STATUS_FAILED)
-        self.assertEqual(self._balance(block, owner_pk), 7 - receipt.total_fee)
+        self.assertEqual(self._balance(block, owner_pk), 100_000 - receipt.total_fee)
         loan = self._loan(block, borrower_pk, self._loan_id)
         self.assertEqual(loan.paid_until_block, 5)
         self.assertEqual(loan.missed_count, 0)

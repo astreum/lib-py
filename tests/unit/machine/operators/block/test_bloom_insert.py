@@ -34,7 +34,7 @@ def _make_tx(hash_val=None, sender=None, recipient=None):
 def _make_block(height=100, previous_block=None):
     if previous_block is None:
         previous_block = type('Prev', (), {
-            'statistics': BlockStatistics(1_000_000, 1_000_000, 1_000_000, 0, 1, 1),
+            'statistics': BlockStatistics(1_000_000, 1_000_000, 1_000_000, 0),
         })()
     block = type('Block', (), {
         'height': height,

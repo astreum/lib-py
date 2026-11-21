@@ -71,8 +71,7 @@ class TestTreasuryBuy(unittest.TestCase):
     def _make_block(self, height, *, fee=1000, stake=100_000):
         prev_block = make_previous_block(
             cumulative_total_balance=stake, cumulative_fee=fee,
-            total_tx_fees=1, total_tx_bytes=1_000_000,
-        )
+            )
         block = make_block(self.node, prev_block, height=height)
         seed_storage_account(block)
         return block
@@ -280,14 +279,14 @@ class TestTreasuryBuy(unittest.TestCase):
         # is escrowed, so a balance below ``transaction.amount`` is enough.
         block = self._make_block(height=5)
         price = self._price()
-        buyer_pk, buyer_key = seed_sender_account(block, balance=price + 1000)
+        buyer_pk, buyer_key = seed_sender_account(block, balance=price + 100_000)
         owner = os.urandom(32)
         block.accounts.set_account(owner, create_account(balance=0))
         _, loan_tx_id, _ = self._seed_loan(block, buyer_pk, owner=owner)
         buyer_before = block.accounts.get_account(buyer_pk, self.node).balance
-        self.assertLess(buyer_before, price + 5000)
+        self.assertLess(buyer_before, price + 200_000)
 
-        receipt = self._buy(block, buyer_pk, buyer_key, loan_tx_id, price + 5000)
+        receipt = self._buy(block, buyer_pk, buyer_key, loan_tx_id, price + 200_000)
 
         self.assertEqual(receipt.status, STATUS_SUCCESS)
         self.assertEqual(

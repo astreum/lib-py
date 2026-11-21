@@ -91,39 +91,6 @@ def _data_nodes(data: Expr) -> list[Expr]:
     return result
 
 
-def demand_pair(node: Any, block: object) -> tuple[int, int]:
-    """Return the demand pair of *block*.
-
-    The pair is ``(total_tx_fees, total_tx_bytes)``. The fee is the
-    inclusion fee paid by each receipt: base fee plus execution fee.
-    Data fees and storage fees are not inclusion fees and are excluded.
-    The bytes are the flat size of the whole transaction Expr tree,
-    signature and all: the same number whether a node holds the tree
-    whole or fetches it cell by cell (``storage_walk_size``).
-
-    Args:
-        node: The node, for the cells the walk fetches.
-        block: The block whose receipts and transactions are read.
-
-    Returns:
-        ``(tx_fees, tx_bytes)`` for the block.
-
-    Raises:
-        ValueError: If a transaction cell cannot be fetched. The pair is
-            never invented.
-    """
-    receipts = block.receipts or []
-    transactions = block.transactions or []
-    tx_fees = sum(receipt.base_fee + receipt.execution_fee for receipt in receipts)
-    tx_bytes = 0
-    for transaction in transactions:
-        size = storage_walk_size(node, block, transaction.expr())
-        if size is None:
-            raise ValueError("transaction exprs unavailable for the demand pair")
-        tx_bytes += size
-    return tx_fees, tx_bytes
-
-
 def _apply_tx_effects(
     node: Any,
     block: object,

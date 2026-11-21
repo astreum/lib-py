@@ -16,8 +16,6 @@ class BlockStatistics:
         total_balance: The supply level ``S(h)`` at this block.
         cumulative_total_balance: The sum of the supply levels, ever.
         total_claims: Storage claims, ever.
-        total_tx_fees: Inclusion fees, ever.
-        total_tx_bytes: Included transaction bytes, ever.
         total_loan_count: Loans created, ever.
         total_loaned: Principal minted, ever.
         total_written_off: Money forgiven, ever.
@@ -27,8 +25,6 @@ class BlockStatistics:
     total_balance: int = 0
     cumulative_total_balance: int = 0
     total_claims: int = 0
-    total_tx_fees: int = 0
-    total_tx_bytes: int = 0
     total_loan_count: int = 0
     total_loaned: int = 0
     total_written_off: int = 0
@@ -86,8 +82,6 @@ class BlockStatistics:
         total_balance: int,
         fee_income: int,
         claims: int,
-        tx_fees: int,
-        tx_bytes: int,
     ) -> "BlockStatistics":
         """Return the value after one block adds its events.
 
@@ -98,8 +92,6 @@ class BlockStatistics:
             total_balance: The supply level ``S(h)`` of this block.
             fee_income: Fee income this block added.
             claims: Storage claims this block added.
-            tx_fees: Inclusion fees this block paid.
-            tx_bytes: Included transaction bytes this block carried.
 
         Returns:
             The value for this block.
@@ -110,8 +102,6 @@ class BlockStatistics:
             total_balance=total_balance,
             cumulative_total_balance=self.cumulative_total_balance + total_balance,
             total_claims=self.total_claims + claims,
-            total_tx_fees=self.total_tx_fees + tx_fees,
-            total_tx_bytes=self.total_tx_bytes + tx_bytes,
         )
 
 

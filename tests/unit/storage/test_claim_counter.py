@@ -1,6 +1,5 @@
 import sys
 import unittest
-from fractions import Fraction
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -140,10 +139,10 @@ class TestSendBatch(unittest.TestCase):
 
     def _send(self, entries, min_profit=0, fee=10):
         self.node.config.storage_claim_min_profit = min_profit
-        with patch.object(claim_mod, "storage_fee_at_rate", return_value=fee), patch(
+        with patch.object(claim_mod, "storage_fee", return_value=fee), patch(
             "astreum.consensus.transaction.send.send_transaction"
         ) as mock_send:
-            result, self.tx_bytes = _send_batch(self.node, self.head, entries, 5, (Fraction(1), Fraction(1)))
+            result, self.tx_bytes = _send_batch(self.node, self.head, entries, 5)
         return result, mock_send
 
     def test_send_batch_profitable(self):
@@ -166,10 +165,10 @@ class TestSendBatch(unittest.TestCase):
     def test_send_batch_reads_the_counter_at_the_send_block(self):
         self.node.latest_block.accounts = _AccountsStub(account=SimpleNamespace(counter=7))
         self.node.config.storage_claim_min_profit = 0
-        with patch.object(claim_mod, "storage_fee_at_rate", return_value=10), patch(
+        with patch.object(claim_mod, "storage_fee", return_value=10), patch(
             "astreum.consensus.transaction.send.send_transaction"
         ) as mock_send:
-            result, _ = _send_batch(self.node, self.head, self._entries(payout=1000), None, (Fraction(1), Fraction(1)))
+            result, _ = _send_batch(self.node, self.head, self._entries(payout=1000), None)
         self.assertEqual(result.counter, 7)
         self.assertEqual(mock_send.call_args.args[1].counter, 7)
 
@@ -203,10 +202,10 @@ class TestSendBatch(unittest.TestCase):
 
     def test_send_batch_send_failure(self):
         self.node.config.storage_claim_min_profit = 0
-        with patch.object(claim_mod, "storage_fee_at_rate", return_value=10), patch(
+        with patch.object(claim_mod, "storage_fee", return_value=10), patch(
             "astreum.consensus.transaction.send.send_transaction", side_effect=RuntimeError("down")
         ):
-            result, _ = _send_batch(self.node, self.head, self._entries(payout=1000), 5, (Fraction(1), Fraction(1)))
+            result, _ = _send_batch(self.node, self.head, self._entries(payout=1000), 5)
         self.assertIsNone(result)
 
 
@@ -452,7 +451,7 @@ class TestClaimStep(unittest.TestCase):
         ), patch.object(claim_mod, "fair_interval", return_value=interval), patch.object(
             claim_mod, "_build_claims", build
         ), patch(
-            "astreum.storage.workers.claim_schedule.storage_fee_at_rate",
+            "astreum.storage.workers.claim_schedule.storage_fee",
             return_value=0,
         ):
             entries = _claim_step(
@@ -462,7 +461,6 @@ class TestClaimStep(unittest.TestCase):
                 [self.storage_id],
                 self.queue,
                 self.held,
-                (Fraction(1), Fraction(1)),
                 100,
                 lambda: False,
             )
@@ -530,7 +528,7 @@ class TestClaimStep(unittest.TestCase):
         ), patch.object(claim_mod, "fair_interval", return_value=50), patch.object(
             claim_mod, "_build_claims", MagicMock(return_value=[])
         ), patch(
-            "astreum.storage.workers.claim_schedule.storage_fee_at_rate",
+            "astreum.storage.workers.claim_schedule.storage_fee",
             return_value=0,
         ):
             entries = _claim_step(
@@ -540,7 +538,6 @@ class TestClaimStep(unittest.TestCase):
                 [failing, self.storage_id],
                 self.queue,
                 self.held,
-                (Fraction(1), Fraction(1)),
                 100,
                 lambda: False,
             )
@@ -560,7 +557,7 @@ class TestClaimStep(unittest.TestCase):
         ), patch.object(claim_mod, "storage_record_from_storage", return_value=record), patch.object(
             claim_mod, "fair_interval", return_value=50
         ), patch.object(claim_mod, "_build_claims", build), patch(
-            "astreum.storage.workers.claim_schedule.storage_fee_at_rate",
+            "astreum.storage.workers.claim_schedule.storage_fee",
             return_value=0,
         ):
             entries = _claim_step(
@@ -570,7 +567,6 @@ class TestClaimStep(unittest.TestCase):
                 [self.storage_id, other_id],
                 self.queue,
                 self.held,
-                (Fraction(1), Fraction(1)),
                 100,
                 lambda: False,
             )
@@ -602,10 +598,10 @@ class TestClaimBid(unittest.TestCase):
 
         with patch.object(claim_mod, "_build_multi_claim_tx", side_effect=build), \
              patch.object(claim_mod, "_tree_bytes", return_value=100), \
-             patch.object(claim_mod, "storage_fee_at_rate", return_value=0), \
+             patch.object(claim_mod, "storage_fee", return_value=0), \
              patch("astreum.consensus.transaction.send.send_transaction"):
             in_flight, _ = _send_batch(
-                node, head, [(*_claim(42), 10)], 0, (Fraction(1), Fraction(1))
+                node, head, [(*_claim(42), 10)], 0
             )
 
         self.assertIsNotNone(in_flight)

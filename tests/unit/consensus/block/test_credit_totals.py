@@ -35,7 +35,7 @@ def _make_block(**overrides):
         total_base_fee=0,
         transaction_count=0,
         total_storage_fee=0,
-        statistics=BlockStatistics(1, 1, 1, 0, 0, 0, 0, 0, 0),
+        statistics=BlockStatistics(1, 1, 1, 0, 0, 0, 0),
         transactions_hash=b"t" * 32,
         receipts_hash=b"r" * 32,
         validation_difficulty=1,
@@ -64,7 +64,7 @@ class TestCreditTotals(unittest.TestCase):
         self.assertEqual(b.statistics.total_loan_count, 0)
 
     def test_round_trip_nonzero_totals(self):
-        b = _make_block(statistics=BlockStatistics(1, 1, 1, 0, 0, 0, 9, 12_345, 678))
+        b = _make_block(statistics=BlockStatistics(1, 1, 1, 0, 9, 12_345, 678))
         block_id = get_block_expr(b).hash()
         inner_exprs, _ = resolve_inner_exprs(self.node, get_block_expr(b))
         for e in inner_exprs:
@@ -104,7 +104,7 @@ class TestCreditTotals(unittest.TestCase):
 
         b = _make_block(
             accounts=Accounts(),
-            statistics=BlockStatistics(1, 1, 1, 0, 0, 0, 1, 100, 10),
+            statistics=BlockStatistics(1, 1, 1, 0, 1, 100, 10),
         )
         snapshot = b.snapshot()
         b.statistics = b.statistics.with_loan(50).with_write_off(5)

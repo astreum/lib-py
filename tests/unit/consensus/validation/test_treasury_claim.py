@@ -67,8 +67,7 @@ class TestTreasuryClaim(unittest.TestCase):
         self.node = _FakeNode()
         self.prev_block = make_previous_block(
             cumulative_total_balance=100_000, cumulative_fee=1000,
-            total_tx_fees=1, total_tx_bytes=1_000_000,
-        )
+            )
 
     def _make_block(self, height):
         block = make_block(self.node, self.prev_block, height=height)
@@ -141,7 +140,7 @@ class TestTreasuryClaim(unittest.TestCase):
         flush_pending(self.node, block)
         return block.receipts[-1]
 
-    def _seed_owner(self, block, *, balance=7):
+    def _seed_owner(self, block, *, balance=100_000):
         owner_pk, owner_key = seed_sender_account(block, balance=balance)
         return owner_pk, owner_key
 
@@ -175,7 +174,7 @@ class TestTreasuryClaim(unittest.TestCase):
         self.assertEqual(loan.paid_until_block, 8)
         self.assertEqual(
             block.accounts.get_account(owner_pk, self.node).balance,
-            7 + 3 * PAYMENT - receipt.total_fee,
+            100_000 + 3 * PAYMENT - receipt.total_fee,
         )
         self.assertEqual(
             block.accounts.get_account(TREASURY_ADDRESS, self.node).balance,
@@ -197,7 +196,7 @@ class TestTreasuryClaim(unittest.TestCase):
         self.assertEqual(loan.paid_until_block, 8)
         # A failed tx keeps its fee, so the owner never gains from it.
         self.assertLessEqual(
-            block.accounts.get_account(owner_pk, self.node).balance, 7,
+            block.accounts.get_account(owner_pk, self.node).balance, 100_000,
         )
 
     def test_claim_one_block_before_the_current_block_pays_one(self):
@@ -216,7 +215,7 @@ class TestTreasuryClaim(unittest.TestCase):
         self.assertEqual(loan.paid_until_block, 8)
         self.assertEqual(
             block.accounts.get_account(owner_pk, self.node).balance,
-            7 + PAYMENT - receipt.total_fee,
+            100_000 + PAYMENT - receipt.total_fee,
         )
         self.assertEqual(
             block.accounts.get_account(TREASURY_ADDRESS, self.node).balance,
@@ -274,7 +273,7 @@ class TestTreasuryClaim(unittest.TestCase):
 
         self.assertEqual(receipt.status, STATUS_FAILED)
         self.assertEqual(
-            block.accounts.get_account(owner_pk, self.node).balance, 7,
+            block.accounts.get_account(owner_pk, self.node).balance, 100_000,
         )
 
     def test_claim_by_the_treasury_owner_fails(self):

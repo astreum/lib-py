@@ -165,7 +165,7 @@ class TestBlockVerify(unittest.TestCase):
             bloom_hash=None,
             expr_id=os.urandom(32),
             height=3,
-            statistics=BlockStatistics(1, 1, 1, 0, 0, 0, 0, 0, 0),
+            statistics=BlockStatistics(1, 1, 1, 0, 0, 0, 0),
         )
         block = SimpleNamespace(
             expr_id=os.urandom(32),

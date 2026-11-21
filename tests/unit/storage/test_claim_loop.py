@@ -2,7 +2,6 @@ import logging
 import sys
 import unittest
 from collections import deque
-from fractions import Fraction
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -12,7 +11,6 @@ from astreum.storage.workers import claim as claim_mod
 from astreum.storage.workers.claim_flow import InFlight
 
 A, B, C = b"\x0a" * 32, b"\x0b" * 32, b"\x0c" * 32
-RATE = Fraction(1, 1000)
 
 
 def _entry(storage_id=A):
@@ -55,13 +53,12 @@ class TestClaimLoop(unittest.TestCase):
         self.fair = None
         self.step = MagicMock(return_value=[_entry()])
         self.send = MagicMock(side_effect=self._send)
-        self.estimate = MagicMock(return_value=(RATE, Fraction(1)))
         self.measure = MagicMock(return_value=7.0)
         self.capacity_min = None
         self.real_send = False
         self.scan = lambda node, batch=None: iter(self.records)
 
-    def _send(self, node, head, entries, counter, rate):
+    def _send(self, node, head, entries, counter):
         counter = self.counter if counter is None else counter
         return InFlight(counter, node.latest_block.height, entries, tx_bytes=100), 100
 
@@ -96,7 +93,6 @@ class TestClaimLoop(unittest.TestCase):
             patch.object(claim_mod, "measure_hash_rate", self.measure),
             patch.object(claim_mod, "iter_records_in_cold_storage", self.scan),
             patch.object(claim_mod, "fair_interval", lambda head: self.fair),
-            patch.object(claim_mod, "next_storage_price", self.estimate),
             patch.object(claim_mod, "calculate_discount_rate", lambda *a, **k: 0.0),
             patch.object(claim_mod, "SLOT_DURATION_SECONDS", 0),
         ]
@@ -159,7 +155,7 @@ class TestClaimLoop(unittest.TestCase):
         self.records = []
         seen = []
 
-        def step(node, head, tree, ids, queue, held, rate, bytes_per_claim, should_stop):
+        def step(node, head, tree, ids, queue, held, bytes_per_claim, should_stop):
             seen.append((set(held), set(queue.released)))
             if not held:
                 held.update({A: (100, 0), B: (200, 0), C: (300, 0)})
@@ -169,36 +165,26 @@ class TestClaimLoop(unittest.TestCase):
         self._run([self._at(10), self._at(10)])
         self.assertEqual(seen[1], ({C}, {A, B}))
 
-    def test_rate_estimated_once_per_head(self):
-        self.step.return_value = []
-        self._run([self._at(10)] + [lambda: None] * 2)
-        self.estimate.assert_called_once()
-
-    def test_no_rate_no_claims(self):
-        self.estimate.side_effect = ValueError("no fees")
-        self._run([self._at(10), self._at(10)])
-        self.step.assert_not_called()
-
     def test_bytes_per_claim_from_last_send(self):
         entries = [_entry(A), _entry(B), _entry(C)]
         self.step.return_value = entries
-        self.send.side_effect = lambda node, head, e, counter, rate: (
+        self.send.side_effect = lambda node, head, e, counter: (
             InFlight(self.counter if counter is None else counter, head.height, e, tx_bytes=900),
             900,
         )
         self._run([self._at(10), self._at(11, counter=1)])
         self.assertEqual(self.step.call_count, 2)
-        self.assertEqual(self.step.call_args_list[0].args[7], 0)
-        self.assertEqual(self.step.call_args_list[1].args[7], 300)
+        self.assertEqual(self.step.call_args_list[0].args[6], 0)
+        self.assertEqual(self.step.call_args_list[1].args[6], 300)
 
     def test_bytes_per_claim_from_a_dropped_batch(self):
         entries = [_entry(A), _entry(B), _entry(C)]
         self.step.return_value = entries
-        self.send.side_effect = lambda node, head, e, counter, rate: (None, 900)
+        self.send.side_effect = lambda node, head, e, counter: (None, 900)
         self._run([self._at(10), self._at(11)])
         self.assertEqual(self.step.call_count, 2)
-        self.assertEqual(self.step.call_args_list[0].args[7], 0)
-        self.assertEqual(self.step.call_args_list[1].args[7], 300)
+        self.assertEqual(self.step.call_args_list[0].args[6], 0)
+        self.assertEqual(self.step.call_args_list[1].args[6], 300)
 
     def test_failed_account_read_is_logged_and_retried(self):
         def broken():
@@ -209,7 +195,6 @@ class TestClaimLoop(unittest.TestCase):
         with self.assertLogs("test_claim_loop", level="ERROR") as logs:
             self._run([broken, self._at(10)])
         self.assertIn("read failed", "\n".join(logs.output))
-        self.estimate.assert_called_once()
         self.step.assert_called_once()
         self.assertEqual(self.send.call_count, 1)
 
@@ -227,7 +212,7 @@ class TestClaimLoop(unittest.TestCase):
         patches = [
             patch.object(claim_mod, "_build_multi_claim_tx", lambda *a: SimpleNamespace(hash=b"h", expr=lambda: None)),
             patch.object(claim_mod, "_tree_bytes", lambda expr: 100),
-            patch.object(claim_mod, "storage_fee_at_rate", lambda *a: 0),
+            patch.object(claim_mod, "storage_fee", lambda n: 0),
         ]
         for p in patches:
             p.start()
@@ -275,7 +260,7 @@ class TestClaimLoop(unittest.TestCase):
         self.capacity_min = 0.1
         self.records = []
 
-        def step(node, head, tree, ids, queue, held, rate, bytes_per_claim, should_stop):
+        def step(node, head, tree, ids, queue, held, bytes_per_claim, should_stop):
             held.update({A: (100, 0), B: (200, 0)})
             return []
 
@@ -287,7 +272,7 @@ class TestClaimLoop(unittest.TestCase):
         entries = [_entry(A), _entry(B)]
         calls = []
 
-        def step(node, head, tree, ids, queue, held, rate, bytes_per_claim, should_stop):
+        def step(node, head, tree, ids, queue, held, bytes_per_claim, should_stop):
             calls.append(ids)
             if len(calls) == 1:
                 queue.released.add(B)
@@ -303,7 +288,7 @@ class TestClaimLoop(unittest.TestCase):
     def test_failed_step_puts_popped_ids_back(self):
         heaps = []
 
-        def step(node, head, tree, ids, queue, held, rate, bytes_per_claim, should_stop):
+        def step(node, head, tree, ids, queue, held, bytes_per_claim, should_stop):
             heaps.append(sorted(queue.heap))
             if len(heaps) == 1:
                 self.assertEqual(ids, [A])

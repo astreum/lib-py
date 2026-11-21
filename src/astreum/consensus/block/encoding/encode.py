@@ -24,8 +24,6 @@ def _statistics_to_expr(statistics: BlockStatistics | None) -> Expr:
         statistics.total_balance,
         statistics.cumulative_total_balance,
         statistics.total_claims,
-        statistics.total_tx_fees,
-        statistics.total_tx_bytes,
         statistics.total_loan_count,
         statistics.total_loaned,
         statistics.total_written_off,

@@ -6,9 +6,9 @@ from typing import Iterable
 def validator_reward(receipts: Iterable) -> int:
     """Return what the validator of a block is paid.
 
-    The validator gets the transaction fees and the data fees of the block.
-    The storage fees go to the storage account, not to the validator. A block
-    that pays no fees pays the validator nothing.
+    The validator gets the transaction fees and the data fees of the block,
+    with a floor of one for a block that pays no fees. The storage fees go to
+    the storage account, not to the validator.
 
     Args:
         receipts: The receipts of the block.
@@ -16,14 +16,15 @@ def validator_reward(receipts: Iterable) -> int:
     Returns:
         The reward in aster.
     """
-    return sum(r.base_fee + r.execution_fee + r.data_fee for r in receipts)
+    paid = sum(r.base_fee + r.execution_fee + r.data_fee for r in receipts)
+    return max(paid, 1)
 
 
 def fee_income(receipts: Iterable) -> int:
     """Return the fee income a block adds to the chain statistics.
 
     It is the validator reward plus the storage fees: the fees the block
-    actually paid. A block with no transactions adds nothing.
+    actually paid. A block with no transactions adds the base reward.
 
     Args:
         receipts: The receipts of the block.

@@ -18,7 +18,7 @@ class TestGenesisStatistics(unittest.TestCase):
     def test_genesis_has_no_fee_seed(self):
         node = Node()
         block = create_genesis_block(node, b"\x07" * 32)
-        self.assertEqual(block.statistics, BlockStatistics(0, 1, 1, 0, 0, 0))
+        self.assertEqual(block.statistics, BlockStatistics(0, 1, 1, 0))
         self.assertEqual(block.statistics.total_fees, 0)
 
 
