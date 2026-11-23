@@ -16,9 +16,9 @@ from astreum.communication.storage_request.payment_required import (
 from astreum.communication.storage_response.code import StorageResponseCode
 from astreum.communication.storage_response.model import StorageResponse
 from astreum.communication.storage_response.storage_found import (
-    PAGE_ENTRY_BUDGET,
     encode_found_pages,
     found_page_expr_bytes,
+    page_entry_budget,
 )
 from astreum.communication.outgoing_queue import enqueue_outgoing
 from astreum.expression import (
@@ -265,7 +265,8 @@ def _serve_get(
                 None,
                 radix_all,
                 follow_refs=False,
-                budget=(node.config.storage_found_max_pages - 1) * PAGE_ENTRY_BUDGET,
+                budget=(node.config.storage_found_max_pages - 1)
+                * page_entry_budget(node.config.storage_found_max_bytes),
             )
             if not exprs:
                 return False, "radix selects nothing"
@@ -307,7 +308,11 @@ def _serve_get(
             )
 
         try:
-            payloads = encode_found_pages(exprs, on_skip=_skip)
+            payloads = encode_found_pages(
+                exprs,
+                on_skip=_skip,
+                entry_budget=page_entry_budget(node.config.storage_found_max_bytes),
+            )
         except ValueError as exc:
             node.logger.error(
                 "STORAGE_FOUND for %s not sent: %s", expr_id.hex(), exc

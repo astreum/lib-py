@@ -17,12 +17,16 @@ from astreum.communication.storage_response.storage_found import (
     decode_found_page,
     encode_found_pages,
     found_page_expr_bytes,
+    page_entry_budget,
 )
 from astreum.expression import NIL, RESOLUTION_FULL, bytes_, link
 from astreum.expression.encoding import encode_expr_to_bytes
 from astreum.utils.config import NodeConfig
 
 BIG = 30000
+# No IPv4/IPv6 path fragments a UDP datagram of this size.
+SAFE_DATAGRAM = 1232
+TEST_PAYLOAD_BYTES = 64
 
 
 def _big(i: int):
@@ -31,6 +35,10 @@ def _big(i: int):
 
 def _root():
     return link(bytes_(b"root"), NIL)
+
+
+def _small(i: int):
+    return bytes_(bytes([i]) * TEST_PAYLOAD_BYTES)
 
 
 def _header(page, total, count):
@@ -110,6 +118,38 @@ class TestCodec(unittest.TestCase):
             encode_found_pages([])
 
 
+class TestSafeBudget(unittest.TestCase):
+    def test_helper_reproduces_the_old_entry_budget(self):
+        self.assertEqual(page_entry_budget(MAX_UDP_DATAGRAM_BYTES), PAGE_ENTRY_BUDGET)
+
+    def test_safe_budget_splits_small_exprs(self):
+        exprs = [_root()] + [_small(i) for i in range(1, 40)]
+        budget = page_entry_budget(SAFE_DATAGRAM)
+        pages = encode_found_pages(exprs, entry_budget=budget)
+        self.assertGreater(len(pages), 1)
+        for i, payload in enumerate(pages, start=1):
+            self.assertLessEqual(len(payload) - 7, budget)
+            page, total, _ = decode_found_page(payload)
+            self.assertEqual((page, total), (i, len(pages)))
+        got = [e.hash() for p in pages for e in decode_found_page(p)[2]]
+        self.assertEqual(got, [e.hash() for e in exprs])
+
+    def test_safe_budget_skips_an_expr_that_cannot_fit(self):
+        budget = page_entry_budget(SAFE_DATAGRAM)
+        huge = bytes_(b"h" * (budget + 10))
+        skipped = []
+        pages = encode_found_pages(
+            [_root(), huge], on_skip=lambda e, n: skipped.append(n), entry_budget=budget
+        )
+        self.assertEqual(skipped, [len(encode_expr_to_bytes(huge))])
+        got = {e.hash() for p in pages for e in decode_found_page(p)[2]}
+        self.assertNotIn(huge.hash(), got)
+
+    def test_rejects_a_budget_below_one_entry(self):
+        with self.assertRaises(ValueError):
+            encode_found_pages([_root()], entry_budget=0)
+
+
 class TestServer(unittest.TestCase):
     def _run(self, exprs, config=None):
         node = SimpleNamespace(
@@ -117,7 +157,11 @@ class TestServer(unittest.TestCase):
             storage_public_key_bytes=b"\x00" * 32,
             storage_index={},
             outgoing_queue=queue.Queue(),
-            config=config if config is not None else NodeConfig(),
+            config=(
+                config
+                if config is not None
+                else NodeConfig(storage_found_max_bytes=MAX_UDP_DATAGRAM_BYTES)
+            ),
         )
         peer = SimpleNamespace(
             address=("127.0.0.1", 1), shared_key_bytes=b"\x01" * 32, difficulty=1,
@@ -155,6 +199,21 @@ class TestServer(unittest.TestCase):
         self.assertEqual(self._payload_of(sent[0]), encode_found_pages(exprs)[0])
         self.assertEqual(decode_found_page(self._payload_of(sent[0]))[:2], (1, 1))
 
+    def test_default_budget_keeps_datagrams_under_the_safe_size(self):
+        exprs = [_root()] + [_small(i) for i in range(1, 40)]
+        _, result, sent, _ = self._run(exprs, config=NodeConfig())
+        self.assertEqual(result, (True, None))
+        self.assertGreater(len(sent), 1)
+        for i, message in enumerate(sent, start=1):
+            self.assertLessEqual(8 + len(message.to_bytes()), SAFE_DATAGRAM)
+            data = self._payload_of(message)
+            self.assertLessEqual(
+                len(data) - 7, page_entry_budget(NodeConfig().storage_found_max_bytes)
+            )
+            self.assertEqual(decode_found_page(data)[:2], (i, len(sent)))
+        got = [e.hash() for m in sent for e in decode_found_page(self._payload_of(m))[2]]
+        self.assertEqual(got, [e.hash() for e in exprs])
+
     def test_large_response_is_paged_in_order(self):
         exprs = [_root()] + [_big(i) for i in range(1, 8)]
         _, result, sent, uploads = self._run(exprs)
@@ -179,6 +238,7 @@ class TestServer(unittest.TestCase):
         exprs = [_root()] + [_big(i) for i in range(1, 8)]
         node, result, sent, uploads = self._run(exprs, config=NodeConfig(
             storage_found_max_pages=2,
+            storage_found_max_bytes=MAX_UDP_DATAGRAM_BYTES,
         ))
         self.assertEqual(result, (False, "response too large"))
         self.assertEqual(sent, [])
@@ -189,7 +249,13 @@ class TestServer(unittest.TestCase):
         exprs = [_root()] + [_big(i) for i in range(1, 8)]
         _, _, default_sent, _ = self._run(exprs)
         pages = len(default_sent)
-        _, result, sent, _ = self._run(exprs, config=NodeConfig(storage_found_max_pages=pages))
+        _, result, sent, _ = self._run(
+            exprs,
+            config=NodeConfig(
+                storage_found_max_pages=pages,
+                storage_found_max_bytes=MAX_UDP_DATAGRAM_BYTES,
+            ),
+        )
         self.assertEqual(result, (True, None))
         self.assertEqual(len(sent), pages)
 

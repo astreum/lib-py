@@ -309,6 +309,29 @@ class TestLogLevel(_ConfigCase):
                 self.assertIn("log_level", str(ctx.exception))
 
 
+class TestStorageFoundMaxBytes(_ConfigCase):
+    def test_default_is_the_safe_datagram_size(self):
+        self.assertEqual(self.build().storage_found_max_bytes, 1232)
+        self.assertEqual(
+            self.build().storage_found_max_bytes,
+            config_module.DEFAULT_STORAGE_FOUND_MAX_BYTES,
+        )
+
+    def test_parsed(self):
+        self.assertEqual(self.build(storage_found_max_bytes="1200").storage_found_max_bytes, 1200)
+        self.assertEqual(self.build(storage_found_max_bytes=1400).storage_found_max_bytes, 1400)
+        self.assertEqual(
+            self.build(storage_found_max_bytes=65507).storage_found_max_bytes, 65507
+        )
+
+    def test_rejected(self):
+        for value in (255, 0, -5, 65508, "x", True):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError) as ctx:
+                    self.build(storage_found_max_bytes=value)
+                self.assertIn("storage_found_max_bytes", str(ctx.exception))
+
+
 class TestParsers(unittest.TestCase):
     def test_parse_int(self):
         parse = config_module._parse_int

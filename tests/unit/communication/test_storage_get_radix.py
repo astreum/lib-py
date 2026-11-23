@@ -27,8 +27,8 @@ from astreum.communication.storage_request.model import (  # noqa: E402
 from astreum.communication.storage_response.code import StorageResponseCode  # noqa: E402
 from astreum.communication.storage_response.cull import cull_to_resolution  # noqa: E402
 from astreum.communication.storage_response.storage_found import (  # noqa: E402
-    PAGE_ENTRY_BUDGET,
     decode_found_page,
+    page_entry_budget,
 )
 from astreum.expression import (  # noqa: E402
     RESOLUTION_DYNAMIC,
@@ -439,7 +439,8 @@ class TestServe(unittest.TestCase):
             walk.call_args.kwargs,
             {
                 "follow_refs": False,
-                "budget": (node.config.storage_found_max_pages - 1) * PAGE_ENTRY_BUDGET,
+                "budget": (node.config.storage_found_max_pages - 1)
+                * page_entry_budget(node.config.storage_found_max_bytes),
             },
         )
 

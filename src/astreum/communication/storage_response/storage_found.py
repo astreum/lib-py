@@ -1,6 +1,9 @@
 from typing import Callable, List, Optional, Tuple
 
-from astreum.communication.message_pow import MAX_INLINE_MESSAGE_BYTES
+from astreum.communication.message_pow import (
+    MAX_INLINE_MESSAGE_BYTES,
+    MESSAGE_FRAMING_BYTES,
+)
 from astreum.expression import Expr
 from astreum.expression.encoding import encode_expr_to_bytes, decode_expr_from_bytes
 
@@ -12,6 +15,28 @@ _RESPONSE_HEADER_BYTES = 33
 # Page header: type 1B + page u16 + total u16 + count u16.
 _PAGE_HEADER_BYTES = 7
 PAGE_ENTRY_BUDGET = MAX_INLINE_MESSAGE_BYTES - _RESPONSE_HEADER_BYTES - _PAGE_HEADER_BYTES
+
+
+def page_entry_budget(max_datagram_bytes: int) -> int:
+    """Return the page entry budget that fits one UDP datagram.
+
+    The budget is the room left for the ``count x (len u32 + expr bytes)``
+    entries after the message framing, the response header and the page
+    header are removed.
+
+    Args:
+        max_datagram_bytes: Largest UDP payload to send, for example 1232,
+            which no IPv4/IPv6 path fragments.
+
+    Returns:
+        int: The number of bytes the page entries may use.
+    """
+    return (
+        max_datagram_bytes
+        - MESSAGE_FRAMING_BYTES
+        - _RESPONSE_HEADER_BYTES
+        - _PAGE_HEADER_BYTES
+    )
 
 
 def _build_page(page: int, total: int, entries: List[bytes]) -> bytes:
@@ -40,6 +65,7 @@ def _build_page(page: int, total: int, entries: List[bytes]) -> bytes:
 def encode_found_pages(
     exprs: List[Expr],
     on_skip: Optional[Callable[[Expr, int], None]] = None,
+    entry_budget: int = PAGE_ENTRY_BUDGET,
 ) -> List[bytes]:
     """Split ``exprs`` (root first) into ``STORAGE_FOUND`` page payloads.
 
@@ -55,15 +81,19 @@ def encode_found_pages(
     Args:
         exprs (List[Expr]): The list of expressions to encode (root first).
         on_skip (Optional[Callable[[Expr, int], None]]): Callback for skipped exprs.
+        entry_budget (int): Most bytes the entries of one page may use. Use
+            ``page_entry_budget()`` to keep each page inside one datagram.
 
     Returns:
-        List[bytes]: Description of the return value.
+        List[bytes]: The page payloads, in order.
     """
     if not exprs:
         raise ValueError("no exprs to page")
+    if entry_budget <= 0:
+        raise ValueError("entry budget must be a positive integer")
 
     root_bytes = encode_expr_to_bytes(exprs[0])
-    if 4 + len(root_bytes) > PAGE_ENTRY_BUDGET:
+    if 4 + len(root_bytes) > entry_budget:
         raise ValueError("root expr too large for a STORAGE_FOUND page")
 
     pages: List[List[bytes]] = [[root_bytes]]
@@ -71,11 +101,11 @@ def encode_found_pages(
     for expr in exprs[1:]:
         expr_bytes = encode_expr_to_bytes(expr)
         cost = 4 + len(expr_bytes)
-        if cost > PAGE_ENTRY_BUDGET:
+        if cost > entry_budget:
             if on_skip is not None:
                 on_skip(expr, len(expr_bytes))
             continue
-        if used + cost > PAGE_ENTRY_BUDGET:
+        if used + cost > entry_budget:
             pages.append([])
             used = 0
         pages[-1].append(expr_bytes)

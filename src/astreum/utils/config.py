@@ -53,8 +53,9 @@ DEFAULT_VERIFICATION_MAX_FUTURE_SKEW_SECONDS = 2
 DEFAULT_MESSAGE_TIMESTAMP_WINDOW_SECONDS = 60
 # 1280 (IPv6 minimum MTU) - 40 (IPv6 header) - 8 (UDP header): a datagram of
 # this size is never IP-fragmented on any IPv4/IPv6 path.
-DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES = 1232
-DEFAULT_STORAGE_GET_BATCH_MAX_BYTES = 1232
+SAFE_UDP_DATAGRAM_BYTES = 1232
+DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES = SAFE_UDP_DATAGRAM_BYTES
+DEFAULT_STORAGE_GET_BATCH_MAX_BYTES = SAFE_UDP_DATAGRAM_BYTES
 # Longest shape a STORAGE_GET entry may carry. The wire format has a varint
 # length, so a later version can raise this.
 DEFAULT_STORAGE_SHAPE_MAX_BYTES = 128
@@ -63,8 +64,11 @@ DEFAULT_STORAGE_SHAPE_MAX_BYTES = 128
 DEFAULT_STORAGE_RADIX_KEY_MAX_BYTES = 32
 # How often buffered STORAGE_GETs are batched and sent.
 DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS = 0.25
-# Most pages one STORAGE_FOUND reply may span (about 4 MiB at ~65 KB a page).
+# Most pages one STORAGE_FOUND reply may span.
 DEFAULT_STORAGE_FOUND_MAX_PAGES = 64
+# Largest STORAGE_FOUND datagram. Keeping each page inside one unfragmented
+# datagram means a path that drops IP fragments still receives the reply.
+DEFAULT_STORAGE_FOUND_MAX_BYTES = SAFE_UDP_DATAGRAM_BYTES
 DEFAULT_STORAGE_CLAIM_FEE_WINDOW = 65_536  # blocks
 DEFAULT_STORAGE_CLAIM_FEE_SAMPLES = 64
 DEFAULT_STORAGE_CLAIM_MIN_PROFIT = 10**9  # astre
@@ -118,6 +122,7 @@ class NodeConfig:
         storage_radix_key_max_bytes: int = DEFAULT_STORAGE_RADIX_KEY_MAX_BYTES,
         storage_request_flush_interval: float = DEFAULT_STORAGE_REQUEST_FLUSH_INTERVAL_SECONDS,
         storage_found_max_pages: int = DEFAULT_STORAGE_FOUND_MAX_PAGES,
+        storage_found_max_bytes: int = DEFAULT_STORAGE_FOUND_MAX_BYTES,
         storage_claim_band: Optional[int] = None,
         storage_claim_hash_rate: Optional[float] = None,
         storage_claim_inclusion_delay: Optional[int] = None,
@@ -191,6 +196,7 @@ class NodeConfig:
         self.storage_radix_key_max_bytes = storage_radix_key_max_bytes
         self.storage_request_flush_interval = storage_request_flush_interval
         self.storage_found_max_pages = storage_found_max_pages
+        self.storage_found_max_bytes = storage_found_max_bytes
         self.storage_claim_band = storage_claim_band
         self.storage_claim_hash_rate = storage_claim_hash_rate
         self.storage_claim_inclusion_delay = storage_claim_inclusion_delay
@@ -608,6 +614,22 @@ def _setup_storage_requests(config: Dict) -> None:
     if found_pages_raw > 0xFFFF:
         raise ValueError("storage_found_max_pages must be at most 65535")
     config["storage_found_max_pages"] = found_pages_raw
+
+    found_bytes_raw = config.get(
+        "storage_found_max_bytes", DEFAULT_STORAGE_FOUND_MAX_BYTES
+    )
+    if isinstance(found_bytes_raw, bool):
+        raise ValueError(
+            f"storage_found_max_bytes must be an integer: {found_bytes_raw!r}"
+        )
+    found_bytes = _parse_int("storage_found_max_bytes", found_bytes_raw)
+    if found_bytes < 256:
+        raise ValueError("storage_found_max_bytes must be at least 256")
+    if found_bytes > MAX_UDP_DATAGRAM_BYTES:
+        raise ValueError(
+            f"storage_found_max_bytes must be at most {MAX_UDP_DATAGRAM_BYTES}"
+        )
+    config["storage_found_max_bytes"] = found_bytes
 
 
 def _setup_storage_claim(config: Dict) -> None:
