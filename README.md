@@ -46,7 +46,8 @@ After startup, `node.config` is an `astreum.NodeConfig` object. Each option belo
 | `sent_transactions_path`         | string     | `None`         | Off by default. When set, `send_transaction` appends one UTF-8 CSV line for each successful send (`\n` line ends). Header: `tx_hash,sender,recipient,code,sent_height,sent_time`. Hashes and keys are lowercase hex without `0x`; `code` is the integer transaction code; `sent_height` is the latest block height when the send started; `sent_time` is Unix seconds. The parent folder is created on the first write. A write error logs a warning and never makes the send fail. |
 | `logging_enabled`               | bool       | `True`         | When **False**, disable logger setup entirely, including file creation and the background logging listener thread.                                                                   |
 | `logging_retention_days`         | int        | `7`            | Number of days to keep rotated log files (daily gzip).                                                                                                                                |
-| `verbose`                        | bool       | `False`        | When **True**, also mirror JSON logs to stdout with a human-readable format.                                                                                                         |
+| `log_level`                      | string     | `"INFO"`       | Lowest level written to `node.csv`: `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`. A level number such as `10` is also accepted. `NOTSET` is rejected.                             |
+| `verbose`                        | bool       | `False`        | When **True**, also mirror JSON logs to stdout with a human-readable format. Console output stops at `INFO` even when `log_level` is `DEBUG`.                                         |
 
 ### Communication
 
@@ -800,6 +801,7 @@ Every `Node` instance wires up structured logging automatically:
 - Logs land in per-instance files named `node.csv` under `%LOCALAPPDATA%\Astreum\lib-py\logs/<instance_id>` on Windows and `$XDG_STATE_HOME` (or `~/.local/state`)/`Astreum/lib-py/logs/<instance_id>` on other platforms. The `<instance_id>` is the first 16 hex characters of a BLAKE3 hash of the caller's file path, so running the node from different entry points keeps their logs isolated.
 - Files rotate at midnight UTC with gzip compression (`node-YYYY-MM-DD.csv.gz`) and retain 7 days by default. Override via `config["logging_retention_days"]`.
 - Each event is a single CSV row with columns `ts`, `level`, `msg`, `module`, and `func`.
+- Set `config["log_level"] = "DEBUG"` to write debug records to `node.csv`. The default is `INFO`. Names are case-insensitive and a level number such as `10` also works. The console mirror stays at `INFO`, so a TUI keeps a clean terminal while the file gets the detail.
 - Set `config["verbose"] = True` to mirror logs to stdout in a human-friendly format like `[2025-04-13-42-59] [info] Starting Astreum Node`.
 - The very first entry emitted is the banner `Starting Astreum Node`, signalling that the logging pipeline is live before other subsystems spin up.
 

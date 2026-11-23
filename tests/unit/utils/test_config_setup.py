@@ -276,6 +276,39 @@ class TestOrderAndMutation(_ConfigCase):
         self.assertEqual(returned.port, 9)
 
 
+class TestLogLevel(_ConfigCase):
+    def test_default_is_info(self):
+        result = self.build()
+        self.assertEqual(result.log_level, "INFO")
+        self.assertEqual(result.log_level, config_module.DEFAULT_LOG_LEVEL)
+
+    def test_absent_and_none_use_default(self):
+        self.assertEqual(self.build(log_level=None).log_level, "INFO")
+
+    def test_names_are_normalized(self):
+        for value, expected in (
+            ("debug", "DEBUG"),
+            ("  Warn ", "WARNING"),
+            ("info", "INFO"),
+            ("Error", "ERROR"),
+            ("fatal", "CRITICAL"),
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(self.build(log_level=value).log_level, expected)
+
+    def test_numeric_level_accepted(self):
+        self.assertEqual(self.build(log_level=10).log_level, "DEBUG")
+        self.assertEqual(self.build(log_level="20").log_level, "INFO")
+        self.assertEqual(self.build(log_level=40).log_level, "ERROR")
+
+    def test_bad_value_rejected(self):
+        for value in ("loud", "NOTSET", "", 5, True):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError) as ctx:
+                    self.build(log_level=value)
+                self.assertIn("log_level", str(ctx.exception))
+
+
 class TestParsers(unittest.TestCase):
     def test_parse_int(self):
         parse = config_module._parse_int

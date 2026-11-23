@@ -60,5 +60,49 @@ class TestLoggingResilience(unittest.TestCase):
             logger.info("this should be ignored")
 
 
+class TestLogLevel(unittest.TestCase):
+    def build(self, tmp_dir, **config):
+        log_dir = Path(tmp_dir) / "logs"
+        with patch.object(logging_utils, "_derive_instance_id", return_value="test-instance"):
+            with patch.object(logging_utils, "_log_root", return_value=log_dir):
+                logger = logging_utils.logging_setup(NodeConfig(**config))
+        return logger, log_dir
+
+    def test_default_level_is_info(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            logger, _ = self.build(tmp_dir)
+            handlers = getattr(logger, "_handlers")
+            self.assertEqual(logger.logger.level, logging.INFO)
+            self.assertEqual(handlers[0].level, logging.INFO)
+            getattr(logger, "_queue_listener").stop()
+
+    def test_debug_reaches_the_file(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            logger, log_dir = self.build(tmp_dir, log_level="DEBUG")
+            handlers = getattr(logger, "_handlers")
+            self.assertEqual(logger.logger.level, logging.DEBUG)
+            self.assertEqual(handlers[0].level, logging.DEBUG)
+            logger.debug("a debug probe line")
+            getattr(logger, "_queue_listener").stop()
+
+            text = (log_dir / "node.csv").read_text(encoding="utf-8")
+            self.assertIn("a debug probe line", text)
+            self.assertIn("DEBUG", text)
+
+    def test_console_handler_stops_at_info(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            logger, _ = self.build(tmp_dir, log_level="DEBUG", verbose=True)
+            handlers = getattr(logger, "_handlers")
+            self.assertEqual(len(handlers), 2)
+            self.assertEqual(handlers[1].level, logging.INFO)
+            getattr(logger, "_queue_listener").stop()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            logger, _ = self.build(tmp_dir, log_level="ERROR", verbose=True)
+            handlers = getattr(logger, "_handlers")
+            self.assertEqual(handlers[1].level, logging.ERROR)
+            getattr(logger, "_queue_listener").stop()
+
+
 if __name__ == "__main__":
     unittest.main()

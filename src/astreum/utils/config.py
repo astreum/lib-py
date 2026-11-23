@@ -11,6 +11,26 @@ DEFAULT_COLD_STORAGE_SCALE = "MB"
 DEFAULT_PORT = 52780
 DEFAULT_LOGGING_ENABLED = True
 DEFAULT_LOGGING_RETENTION_DAYS = 7
+DEFAULT_LOG_LEVEL = "INFO"
+# Accepted level names, with their canonical spelling. NOTSET is left out on
+# purpose: on the base logger it inherits the root logger level, which hides
+# the INFO records the node normally writes.
+LOG_LEVEL_NAMES = {
+    "CRITICAL": "CRITICAL",
+    "FATAL": "CRITICAL",
+    "ERROR": "ERROR",
+    "WARNING": "WARNING",
+    "WARN": "WARNING",
+    "INFO": "INFO",
+    "DEBUG": "DEBUG",
+}
+LOG_LEVEL_VALUES = {
+    "CRITICAL": 50,
+    "ERROR": 40,
+    "WARNING": 30,
+    "INFO": 20,
+    "DEBUG": 10,
+}
 DEFAULT_PEER_TIMEOUT_SECONDS = 15 * 60  # 15 minutes
 DEFAULT_PEER_TIMEOUT_INTERVAL_SECONDS = 10  # 10 seconds
 DEFAULT_BOOTSTRAP_RETRY_INTERVAL_SECONDS = 30  # 30 seconds
@@ -71,6 +91,7 @@ class NodeConfig:
         sent_transactions_path: Optional[str] = None,
         logging_retention_days: int = DEFAULT_LOGGING_RETENTION_DAYS,
         logging_enabled: bool = DEFAULT_LOGGING_ENABLED,
+        log_level: str = DEFAULT_LOG_LEVEL,
         logger_name: Optional[str] = None,
         verbose: bool = False,
         port: int = DEFAULT_PORT,
@@ -143,6 +164,7 @@ class NodeConfig:
         self.sent_transactions_path = sent_transactions_path
         self.logging_retention_days = logging_retention_days
         self.logging_enabled = logging_enabled
+        self.log_level = log_level
         self.logger_name = logger_name
         self.verbose = verbose
         self.port = port
@@ -264,6 +286,47 @@ def _parse_bool(name: str, raw) -> bool:
     return raw
 
 
+def _parse_log_level(name: str, raw) -> str:
+    """Check that a raw config value is a log level and return its name.
+
+    Args:
+        name: Config key name, used in error messages.
+        raw: Raw value from the caller. A level name such as ``"debug"`` or
+            the matching number such as ``10``. ``None`` gives the default.
+
+    Returns:
+        The canonical level name, for example ``"DEBUG"``.
+
+    Raises:
+        ValueError: If ``raw`` is not a known level.
+    """
+    if raw is None:
+        return DEFAULT_LOG_LEVEL
+    if isinstance(raw, bool):
+        raise ValueError(
+            f"{name} must be one of {_log_level_choices()}: {raw!r}"
+        )
+    if isinstance(raw, int):
+        for level_name, level_value in LOG_LEVEL_VALUES.items():
+            if level_value == raw:
+                return level_name
+        raise ValueError(
+            f"{name} must be one of {_log_level_choices()}: {raw!r}"
+        )
+    if isinstance(raw, str):
+        text = raw.strip().upper()
+        if text in LOG_LEVEL_NAMES:
+            return LOG_LEVEL_NAMES[text]
+        if text.isdigit():
+            return _parse_log_level(name, int(text))
+    raise ValueError(f"{name} must be one of {_log_level_choices()}: {raw!r}")
+
+
+def _log_level_choices() -> str:
+    """Return the accepted level names, in order, for error messages."""
+    return ", ".join(LOG_LEVEL_VALUES)
+
+
 def _setup_chain(config: Dict) -> None:
     """Normalize ``chain`` and ``chain_id``."""
     chain_str = config.get("chain")
@@ -341,6 +404,9 @@ def _setup_logging(config: Dict) -> None:
     )
     config["logging_enabled"] = _parse_bool(
         "logging_enabled", config.get("logging_enabled", DEFAULT_LOGGING_ENABLED)
+    )
+    config["log_level"] = _parse_log_level(
+        "log_level", config.get("log_level", DEFAULT_LOG_LEVEL)
     )
 
 

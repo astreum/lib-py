@@ -31,6 +31,14 @@ CSV_FIELDNAMES = (
     "func",
 )
 _RESOURCE_EXHAUSTION_ERRNOS = {errno.ENOSPC}
+# Level names accepted by NodeConfig.log_level, mapped for logging.setLevel.
+_LEVEL_VALUES = {
+    "CRITICAL": logging.CRITICAL,
+    "ERROR": logging.ERROR,
+    "WARNING": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+}
 
 if hasattr(errno, "EDQUOT"):
     _RESOURCE_EXHAUSTION_ERRNOS.add(errno.EDQUOT)
@@ -278,6 +286,23 @@ def _disabled_logger(product: str, instance_id: str, logger_name: str | None) ->
     )
 
 
+def _level_value(raw) -> int:
+    """Return the logging level number for a config value.
+
+    Args:
+        raw: A level name such as ``"DEBUG"``, a level number such as ``10``,
+            or ``None``.
+
+    Returns:
+        The level number. ``INFO`` is used for an unknown value.
+    """
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        return _LEVEL_VALUES.get(raw.strip().upper(), logging.INFO)
+    return logging.INFO
+
+
 def logging_setup(config: NodeConfig) -> logging.LoggerAdapter:
     """Configure logging according to the runtime config and return an adapter.
 
@@ -285,6 +310,7 @@ def logging_setup(config: NodeConfig) -> logging.LoggerAdapter:
         config: Node configuration. Fields used:
             - logging_retention_days: Number of days to retain log files.
             - logging_enabled: Boolean to enable/disable logging.
+            - log_level: Lowest level written to the log file.
             - logger_name: Optional logger name for extra context.
             - verbose: Boolean to enable console output.
 
@@ -303,6 +329,7 @@ def logging_setup(config: NodeConfig) -> logging.LoggerAdapter:
         return _disabled_logger(product, instance_id, logger_name)
 
     verbose = config.verbose
+    level = _level_value(getattr(config, "log_level", None))
 
     log_dir = _log_root(org, product, instance_id)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -319,6 +346,7 @@ def logging_setup(config: NodeConfig) -> logging.LoggerAdapter:
         delay=True,
     )
     file_handler.setFormatter(CSVFormatter())
+    file_handler.setLevel(level)
     file_handler.rotator = _gzip_rotator
     file_handler.namer = _namer
 
@@ -326,7 +354,9 @@ def logging_setup(config: NodeConfig) -> logging.LoggerAdapter:
 
     if verbose:
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
+        # Console output stops at INFO so that DEBUG records stay in the file
+        # and a TUI keeps a clean terminal.
+        console_handler.setLevel(max(level, logging.INFO))
         console_handler.setFormatter(HumanFormatter())
         handler_list.append(console_handler)
 
@@ -334,7 +364,7 @@ def logging_setup(config: NodeConfig) -> logging.LoggerAdapter:
     queue_handler = logging.handlers.QueueHandler(log_queue)
 
     base_logger = logging.getLogger(f"{product}.{instance_id}")
-    base_logger.setLevel(logging.INFO)
+    base_logger.setLevel(level)
     base_logger.handlers.clear()
     base_logger.propagate = False
     base_logger.addHandler(queue_handler)
