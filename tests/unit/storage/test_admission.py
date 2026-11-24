@@ -107,6 +107,22 @@ class TestIsExprInLatestBlock(unittest.TestCase):
         self.assertFalse(is_expr_in_latest_block(node, b"\x55" * 32))
 
 
+class TestPinnedAccount(unittest.TestCase):
+    def test_uses_the_given_account(self) -> None:
+        eid = b"\x66" * 32
+        node = _FakeNode()
+        node.latest_block = None
+        account = _storage_account()
+        put_in_radix_tree(account.data, node, eid, int_(1))
+        self.assertTrue(is_expr_in_latest_block(node, eid, account))
+
+    def test_given_account_wins_over_latest_block(self) -> None:
+        eid = b"\x77" * 32
+        node = _latest_block_with([eid])
+        empty = _storage_account()
+        self.assertFalse(is_expr_in_latest_block(node, eid, empty))
+
+
 class TestOneRecordPerBlock(unittest.TestCase):
     """The storage trie holds only block record ids, so a block's inner exprs
     (txs, receipts, values) are not admitted and its record id is."""

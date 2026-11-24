@@ -14,6 +14,7 @@ from astreum.storage.workers.advertisements import _serve_one_put, advertise_sto
 from astreum.utils.config import NodeConfig
 
 HANDLE_PUT = "astreum.communication.storage_request.handle.handle_put"
+RESOLVER = "astreum.storage.admission.get_latest_storage_account"
 PROVIDER = b"P" * 70
 
 
@@ -39,6 +40,8 @@ def _node():
         latest_block=None,
         startup_announce=None,
         storage_index={},
+        put_round_mark=None,
+        put_round_account=None,
         config=NodeConfig(
             storage_request_price_interval=0,
             expr_request_ttl=0,
@@ -117,7 +120,7 @@ class TestServeOnePut(unittest.TestCase):
         node.put_requests.append((peer, request))
         with patch(HANDLE_PUT, return_value=(True, None)) as handle:
             self.assertFalse(_serve_one_put(node))
-        handle.assert_called_once_with(node, peer, request)
+        handle.assert_called_once_with(node, peer, request, storage_account=None)
         self.assertEqual(node.put_requests, [])
 
     def test_returns_true_while_items_remain(self):
@@ -173,7 +176,7 @@ class TestLoop(unittest.TestCase):
         node.put_requests.extend([(_peer(), _request(1)), (_peer(), _request(2))])
         calls = []
 
-        def handle(_node, _peer, request):
+        def handle(_node, _peer, request, **_kwargs):
             calls.append(request.entries[0][0][0])
             if request.entries[0][0][0] == 1:
                 raise RuntimeError("boom")
@@ -198,6 +201,68 @@ class TestLoop(unittest.TestCase):
         with patch(HANDLE_PUT, side_effect=slow):
             self._run(node, 0.8)
         self.assertIsNot(seen["thread"], caller)
+
+
+class TestPutRounds(unittest.TestCase):
+    def _queued(self, node, count, prefix=1):
+        for i in range(count):
+            node.put_requests.append((_peer(), _request(prefix + i)))
+
+    def test_round_pins_one_account(self):
+        node = _node()
+        first = object()
+        with patch(RESOLVER, return_value=first) as resolver, patch(
+            HANDLE_PUT, return_value=(True, None)
+        ) as handle:
+            self._queued(node, 3)
+            _serve_one_put(node)
+            _serve_one_put(node)
+            _serve_one_put(node)
+        self.assertEqual(resolver.call_count, 1)
+        accounts = [call.kwargs["storage_account"] for call in handle.call_args_list]
+        self.assertEqual(accounts, [first, first, first])
+
+    def test_entry_after_the_mark_uses_the_next_pin(self):
+        node = _node()
+        first, second = object(), object()
+        with patch(RESOLVER, side_effect=[first, second]) as resolver, patch(
+            HANDLE_PUT, return_value=(True, None)
+        ) as handle:
+            self._queued(node, 1)
+            _serve_one_put(node)
+            self._queued(node, 1, prefix=2)
+            _serve_one_put(node)
+        self.assertEqual(resolver.call_count, 2)
+        accounts = [call.kwargs["storage_account"] for call in handle.call_args_list]
+        self.assertEqual(accounts, [first, second])
+
+    def test_mid_round_arrival_waits_for_the_next_pin(self):
+        node = _node()
+        first, second = object(), object()
+        with patch(RESOLVER, side_effect=[first, second]) as resolver, patch(
+            HANDLE_PUT, return_value=(True, None)
+        ) as handle:
+            self._queued(node, 2)
+            _serve_one_put(node)
+            self._queued(node, 1, prefix=3)
+            _serve_one_put(node)
+            _serve_one_put(node)
+        self.assertEqual(resolver.call_count, 2)
+        accounts = [call.kwargs["storage_account"] for call in handle.call_args_list]
+        self.assertEqual(accounts, [first, first, second])
+
+    def test_next_entry_after_an_empty_queue_pins_again(self):
+        node = _node()
+        first, second = object(), object()
+        with patch(RESOLVER, side_effect=[first, second]) as resolver, patch(
+            HANDLE_PUT, return_value=(True, None)
+        ):
+            self._queued(node, 1)
+            _serve_one_put(node)
+            self.assertFalse(_serve_one_put(node))
+            self._queued(node, 1, prefix=2)
+            _serve_one_put(node)
+        self.assertEqual(resolver.call_count, 2)
 
 
 if __name__ == "__main__":

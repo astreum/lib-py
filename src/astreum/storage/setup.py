@@ -89,6 +89,10 @@ def setup_storage(node: Any, config: NodeConfig) -> None:
     # STORAGE_PUT requests waiting for the advertise loop, oldest first.
     node.put_requests = []
     node.put_requests_lock = threading.Lock()
+    # Verification round: entries still to check against put_round_account,
+    # or None when no round is open.
+    node.put_round_mark = None
+    node.put_round_account = None
     node.storage_providers = []
     # Which peer holds a recent block's uncommitted exprs (BLOCK message).
     from astreum.consensus.block.holders import init_block_holders

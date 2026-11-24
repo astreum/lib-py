@@ -323,7 +323,7 @@ class TestReceivePath(unittest.TestCase):
         account = SimpleNamespace(data=SimpleNamespace(root_hash=b"\x09" * 32))
         with patch(
             "astreum.storage.admission.is_expr_in_latest_block",
-            side_effect=lambda n, e: e in committed,
+            side_effect=lambda n, e, account=None: e in committed,
         ), patch(
             "astreum.storage.admission.get_latest_storage_account", return_value=account
         ), patch(

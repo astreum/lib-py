@@ -13,7 +13,9 @@ if TYPE_CHECKING:
 _storage_account_cache: Optional[tuple[bytes, "Account"]] = None
 
 
-def is_expr_in_latest_block(node: "Node", expr_id: bytes) -> bool:
+def is_expr_in_latest_block(
+    node: "Node", expr_id: bytes, storage_account: Optional["Account"] = None
+) -> bool:
     """Return True if *expr_id* is in the latest block's storage trie.
 
     Fail-closed: a node with no ``latest_block`` (or no storage account in it)
@@ -23,12 +25,15 @@ def is_expr_in_latest_block(node: "Node", expr_id: bytes) -> bool:
         node: A Node instance with a ``latest_block`` attribute (may be
             ``None`` while unsynced).
         expr_id: The 32-byte content hash to check for admission.
+        storage_account: The account to walk. When given, the latest block is
+            not read. A verification round pins one account for its entries.
 
     Returns:
-        True if the expr is committed in the latest block's storage
-        account, False otherwise.
+        True if the expr is committed in the storage account, False
+        otherwise.
     """
-    storage_account = _get_latest_storage_account(node)
+    if storage_account is None:
+        storage_account = _get_latest_storage_account(node)
     if storage_account is None:
         return False
     return exists_in_radix_tree(storage_account.data, node, expr_id)

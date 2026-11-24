@@ -362,6 +362,13 @@ def _serve_one_put(node: "Node") -> bool:
     check, the indexing, the record fetch and the forward on the loop thread.
     The loop thread does not receive replies, so it can wait on the network.
 
+    Entries are verified in rounds. A round starts by marking the queue and
+    reading the STORAGE account of the current latest block once. Every entry
+    up to the mark is checked against that account, so a head move does not
+    restart the walk. When the mark is reached, the next round reads the
+    newest account. Entries that arrive during a round sit after the mark and
+    are checked against the next account.
+
     Args:
         node: A Node instance.
 
@@ -369,12 +376,27 @@ def _serve_one_put(node: "Node") -> bool:
         True if more puts remain in the queue, False otherwise.
     """
     from astreum.communication.storage_request.handle import handle_put
+    from astreum.storage.admission import get_latest_storage_account
 
     with node.put_requests_lock:
         if not node.put_requests:
+            node.put_round_mark = None
             return False
+        started = node.put_round_mark is None
+        if started:
+            # Mark before the account walk, so entries that arrive during
+            # the walk belong to the next round.
+            node.put_round_mark = len(node.put_requests)
+    if started:
+        node.put_round_account = get_latest_storage_account(node)
+    with node.put_requests_lock:
         peer, request = node.put_requests.pop(0)
-    ok, reason = handle_put(node, peer, request)
+        node.put_round_mark -= 1
+        if node.put_round_mark <= 0:
+            node.put_round_mark = None
+    ok, reason = handle_put(
+        node, peer, request, storage_account=node.put_round_account
+    )
     if not ok:
         node.logger.debug("STORAGE_PUT from %s not handled: %s", peer.address, reason)
     with node.put_requests_lock:

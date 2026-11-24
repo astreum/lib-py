@@ -73,7 +73,10 @@ BATCH_INLINE_FETCH_LIMIT = 8
 
 
 def handle_put(
-    node: "Node", peer: "Peer", storage_request: StorageRequest
+    node: "Node",
+    peer: "Peer",
+    storage_request: StorageRequest,
+    storage_account=None,
 ) -> tuple[bool, str | None]:
     """Handle a STORAGE_PUT request by indexing and forwarding entries.
 
@@ -84,6 +87,9 @@ def handle_put(
         node (Node): The node instance handling the request.
         peer (Peer): The peer sending the request.
         storage_request (StorageRequest): The storage request object.
+        storage_account: The account the admission check walks. The loop
+            passes the account pinned for the current round. ``None`` reads
+            the latest block's account.
 
     Returns:
         tuple[bool, str | None]: A tuple of (success, error_reason).
@@ -97,7 +103,7 @@ def handle_put(
     survivors = [
         (expr_id, payload_type)
         for expr_id, payload_type in entries
-        if is_expr_in_latest_block(node, expr_id)
+        if is_expr_in_latest_block(node, expr_id, storage_account)
     ]
     rejected = len(entries) - len(survivors)
     if rejected:
