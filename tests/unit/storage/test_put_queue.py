@@ -37,6 +37,8 @@ def _node():
         index_requested=False,
         is_storage_provider=False,
         latest_block=None,
+        startup_announce=None,
+        storage_index={},
         config=NodeConfig(
             storage_request_price_interval=0,
             expr_request_ttl=0,

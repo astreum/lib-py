@@ -18,6 +18,9 @@ from astreum.utils.config import NodeConfig
 
 PUT = "astreum.storage.workers.advertisements.put_exprs_in_network"
 ITER = "astreum.storage.workers.advertisements.iter_records_in_cold_storage"
+ADMIT = "astreum.storage.workers.advertisements.is_expr_in_latest_block"
+PAYLOAD = "astreum.storage.workers.advertisements.build_provider_payload"
+SELF_ID = "astreum.storage.workers.advertisements.provider_id_for_payload"
 
 
 def _silent_logger():
@@ -35,6 +38,7 @@ def _node(provider=True, synced=True, budget=DEFAULT_STORAGE_PUT_BATCH_MAX_BYTES
         is_storage_provider=provider,
         latest_block=object() if synced else None,
         startup_announce=None,
+        storage_index={},
         config=NodeConfig(storage_put_batch_max_bytes=budget),
         logger=_silent_logger(),
     )
@@ -52,11 +56,23 @@ def _announced(put_mock):
 
 
 class TestStartupAnnounceStep(unittest.TestCase):
-    def test_skips_when_not_provider(self):
+    def setUp(self):
+        admit = patch(ADMIT, return_value=True)
+        admit.start()
+        self.addCleanup(admit.stop)
+        payload = patch(PAYLOAD, return_value=b"self-payload")
+        payload.start()
+        self.addCleanup(payload.stop)
+        self_id = patch(SELF_ID, return_value=0)
+        self_id.start()
+        self.addCleanup(self_id.stop)
+
+    def test_runs_without_provider_role(self):
         node = _node(provider=False)
-        with patch(PUT) as put, patch(ITER, return_value=iter(_ids(3))):
+        records = _ids(3)
+        with patch(PUT) as put, patch(ITER, return_value=iter(records)):
             self.assertEqual(_startup_announce_step(node), "done")
-        put.assert_not_called()
+        self.assertEqual(_announced(put), records)
 
     def test_waits_for_latest_block(self):
         node = _node(synced=False)
@@ -100,6 +116,12 @@ class TestStartupAnnounceStep(unittest.TestCase):
         put.assert_not_called()
         self.assertEqual(node.startup_announce, "done")
 
+    def test_missing_table_does_not_raise(self):
+        node = _node()
+        with patch(PUT) as put, patch(ITER, side_effect=FileNotFoundError("gone")):
+            self.assertEqual(_startup_announce_step(node), "done")
+        put.assert_not_called()
+
     def test_error_ends_job(self):
         node = _node()
         with patch(PUT, side_effect=RuntimeError("boom")) as put, patch(
@@ -109,8 +131,44 @@ class TestStartupAnnounceStep(unittest.TestCase):
             self.assertEqual(_startup_announce_step(node), "done")
         self.assertEqual(put.call_count, 1)
 
+    def test_skips_record_that_names_this_node(self):
+        node = _node()
+        records = _ids(2)
+        node.storage_index = {records[0]: [0]}
+        with patch(PUT) as put, patch(ITER, return_value=iter(records)):
+            self.assertEqual(_startup_announce_step(node), "done")
+        self.assertEqual(_announced(put), [records[1]])
+
+    def test_keeps_record_with_one_other_provider(self):
+        node = _node()
+        records = _ids(2)
+        node.storage_index = {records[0]: [5]}
+        with patch(PUT) as put, patch(ITER, return_value=iter(records)):
+            self.assertEqual(_startup_announce_step(node), "done")
+        self.assertEqual(_announced(put), records)
+
+    def test_skips_uncommitted_record(self):
+        node = _node()
+        records = _ids(2)
+        with patch(PUT) as put, patch(ITER, return_value=iter(records)), patch(
+            ADMIT, side_effect=lambda node, expr_id: expr_id == records[1]
+        ):
+            self.assertEqual(_startup_announce_step(node), "done")
+        self.assertEqual(_announced(put), [records[1]])
+
 
 class TestStartupAnnounceLoop(unittest.TestCase):
+    def setUp(self):
+        admit = patch(ADMIT, return_value=True)
+        admit.start()
+        self.addCleanup(admit.stop)
+        payload = patch(PAYLOAD, return_value=b"self-payload")
+        payload.start()
+        self.addCleanup(payload.stop)
+        self_id = patch(SELF_ID, return_value=0)
+        self_id.start()
+        self.addCleanup(self_id.stop)
+
     def _run(self, node, duration):
         thread = threading.Thread(target=advertise_storage, args=(node,), daemon=True)
         thread.start()
@@ -140,11 +198,22 @@ class TestStartupAnnounceLoop(unittest.TestCase):
             self._run(node, 0.3)
         self.assertEqual(_announced(put), records)
 
-    def test_loop_does_not_announce_when_not_provider(self):
+    def test_loop_announces_for_non_provider(self):
         node = self._loop_node(provider=False)
-        with patch(PUT) as put, patch(ITER, return_value=iter(_ids(3))):
+        records = _ids(3)
+        with patch(PUT) as put, patch(ITER, return_value=iter(records)):
             self._run(node, 0.3)
-        put.assert_not_called()
+        self.assertEqual(_announced(put), records)
+
+    def test_loop_repeats_after_interval(self):
+        node = self._loop_node()
+        node.config.storage_index_interval = 0.05
+        records = _ids(1)
+        with patch(PUT) as put, patch(
+            ITER, side_effect=lambda node: iter(records)
+        ):
+            self._run(node, 0.4)
+        self.assertGreaterEqual(put.call_count, 2)
 
     def test_loop_survives_error(self):
         node = self._loop_node()
@@ -152,7 +221,7 @@ class TestStartupAnnounceLoop(unittest.TestCase):
             ITER, return_value=iter(_ids(3))
         ):
             self._run(node, 0.3)
-        self.assertEqual(node.startup_announce, "done")
+        self.assertIsNone(node.startup_announce)
 
 
 if __name__ == "__main__":

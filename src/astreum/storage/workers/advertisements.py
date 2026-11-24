@@ -12,12 +12,17 @@ from astreum.communication.storage_request.model import StorageRequest
 from astreum.communication.models.peer_info import decode_peer_info
 from astreum.expression import RESOLUTION_SINGLE
 from astreum.storage.advertisements import advertise_exprs
+from astreum.storage.admission import is_expr_in_latest_block
 from astreum.storage.exprs.network import (
     _send_storage_put,
+    build_provider_payload,
     put_exprs_in_network,
     send_put_entries,
 )
-from astreum.storage.providers import provider_payload_for_id
+from astreum.storage.providers import (
+    provider_id_for_payload,
+    provider_payload_for_id,
+)
 from astreum.storage.radix import RadixTree, get_from_radix_tree
 from astreum.storage.requests import prune_expired_expr_reqs
 from astreum.storage.records import (
@@ -167,23 +172,50 @@ _ANNOUNCE_MORE = "more"
 _ANNOUNCE_WAIT = "wait"
 
 
+def _should_announce(node: "Node", expr_id: bytes, self_provider_id: int) -> bool:
+    """Return True if *expr_id* needs an announcement from this node.
+
+    A record is skipped when the index already names this node, or when the
+    record is not committed in the latest block.
+
+    Args:
+        node: A Node instance with ``storage_index``.
+        expr_id: The 32-byte record id.
+        self_provider_id: This node's provider id.
+
+    Returns:
+        True if the record should be announced.
+    """
+    entry = node.storage_index.get(expr_id)
+    if entry and self_provider_id in entry:
+        return False
+    return is_expr_in_latest_block(node, expr_id)
+
+
 def _startup_announce_step(node: "Node") -> str:
     """Announce one batch of stored records as this node.
 
-    Does nothing until ``node.latest_block`` is loaded. The first ready call
-    starts an iterator over the records table. Each call then sends the next
-    batch, sized to fit one ``STORAGE_PUT`` datagram, through
-    ``put_exprs_in_network``. An error ends the job.
+    Runs for any node with records in its table: validators and storage
+    providers are the only writers of that table, so the table itself is
+    the gate. Does nothing until ``node.latest_block`` is loaded. The
+    first ready call starts an iterator over the records table. Each call
+    sends the next batch, sized to fit one ``STORAGE_PUT`` datagram,
+    through ``put_exprs_in_network``.
+
+    A record is left out of the batch when the index already names this
+    node, or when the record is not committed in the latest block.
+
+    A finished pass reports ``"done"``. The caller books the next pass
+    after ``storage_index_interval`` seconds and clears
+    ``node.startup_announce`` so the pass starts again.
 
     Args:
-        node: A Node instance with ``is_storage_provider`` set.
+        node: A Node instance with ``latest_block`` and a records table.
 
     Returns:
         ``"wait"`` if the node is not synced yet, ``"more"`` if records
-        remain, ``"done"`` if the job is finished or does not apply.
+        remain, ``"done"`` if the pass is finished.
     """
-    if not node.is_storage_provider:
-        return _ANNOUNCE_DONE
     state = node.startup_announce
     if state == _ANNOUNCE_DONE:
         return _ANNOUNCE_DONE
@@ -199,9 +231,16 @@ def _startup_announce_step(node: "Node") -> str:
         budget = node.config.storage_put_batch_max_bytes
         per_batch = max(1, max_batch_entries(budget))
         batch = list(islice(state, per_batch))
-        if batch:
-            put_exprs_in_network(node, [(expr_id, RESOLUTION_SINGLE) for expr_id in batch])
-        if len(batch) < per_batch:
+        exhausted = len(batch) < per_batch
+        self_provider_id = provider_id_for_payload(node, build_provider_payload(node))
+        keep = [
+            expr_id
+            for expr_id in batch
+            if _should_announce(node, expr_id, self_provider_id)
+        ]
+        if keep:
+            put_exprs_in_network(node, [(expr_id, RESOLUTION_SINGLE) for expr_id in keep])
+        if exhausted:
             node.startup_announce = _ANNOUNCE_DONE
             return _ANNOUNCE_DONE
     except Exception as exc:
@@ -373,14 +412,21 @@ def advertise_storage(astreum_node: "Node") -> None:
 
     Runs a single timed loop in a daemon thread that adjusts
     ``storage_request_current_price`` based on incoming queue pressure to
-    signal demand. When ``is_storage_provider`` is enabled, the same loop also
-    announces every stored record once after sync, then processes one storage-index entry per ``long_term_storage_interval``
-    seconds: entries missing from the records table are fetched and written
-    to cold storage plus the records table. Fresh-expr advertisement happens
-    at block creation via ``advertise_exprs(entries=...)``. The periodic
-    re-advertise loop was removed. The loop also handles one queued
-    ``STORAGE_PUT`` per turn, because the message thread must not wait on the
-    network.
+    signal demand. The same loop announces the records table in passes,
+    one datagram-sized batch per turn. Validators and storage providers are
+    the only writers of that table, so the table is the gate: a node with
+    no records does nothing. A finished pass starts again after
+    ``storage_index_interval`` seconds, so a peer that joins late still
+    receives the backlog. A record is left out when the index already names
+    this node, or when the record is not committed in the latest block.
+
+    When ``is_storage_provider`` is enabled, the loop also processes one
+    storage-index entry per ``long_term_storage_interval`` seconds: entries
+    missing from the records table are fetched and written to cold storage
+    plus the records table. Fresh-expr advertisement happens at block
+    creation via ``advertise_exprs(entries=...)``. The loop also handles one
+    queued ``STORAGE_PUT`` per turn, because the message thread must not
+    wait on the network.
 
     The thread exits when you set ``communication_stop_event``.
 
@@ -393,6 +439,7 @@ def advertise_storage(astreum_node: "Node") -> None:
     """
     price_interval = float(astreum_node.config.storage_request_price_interval or 0)
     prune_interval = float(astreum_node.config.expr_request_ttl or 0)
+    announce_interval = float(astreum_node.config.storage_index_interval or 0)
 
     long_term_interval = float(astreum_node.long_term_storage_interval)
     long_term_enabled = bool(astreum_node.is_storage_provider)
@@ -413,7 +460,7 @@ def advertise_storage(astreum_node: "Node") -> None:
     next_price_at = now if price_interval > 0 else None
     next_long_term_at = now if long_term_enabled and long_term_interval > 0 else None
     next_prune_at = now + prune_interval if prune_interval > 0 else None
-    next_announce_at = now if astreum_node.is_storage_provider else None
+    next_announce_at = now
     next_index_at = now
     next_put_at = now
     timer = SelfLookupTimer()
@@ -440,7 +487,12 @@ def advertise_storage(astreum_node: "Node") -> None:
         if next_announce_at is not None and now >= next_announce_at:
             progress = _startup_announce_step(astreum_node)
             if progress == _ANNOUNCE_DONE:
-                next_announce_at = None
+                # Start a fresh pass after the interval. A pass that finishes
+                # early does not block a later join from receiving the backlog.
+                astreum_node.startup_announce = None
+                next_announce_at = (
+                    now + announce_interval if announce_interval > 0 else None
+                )
             elif progress == _ANNOUNCE_MORE:
                 next_announce_at = now
             else:

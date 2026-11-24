@@ -184,6 +184,9 @@ class TestSweepWorker(unittest.TestCase):
             communication_stop_event=stop,
             is_storage_provider=False,
             long_term_storage_interval=0,
+            latest_block=None,
+            startup_announce=None,
+            storage_index={},
             expr_requests={H1: PendingExprRequest(RESOLUTION_SINGLE, 0.0)},  # long expired
             expr_requests_lock=threading.Lock(),
         )
