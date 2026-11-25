@@ -156,8 +156,7 @@ def handle_put(
             stored_value = None
             if storage_account is not None:
                 stored_value = get_from_radix_tree(storage_account.data, node, expr_id)
-            record = parse_record(node, stored_value)
-            if record is None:
+            if stored_value is None:
                 continue
             for provider_id in provider_ids:
                 index_provider(node, expr_id, provider_id)
@@ -165,6 +164,10 @@ def handle_put(
             if fetch_budget <= 0 or get_record_from_cold_storage(node, expr_id) is not None:
                 continue
             fetch_budget -= 1
+            record = parse_record(node, stored_value)
+            if record is None:
+                node.logger.debug("Record body for %s is not parseable", expr_id.hex())
+                continue
             try:
                 fetch_and_store_record(node, expr_id, record)
             except Exception as exc:

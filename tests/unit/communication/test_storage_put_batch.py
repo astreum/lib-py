@@ -3,7 +3,7 @@ import sys
 import threading
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, "src")
 
@@ -314,13 +314,33 @@ class TestReceivePath(unittest.TestCase):
         self.peer_a = _peer(PEER_A_KEY, 9001)
         self.sender = _peer(b"\x55" * 32, 9100)
 
-    def _handle(self, node, entries, committed=None, record_ids=None, provider=PROVIDER):
-        """Run the STORAGE_PUT handler with admission/record checks stubbed."""
+    def _handle(
+        self,
+        node,
+        entries,
+        committed=None,
+        record_ids=None,
+        provider=PROVIDER,
+        unreadable=(),
+        cold=(),
+    ):
+        """Run the STORAGE_PUT handler with admission/record checks stubbed.
+
+        ``unreadable`` names entries whose trie value reads as None;
+        ``cold`` names entries already in the records table. The parse
+        mock is left on ``node.parse_mock`` for inspection.
+        """
         committed = set(e for e, _ in entries) if committed is None else set(committed)
         record_ids = committed if record_ids is None else set(record_ids)
+        unreadable = set(unreadable)
+        cold = set(cold)
         request = StorageRequest(StorageRequestCode.STORAGE_PUT, provider, entries=entries)
         message = SimpleNamespace(content=request.to_bytes())
         account = SimpleNamespace(data=SimpleNamespace(root_hash=b"\x09" * 32))
+        parse = Mock(
+            side_effect=lambda n, v: SimpleNamespace(new_count=1) if v in record_ids else None
+        )
+        node.parse_mock = parse
         with patch(
             "astreum.storage.admission.is_expr_in_latest_block",
             side_effect=lambda n, e, account=None: e in committed,
@@ -328,12 +348,13 @@ class TestReceivePath(unittest.TestCase):
             "astreum.storage.admission.get_latest_storage_account", return_value=account
         ), patch(
             "astreum.storage.radix.get_from_radix_tree",
-            side_effect=lambda tree, n, e: e,
+            side_effect=lambda tree, n, e: None if e in unreadable else e,
         ), patch(
-            "astreum.storage.records.parse_record",
-            side_effect=lambda n, v: SimpleNamespace(new_count=1) if v in record_ids else None,
+            "astreum.storage.records.parse_record", parse
         ), patch.object(
-            put_handle, "get_record_from_cold_storage", return_value=None
+            put_handle,
+            "get_record_from_cold_storage",
+            side_effect=lambda n, e: b"stored" if e in cold else None,
         ), patch(
             "astreum.storage.records.fetch_and_store_record", return_value=True
         ) as fetch:
@@ -359,12 +380,55 @@ class TestReceivePath(unittest.TestCase):
         self.assertIn("no exprs committed", reason)
         self.assertEqual(node.storage_index, {})
 
-    def test_non_record_exprs_skipped(self):
+    def test_unparseable_record_is_indexed(self):
+        node = _make_node([self.peer_a])
+        node.is_storage_provider = True
+        ids = _ids(0x00, 3)
+        result, fetch = self._handle(node, [(e, 4) for e in ids], record_ids=[])
+        self.assertEqual(result, (True, None))
+        self.assertEqual(set(node.storage_index), set(ids))
+        self.assertEqual(fetch.call_count, 0)
+        for value in node.storage_index.values():
+            self.assertEqual(value, (0,))
+
+    def test_unreadable_trie_value_is_skipped(self):
         node = _make_node([self.peer_a])
         ids = _ids(0x00, 3)
-        result, _ = self._handle(node, [(e, 4) for e in ids], record_ids=ids[:1])
+        result, _ = self._handle(node, [(e, 4) for e in ids], unreadable=ids[:1])
         self.assertEqual(result, (True, None))
-        self.assertEqual(set(node.storage_index), set(ids[:1]))
+        self.assertEqual(set(node.storage_index), set(ids[1:]))
+        indexed = [call.args[1] for call in node.parse_mock.call_args_list]
+        self.assertNotIn(ids[0], indexed)
+
+    def test_non_provider_never_parses(self):
+        node = _make_node([self.peer_a])
+        ids = _ids(0x00, 4)
+        result, fetch = self._handle(node, [(e, 4) for e in ids])
+        self.assertEqual(result, (True, None))
+        self.assertEqual(set(node.storage_index), set(ids))
+        self.assertEqual(node.parse_mock.call_count, 0)
+        self.assertEqual(fetch.call_count, 0)
+
+    def test_already_stored_record_is_indexed_and_not_parsed(self):
+        node = _make_node([self.peer_a])
+        node.is_storage_provider = True
+        ids = _ids(0x00, 3)
+        result, fetch = self._handle(node, [(e, 4) for e in ids], cold=ids[:2])
+        self.assertEqual(result, (True, None))
+        self.assertEqual(set(node.storage_index), set(ids))
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(node.parse_mock.call_count, 1)
+        self.assertEqual(node.parse_mock.call_args.args[1], ids[2])
+
+    def test_parse_capped_at_inline_fetch_limit(self):
+        node = _make_node([self.peer_a])
+        node.is_storage_provider = True
+        ids = _ids(0x00, 12)
+        result, fetch = self._handle(node, [(e, 4) for e in ids])
+        self.assertEqual(result, (True, None))
+        self.assertEqual(set(node.storage_index), set(ids))
+        self.assertEqual(node.parse_mock.call_count, put_handle.BATCH_INLINE_FETCH_LIMIT)
+        self.assertEqual(fetch.call_count, put_handle.BATCH_INLINE_FETCH_LIMIT)
 
     def test_two_provider_put_indexes_one_tuple(self):
         node = _make_node([self.peer_a])
